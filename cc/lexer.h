@@ -140,7 +140,8 @@ struct lex_state {
     struct token current;
 };
 
-/* prints out an error message with the current filename and line number */
+/* prints out an error message with the current filename and line number, then
+ * exits */
 void lex_error(struct lex_state *state, const char *message);
 
 /* parses one token from the provided file, returning 1 when there are more

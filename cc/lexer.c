@@ -5,6 +5,7 @@
 void lex_error(struct lex_state* state, const char* message) {
     fprintf(stderr, "%s:%d: error: %s\n", state->filename, state->line,
         message);
+    exit(1);
 }
 
 static char parse_single_char(struct lex_state *state, char ending) {
@@ -18,10 +19,8 @@ static char parse_single_char(struct lex_state *state, char ending) {
     else if (c == '\\')
         /* skip the next char as it's escaped */
         fseek(state->stream, 1, SEEK_CUR);
-    else if (c == '\n') {
+    else if (c == '\n')
         lex_error(state, "unexpected newline");
-        exit(1);
-    }
 
     return 1;
 }
@@ -241,21 +240,17 @@ char lex(struct lex_state *state, struct token *out) {
                     /* parse hexadecimal digits */
                     out->kind = T_HEX_NUMBER;
                     out->file_start = ftell(state->stream);
-                    if (!fread(&c, 1, 1, state->stream) || !isxdigit(c)) {
+                    if (!fread(&c, 1, 1, state->stream) || !isxdigit(c))
                         lex_error(state, "expected hex digits");
-                        exit(1);
-                    }
                     while (fread(&c, 1, 1, state->stream) && isxdigit(c));
                     fseek(state->stream, -1, SEEK_CUR);
                 } else if (c >= '0' && c <= '7') {
                     /* parse octal digits */
                     out->kind = T_OCT_NUMBER;
-                    out->file_start = ftell(state->stream);
+                    out->file_start = ftell(state->stream) - 1;
                     if (!fread(&c, 1, 1, state->stream) || c < '0'
-                        || c > '7') {
+                        || c > '7')
                         lex_error(state, "expected octal digits");
-                        exit(1);
-                    }
                     while (fread(&c, 1, 1, state->stream) && c >= '0' &&
                         c <= '7');
                     fseek(state->stream, -1, SEEK_CUR);
@@ -534,16 +529,12 @@ char lex(struct lex_state *state, struct token *out) {
                     /* parse a character literal */
                     state->current.kind = out->kind = T_CHAR_LIT;
                     state->current.file_start = ++ out->file_start;
-                    if (!parse_single_char(state, '\'')) {
+                    if (!parse_single_char(state, '\''))
                         lex_error(state, "invalid char literal");
-                        exit(1);
-                    }
                     state->current.file_end = out->file_end =
                         ftell(state->stream);
-                    if (!fread(&c, 1, 1, state->stream) || c != '\'') {
+                    if (!fread(&c, 1, 1, state->stream) || c != '\'')
                         lex_error(state, "expected terminating single quote");
-                        exit(1);
-                    }
                     return 1;
                 } else if (c == '"') {
                     /* parse a string literal */
@@ -553,11 +544,9 @@ char lex(struct lex_state *state, struct token *out) {
                     state->current.file_end = out->file_end =
                         ftell(state->stream) - 1;
                     return 1;
-                } else {
+                } else
                     /* unrecognized token */
                     lex_error(state, "unexpected token");
-                    exit(1);
-                }
         }
         break;
     }
