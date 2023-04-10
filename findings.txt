@@ -1,0 +1,5 @@
+https://github.com/Nakazoto/CenturionComputer/wiki/Memory-Mapping is wrong- contexts are ascending, upper nibble is the context, lower nibble is the register
+contexts are on page 00, mmio is on pages 7e and 7f, all of which can be mapped out
+setting the address of a page to 0xff (haven't tried any other invalid values) causes a fault
+previous context seems to be stored in bits 12-15 of ccr, flags might be stored on bits 8-11, page table number might be stored in bits 0-3
+untested but the 20k of memory the diag board takes up can probably be just set as used in vmm once implemented, should be able to be mapped out of the way just fine
