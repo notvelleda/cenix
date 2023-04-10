@@ -1,0 +1,6 @@
+**/*.o
+as/as
+as/lex.yy.c
+as/y.tab.*
+cc/cc
+ld/ld
