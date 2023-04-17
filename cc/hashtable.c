@@ -8,7 +8,7 @@
  * null byte
  * returns the length of the string including the null terminator to make
  * duplicating it easier, since it avoids a strlen call */
-static unsigned int hash_string(const char *string, unsigned long *value) {
+unsigned int hash_string(const char *string, unsigned long *value) {
     char c;
     unsigned int length = 1;
     *value = 0x811c9dc5;

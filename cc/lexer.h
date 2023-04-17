@@ -1,3 +1,6 @@
+#ifndef LEXER_H
+#define LEXER_H
+
 /* list of all kinds of tokens we understand */
 enum token_kind {
     /* an identifier/keyword/type/etc */
@@ -151,3 +154,5 @@ char lex(struct lex_state *state, struct token *out);
 
 /* tells the lexer to repeat the current token */
 void lex_rewind(struct lex_state *state);
+
+#endif
