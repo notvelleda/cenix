@@ -39,18 +39,16 @@ struct standard_type {
 };
 
 struct array_type {
-    struct type *derivation;
     unsigned int length;
 };
 
 struct pointer_type {
-    struct type *derivation;
     unsigned char const_qualified: 1;
     unsigned char volatile_qualified: 1;
 };
 
-/* first link in the list is the return type, all subsequent links are arguments
- */
+/* each link in the list is an argument, if both fields are NULL there are
+ * no arguments */
 struct function_type {
     struct type *derivation;
     struct function_type *next;
@@ -64,19 +62,24 @@ enum top_type {
 };
 
 struct type {
-    enum top_type top_type;
+    enum top_type top;
     union {
-        struct standard_type standard_type;
-        struct array_type array_type;
-        struct pointer_type pointer_type;
-        struct function_type function_type;
+        struct standard_type standard;
+        struct {
+            struct type *derivation;
+            union {
+                struct array_type array;
+                struct pointer_type pointer;
+                struct function_type function;
+            } type;
+        } derived;
     } type;
     unsigned int size;
 };
 
 struct struct_union_field {
     /* the type of this field */
-    struct type type;
+    struct type *type;
     /* the name of this field */
     const char *name;
     /* the hashed name of this field to speed up comparisons */
