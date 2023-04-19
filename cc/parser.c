@@ -320,6 +320,25 @@ static void derive_type(
     (*last_derivation)->type.derived.derivation = new;
 }
 
+static void derive_reverse(
+    struct type **first_derivation,
+    struct type **last_derivation
+) {
+    struct type *new;
+    new = (struct type *) malloc(sizeof(struct type));
+    if (new == NULL) {
+        perror(malloc_failed);
+        exit(1);
+    }
+
+    if (*first_derivation == NULL)
+        *first_derivation = *last_derivation = new;
+    else {
+        (*first_derivation)->type.derived.derivation = new;
+        *first_derivation = new;
+    }
+}
+
 static void parse_array_internal(
     struct lex_state *state,
     struct type **first_derivation,
@@ -327,14 +346,13 @@ static void parse_array_internal(
     unsigned long base
 ) {
     struct token t;
-    derive_type(first_derivation, last_derivation);
-    (*last_derivation)->top = TOP_ARRAY;
+    derive_reverse(first_derivation, last_derivation);
+    (*first_derivation)->top = TOP_ARRAY;
     lex(state, &t);
-    (*last_derivation)->size =
-        (*last_derivation)->type.derived.derivation->size *
-        ((*last_derivation)->type.derived.type.array.length =
-            parse_number(state, &t, base)
-        );
+    (*first_derivation)->size = -1;
+    /*    (*first_derivation)->type.derived.derivation->size * */
+    (*first_derivation)->type.derived.type.array.length =
+        parse_number(state, &t, base);
     if (!lex(state, &t) || t.kind != T_CLOSE_BRACKET)
         lex_error(state, bad_array_syntax);
 }
@@ -346,52 +364,81 @@ static void parse_array(
 ) {
     struct token t;
     struct pointer_type *p;
+    struct type *first_array = NULL;
+    struct type *last_array = NULL;
 
-    if (!lex(state, &t))
-        lex_error(state, bad_array_syntax);
-
-    switch (t.kind) {
-        case T_NUMBER:
-            lex_rewind(state);
-            parse_array_internal(
-                state,
-                first_derivation,
-                last_derivation,
-                10
-            );
-            break;
-        case T_HEX_NUMBER:
-            lex_rewind(state);
-            parse_array_internal(
-                state,
-                first_derivation,
-                last_derivation,
-                16
-            );
-            break;
-        case T_OCT_NUMBER:
-            lex_rewind(state);
-            parse_array_internal(
-                state,
-                first_derivation,
-                last_derivation,
-                8
-            );
-            break;
-        case T_CLOSE_BRACKET:
-            /* [] is parsed just like a pointer */
-            derive_type(first_derivation, last_derivation);
-            (*last_derivation)->top = TOP_POINTER;
-            (*last_derivation)->size = 2;
-            p = &(*last_derivation)->type.derived.type.pointer;
-            p->const_qualified = 0;
-            p->volatile_qualified = 0;
-            break;
-        default:
+    while (1) {
+        if (!lex(state, &t))
             lex_error(state, bad_array_syntax);
+
+        switch (t.kind) {
+            case T_NUMBER:
+                lex_rewind(state);
+                parse_array_internal(state, &first_array, &last_array, 10);
+                break;
+            case T_HEX_NUMBER:
+                lex_rewind(state);
+                parse_array_internal(state, &first_array, &last_array, 16);
+                break;
+            case T_OCT_NUMBER:
+                lex_rewind(state);
+                parse_array_internal(state, &first_array, &last_array, 8);
+                break;
+            case T_CLOSE_BRACKET:
+                derive_reverse(&first_array, &last_array);
+                first_array->top = TOP_ARRAY;
+                first_array->size = 0;
+                first_array->type.derived.type.array.length = 0;
+                break;
+            default:
+                lex_error(state, bad_array_syntax);
+        }
+
+        if (!lex(state, &t))
+            break;
+
+        if (t.kind != T_OPEN_BRACKET) {
+            lex_rewind(state);
+            break;
+        }
     }
 
-    /* TODO: array nesting (the derivations are backwards????) */
+    if (first_array != NULL) {
+        struct type *current;
+
+        /* add array derivations to the type */
+        first_array->type.derived.derivation = *last_derivation;
+        (*last_derivation) = last_array;
+
+        /* compute all the array sizes. this silly algorithm is like O(n^2)
+         * worst case so it's a good thing arrays don't get nested often */
+        while (1) {
+            int found = 0;
+
+            current = last_array;
+
+            while (1) {
+                struct type *derivation = current->type.derived.derivation;
+
+                if (derivation == NULL)
+                    break;
+
+                if (
+                    current->top == TOP_ARRAY && current->size == -1 &&
+                    derivation->size != -1
+                ) {
+                    found ++;
+                    current->size = derivation->size *
+                        current->type.derived.type.array.length;
+                }
+
+                current = derivation;
+            }
+
+            if (found == 0)
+                break;
+        }
+    }
 }
 
 static char parse_type_after_name(
