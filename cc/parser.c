@@ -20,6 +20,7 @@ const char *duplicate_field = "field with this name was already declared";
 const char *unknown_size = "storage size of field is unknown";
 const char *field_missing_name = "field missing name";
 const char *expected_paren = "expected `)'";
+const char *expected_comma_or_paren = "expected `,' or `)'";
 
 /* given a token, read the area in the file it points to into a newly allocated
  * null terminated string and return it */
@@ -404,44 +405,19 @@ static void parse_array(
     }
 
     if (first_array != NULL) {
-        struct type *current;
-
         /* add array derivations to the type */
         first_array->type.derived.derivation = *last_derivation;
         *last_derivation = last_array;
         if (*first_derivation == NULL)
             *first_derivation = first_array;
-
-        /* compute all the array sizes. this silly algorithm is like O(n^2)
-         * worst case so it's a good thing arrays don't get nested often */
-        while (1) {
-            int found = 0;
-
-            current = last_array;
-
-            while (1) {
-                struct type *derivation = current->type.derived.derivation;
-
-                if (derivation == NULL)
-                    break;
-
-                if (
-                    current->top == TOP_ARRAY && current->size == -1 &&
-                    derivation->size != -1
-                ) {
-                    found ++;
-                    current->size = derivation->size *
-                        current->type.derived.type.array.length;
-                }
-
-                current = derivation;
-            }
-
-            if (found == 0)
-                break;
-        }
     }
 }
+
+static void parse_function_arguments(
+    struct lex_state *state,
+    struct type **first_derivation,
+    struct type **last_derivation
+);
 
 static char parse_type_after_name(
     struct lex_state *state,
@@ -458,7 +434,7 @@ static char parse_type_after_name(
             parse_array(state, first_derivation, last_derivation);
             break;
         case T_OPEN_PAREN:
-            lex_error(state, "function syntax not supported yet");
+            parse_function_arguments(state, first_derivation, last_derivation);
             break;
         default:
             lex_rewind(state);
@@ -558,6 +534,7 @@ static char parse_type_derivation(
     }
 }
 
+
 /* parse a type signature. this code is very wacky, just like c type signatures
  * TODO: explain type signature syntax
  */
@@ -569,6 +546,7 @@ static char parse_type_signature(
     struct token t;
     struct type *first_derivation = NULL;
     struct type *last_derivation = NULL;
+    struct type *current;
 
     if ((*type = (struct type *) malloc(sizeof(struct type))) == NULL) {
         perror(malloc_failed);
@@ -593,6 +571,39 @@ static char parse_type_signature(
         struct type *temp = *type;
         *type = last_derivation;
         first_derivation->type.derived.derivation = temp;
+
+        /* compute all the array sizes in a derivation list. this silly
+         * algorithm is like O(n) best case and O(n^2)? worst case so it's a
+         * good thing arrays don't get nested often */
+        while (1) {
+            int found = 0;
+
+            current = *type;
+
+            while (current) {
+                struct type *derivation;
+
+                if (
+                    current->top == TOP_NORMAL ||
+                    (derivation = current->type.derived.derivation) == NULL
+                )
+                    break;
+
+                if (
+                    current->top == TOP_ARRAY && current->size == -1 &&
+                    derivation->size != -1
+                ) {
+                    found ++;
+                    current->size = derivation->size *
+                        current->type.derived.type.array.length;
+                }
+
+                current = derivation;
+            }
+
+            if (found == 0)
+                break;
+        }
     }
 
     return 1;
@@ -671,6 +682,64 @@ static struct struct_union_field *parse_struct_union(struct lex_state *state) {
     }
 
     return first;
+}
+
+static void parse_function_arguments(
+    struct lex_state *state,
+    struct type **first_derivation,
+    struct type **last_derivation
+) {
+    struct token t;
+    struct type *type;
+    char *name;
+    struct function_type *first = NULL;
+    struct function_type *last = NULL;
+
+    derive_type(first_derivation, last_derivation);
+    (*last_derivation)->top = TOP_FUNCTION;
+    (*last_derivation)->size = 0;
+    (*last_derivation)->type.derived.type.function = NULL;
+
+    while (1) {
+        struct function_type *new;
+
+        if (!parse_type_signature(state, &type, &name)) {
+            if (!lex(state, &t) || t.kind != T_CLOSE_PAREN)
+                lex_error(state, expected_paren);
+
+            return;
+        }
+
+        if ((new = malloc(sizeof(struct function_type))) == NULL) {
+            perror(malloc_failed);
+            exit(1);
+        }
+
+        new->type = type;
+        new->name = name;
+        new->next = NULL;
+
+        if (last == NULL)
+            first = last = new;
+        else {
+            last->next = new;
+            last = new;
+        }
+
+        if (!lex(state, &t))
+            lex_error(state, expected_comma_or_paren);
+
+        switch (t.kind) {
+            case T_COMMA:
+                continue;
+            case T_CLOSE_PAREN:
+                break;
+        }
+
+        break;
+    }
+
+    (*last_derivation)->type.derived.type.function = first;
 }
 
 int parse(struct lex_state *state) {

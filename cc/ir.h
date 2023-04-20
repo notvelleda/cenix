@@ -71,7 +71,7 @@ struct type {
             union {
                 struct array_type array;
                 struct pointer_type pointer;
-                struct function_type function;
+                struct function_type *function;
             } type;
         } derived;
     } type;

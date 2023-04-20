@@ -89,7 +89,7 @@ static void print_type_internal(
                     break;
             }
             if (name == NULL)
-                printf("\n");
+                printf("(unnamed)\n");
             else
                 printf("`%s'\n", name);
             break;
@@ -102,13 +102,9 @@ static void print_type_internal(
             print_type_internal(type->type.derived.derivation, name, indent, 0);
             break;
         case TOP_FUNCTION:
-            printf("function (");
-            for (
-                f = &type->type.derived.type.function;
-                f != NULL;
-                f = f->next
-            )
-                print_type_internal(f->type, f->name, indent, 0);
+            printf("function (\n");
+            for (f = type->type.derived.type.function; f != NULL; f = f->next)
+                print_type_internal(f->type, f->name, indent + 4, 1);
             printf(") -> ");
             print_type_internal(type->type.derived.derivation, name, indent, 0);
             break;
