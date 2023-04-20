@@ -408,7 +408,9 @@ static void parse_array(
 
         /* add array derivations to the type */
         first_array->type.derived.derivation = *last_derivation;
-        (*last_derivation) = last_array;
+        *last_derivation = last_array;
+        if (*first_derivation == NULL)
+            *first_derivation = first_array;
 
         /* compute all the array sizes. this silly algorithm is like O(n^2)
          * worst case so it's a good thing arrays don't get nested often */
@@ -677,6 +679,7 @@ int parse(struct lex_state *state) {
     struct token t;
     if (!parse_type_signature(state, &uwu, &name))
         lex_error(state, "expected type signature");
+    print_type(uwu, name);
     printf("size is %d, name is %s\n", uwu->size, name);
     if (!lex(state, &t))
         lex_error(state, "unexpected eof");
