@@ -21,6 +21,8 @@ const char *unknown_size = "storage size of field is unknown";
 const char *field_missing_name = "field missing name";
 const char *expected_paren = "expected `)'";
 const char *expected_comma_or_paren = "expected `,' or `)'";
+const char *expected_type = "expected type signature";
+const char *unexpected_eof = "unexpected EOF";
 
 /* given a token, read the area in the file it points to into a newly allocated
  * null terminated string and return it */
@@ -80,7 +82,7 @@ static unsigned long parse_number(
 
 static struct struct_union_field *parse_struct_union(struct lex_state *state);
 
-/* macros to deduplicate wacky code in parse_standard_type() */
+/* macros to deduplicate wacky code in parse_basic_type() */
 
 /* set the type specifier to the given type specifier, set the
  * have_type_specifier flag, and throw an error if a type specifier has already
@@ -137,11 +139,11 @@ static struct struct_union_field *parse_struct_union(struct lex_state *state);
     type_specifier = s;\
 }
 
-/* parses a "standard type" signature (i.e. anything in enum type_specifier)
+/* parses a "basic type" signature (i.e. anything in enum type_specifier)
  * and its storage class, sign specifier, and qualifiers. returns 1 on success,
  * 0 on failure. contents of the type pointer will only be modified on success
  */
-static char parse_standard_type(struct lex_state *state, struct type *type) {
+static char parse_basic_type(struct lex_state *state, struct type *type) {
     struct token t, t2;
     char *name = NULL;
     enum type_specifier type_specifier;
@@ -265,18 +267,19 @@ static char parse_standard_type(struct lex_state *state, struct type *type) {
         else
             lex_error(state, no_type_spec);
 
-    type->top = TOP_NORMAL;
-    type->type.standard.type_specifier = type_specifier;
-    type->type.standard.storage_class = storage_class;
-    type->type.standard.sign_specifier = sign_specifier;
-    type->type.standard.const_qualified = const_qualified;
-    type->type.standard.volatile_qualified =
+    type->top = TOP_BASIC;
+    type->type.basic.type_specifier = type_specifier;
+    type->type.basic.storage_class = storage_class;
+    type->type.basic.sign_specifier = sign_specifier;
+    type->type.basic.const_qualified = const_qualified;
+    type->type.basic.volatile_qualified =
         volatile_qualified;
-    if (type->type.standard.has_fields = have_fields)
-        type->type.standard.name_field_ptr = first_field;
+    if (type->type.basic.has_fields = have_fields)
+        type->type.basic.name_field_ptr = first_field;
     else
-        type->type.standard.name_field_ptr = name;
+        type->type.basic.name_field_ptr = name;
     type->size = size;
+    type->references = 0;
 
     return 1;
 }
@@ -304,6 +307,7 @@ static void derive_type(
         perror(malloc_failed);
         exit(1);
     }
+    new->references = 0;
 
     if (*last_derivation == NULL) {
         /* no types have been derived, set first_derivation to the newly
@@ -319,6 +323,8 @@ static void derive_type(
     }
 
     (*last_derivation)->type.derived.derivation = new;
+    if (new != NULL)
+        new->references ++;
 }
 
 static void derive_reverse(
@@ -332,10 +338,12 @@ static void derive_reverse(
         exit(1);
     }
 
-    if (*first_derivation == NULL)
+    if (*first_derivation == NULL) {
         *first_derivation = *last_derivation = new;
-    else {
+        new->references = 0;
+    } else {
         (*first_derivation)->type.derived.derivation = new;
+        new->references = 1;
         *first_derivation = new;
     }
 }
@@ -497,15 +505,31 @@ static char parse_type_derivation(
                 parse_array(state, first_derivation, last_derivation);
                 return 1;
             case T_OPEN_PAREN:
-                parse_type_derivation(
-                    state,
-                    &recursive_first,
-                    &recursive_last,
-                    name
-                );
+                if (!lex(state, &t))
+                    lex_error(state, unexpected_eof);
 
-                if (!lex(state, &t) || t.kind != T_CLOSE_PAREN)
-                    lex_error(state, expected_paren);
+                if (
+                    t.kind == T_IDENT || t.kind == T_ASTERISK ||
+                    t.kind == T_OPEN_BRACKET
+                ) {
+                    lex_rewind(state);
+                    parse_type_derivation(
+                        state,
+                        &recursive_first,
+                        &recursive_last,
+                        name
+                    );
+
+                    if (!lex(state, &t) || t.kind != T_CLOSE_PAREN)
+                        lex_error(state, expected_paren);
+                } else {
+                    lex_rewind(state);
+                    parse_function_arguments(
+                        state,
+                        first_derivation,
+                        last_derivation
+                    );
+                }
 
                 parse_type_after_name(state, first_derivation, last_derivation);
 
@@ -534,29 +558,15 @@ static char parse_type_derivation(
     }
 }
 
-
-/* parse a type signature. this code is very wacky, just like c type signatures
- * TODO: explain type signature syntax
- */
-static char parse_type_signature(
+/* parses the name and derivations of an existing basic type */
+static char parse_type_derivations(
     struct lex_state *state,
     struct type **type,
     char **name
 ) {
-    struct token t;
     struct type *first_derivation = NULL;
     struct type *last_derivation = NULL;
     struct type *current;
-
-    if ((*type = (struct type *) malloc(sizeof(struct type))) == NULL) {
-        perror(malloc_failed);
-        exit(1);
-    }
-
-    *name = NULL;
-
-    if (!parse_standard_type(state, *type))
-        return 0;
 
     if (!parse_type_derivation(
         state,
@@ -566,7 +576,7 @@ static char parse_type_signature(
     ))
         return 1;
 
-    /* merge the standard type into the derivation list */
+    /* merge the basic type into the derivation list */
     if (first_derivation != NULL) {
         struct type *temp = *type;
         *type = last_derivation;
@@ -584,7 +594,7 @@ static char parse_type_signature(
                 struct type *derivation;
 
                 if (
-                    current->top == TOP_NORMAL ||
+                    current->top == TOP_BASIC ||
                     (derivation = current->type.derived.derivation) == NULL
                 )
                     break;
@@ -607,6 +617,29 @@ static char parse_type_signature(
     }
 
     return 1;
+}
+
+/* parse a type signature. this code is very wacky, just like c type signatures
+ * TODO: explain type signature syntax
+ */
+static char parse_type_signature(
+    struct lex_state *state,
+    struct type **type,
+    char **name
+) {
+    struct token t;
+
+    if ((*type = (struct type *) malloc(sizeof(struct type))) == NULL) {
+        perror(malloc_failed);
+        exit(1);
+    }
+
+    *name = NULL;
+
+    if (!parse_basic_type(state, *type))
+        return 0;
+
+    return parse_type_derivations(state, type, name);
 }
 
 /* parse a struct or union definition */
@@ -700,15 +733,19 @@ static void parse_function_arguments(
     (*last_derivation)->size = 0;
     (*last_derivation)->type.derived.type.function = NULL;
 
+    if (!lex(state, &t))
+        lex_error(state, expected_type);
+
+    if (t.kind == T_CLOSE_PAREN)
+        return;
+    else
+        lex_rewind(state);
+
     while (1) {
         struct function_type *new;
 
-        if (!parse_type_signature(state, &type, &name)) {
-            if (!lex(state, &t) || t.kind != T_CLOSE_PAREN)
-                lex_error(state, expected_paren);
-
-            return;
-        }
+        if (!parse_type_signature(state, &type, &name))
+            lex_error(state, expected_type);
 
         if ((new = malloc(sizeof(struct function_type))) == NULL) {
             perror(malloc_failed);
@@ -757,5 +794,6 @@ int parse(struct lex_state *state) {
         printf("next token is %d\n", t.kind);
     else
         printf("nothing after\n");
+    free_type(uwu);
     return 1;
 }

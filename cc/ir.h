@@ -26,7 +26,7 @@ enum type_specifier {
     TY_ENUM = 8,
 };
 
-struct standard_type {
+struct basic_type {
     enum storage_class storage_class: 2;
     enum sign_specifier sign_specifier: 2;
     enum type_specifier type_specifier: 4;
@@ -56,7 +56,7 @@ struct function_type {
 };
 
 enum top_type {
-    TOP_NORMAL = 0,
+    TOP_BASIC = 0,
     TOP_ARRAY = 1,
     TOP_POINTER = 2,
     TOP_FUNCTION = 3,
@@ -65,7 +65,7 @@ enum top_type {
 struct type {
     enum top_type top;
     union {
-        struct standard_type standard;
+        struct basic_type basic;
         struct {
             struct type *derivation;
             union {
@@ -76,6 +76,7 @@ struct type {
         } derived;
     } type;
     unsigned int size;
+    unsigned int references;
 };
 
 struct struct_union_field {
@@ -91,6 +92,10 @@ struct struct_union_field {
     struct struct_union_field *next;
 };
 
+/* prints a type and its derivations, useful for debugging*/
 void print_type(struct type *type, const char *name);
+
+/* frees memory allocated for a type with proper reference counting */
+void free_type(struct type *type);
 
 #endif
