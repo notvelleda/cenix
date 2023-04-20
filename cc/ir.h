@@ -50,7 +50,8 @@ struct pointer_type {
 /* each link in the list is an argument, if both fields are NULL there are
  * no arguments */
 struct function_type {
-    struct type *derivation;
+    struct type *type;
+    const char *name;
     struct function_type *next;
 };
 
@@ -89,5 +90,7 @@ struct struct_union_field {
     /* the next field in the list, or NULL if it's the end */
     struct struct_union_field *next;
 };
+
+void print_type(struct type *type, const char *name);
 
 #endif
