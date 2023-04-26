@@ -110,6 +110,8 @@ static void print_type_internal(
             printf("function (\n");
             for (f = type->type.derived.type.function; f != NULL; f = f->next)
                 print_type_internal(f->type, f->name, indent + 4, 1);
+            for (i = 0; i < indent; i ++)
+                printf(" ");
             printf(") -> ");
             print_type_internal(type->type.derived.derivation, name, indent, 0);
             break;
@@ -154,7 +156,8 @@ void free_type(struct type *type) {
                         free(type->type.basic.name_field_ptr);
             } else if (type->top == TOP_FUNCTION) {
                 /* free function argument names/types */
-                struct function_type *current = type->type.derived.type.function,
+                struct function_type *current =
+                    type->type.derived.type.function,
                     *next;
 
                 while (current != NULL) {
@@ -179,4 +182,141 @@ void free_type(struct type *type) {
             break;
         }
     }
+}
+
+static void label_node(struct node *node) {
+    printf("n%x [label=\"", node);
+    switch (node->kind) {
+        case N_LITERAL:
+            printf("%d", node->data.literal);
+            break;
+        case N_CALL:
+            printf("call %s", node->data.tag);
+            break;
+        case N_MUL:
+            printf("*");
+            break;
+        case N_DIV:
+            printf("/");
+            break;
+        case N_MOD:
+            printf("%%");
+            break;
+        case N_ADD:
+            printf("+");
+            break;
+        case N_SUB:
+            printf("-");
+            break;
+        case N_SHIFT_LEFT:
+            printf("<<");
+            break;
+        case N_SHIFT_RIGHT:
+            printf(">>");
+            break;
+        case N_LESS:
+            printf("<");
+            break;
+        case N_GREATER:
+            printf(">");
+            break;
+        case N_LESS_EQ:
+            printf("<=");
+            break;
+        case N_GREATER_EQ:
+            printf(">=");
+            break;
+        case N_EQUALS:
+            printf("==");
+            break;
+        case N_NOT_EQ:
+            printf("!=");
+            break;
+        case N_BITWISE_AND:
+            printf("&");
+            break;
+        case N_BITWISE_XOR:
+            printf("^");
+            break;
+        case N_BITWISE_OR:
+            printf("|");
+            break;
+        case N_AND:
+            printf("&&");
+            break;
+        case N_OR:
+            printf("||");
+            break;
+        case N_LVALUE:
+            printf("lvalue");
+            break;
+        default:
+            printf("(unknown)");
+            break;
+    }
+    printf("\"]");
+
+    if (node->has_side_effects)
+        printf(" [shape=box]");
+
+    printf("; ");
+}
+
+static void debug_graph_recurse(struct node *node) {
+    switch (node->kind) {
+        case N_MUL:
+        case N_DIV:
+        case N_MOD:
+        case N_ADD:
+        case N_SUB:
+        case N_SHIFT_LEFT:
+        case N_SHIFT_RIGHT:
+        case N_LESS:
+        case N_GREATER:
+        case N_LESS_EQ:
+        case N_GREATER_EQ:
+        case N_EQUALS:
+        case N_NOT_EQ:
+        case N_BITWISE_AND:
+        case N_BITWISE_XOR:
+        case N_BITWISE_OR:
+        case N_AND:
+        case N_OR:
+            if (!node->deps.op.left->visited) {
+                node->deps.op.left->visited = 1;
+                label_node(node->deps.op.left);
+                debug_graph_recurse(node->deps.op.left);
+            }
+            if (!node->deps.op.right->visited) {
+                node->deps.op.right->visited = 1;
+                label_node(node->deps.op.right);
+                debug_graph_recurse(node->deps.op.right);
+            }
+            printf("n%x -> n%x [label=right]; ", node, node->deps.op.right);
+            printf("n%x -> n%x [label=left]; ", node, node->deps.op.left);
+            break;
+        case N_LVALUE:
+            label_node(node->deps.single);
+            printf("n%x -> n%x; ", node, node->deps.single);
+            debug_graph_recurse(node->deps.single);
+            break;
+    }
+
+    if (node->prev != NULL) {
+        if (!node->prev->visited) {
+            node->prev->visited = 1;
+            label_node(node->prev);
+            debug_graph_recurse(node->prev);
+        }
+        printf("n%x -> n%x [style=dotted]; ", node, node->prev);
+    }
+}
+
+void debug_graph(struct node *node) {
+    printf("digraph { ");
+    if (node != NULL) {
+        label_node(node);
+        debug_graph_recurse(node);
+    }
+    printf("}\n");
 }

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include "lexer.h"
 #include "parser.h"
+#include "ir.h"
 
 #include <stdlib.h>
 #include "hashtable.h"
@@ -27,6 +28,31 @@ int main(int argc, char **argv) {
         printf("%d: %d - %d\n", the_token.kind, the_token.file_start, the_token.file_end);*/
     parse(&state);
     fclose(state.stream);
+
+#if 0
+    struct node *current, *current2, *last;
+
+    /* owo() ^ 5 */
+    current = malloc(sizeof(struct node));
+    current->kind = N_CALL;
+    current->data.tag = "owo";
+    current2 = malloc(sizeof(struct node));
+    current2->kind = N_LITERAL;
+    current2->data.literal = 5;
+    last = malloc(sizeof(struct node));
+    last->kind = N_XOR;
+    last->edges.op.left = current;
+    last->edges.op.right = current2;
+
+    /* foo = owo() ^ 5 */
+    current = malloc(sizeof(struct node));
+    current->kind = N_STORE;
+    current->edges.single = last;
+    current->data.tag = "foo";
+    last = current;
+
+    debug_graph(last);
+#endif
 
 #if 0
     struct hashtable *table = (struct hashtable *) malloc(sizeof(struct hashtable));

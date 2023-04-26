@@ -1,8 +1,11 @@
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "ir.h"
 #include "parser.h"
 #include "lexer.h"
+#include "hashtable.h"
 
 /* error messages */
 const char *malloc_failed = "failed to allocate memory";
@@ -17,7 +20,7 @@ const char *unexpected_qual = "unexpected type qualifier";
 const char *unfinished_struct_union_def = "expected type or `}'";
 const char *expected_semicolon = "expected `;'";
 const char *duplicate_field = "field with this name was already declared";
-const char *unknown_size = "storage size of field is unknown";
+const char *unknown_size = "storage size of type is unknown";
 const char *field_missing_name = "field missing name";
 const char *expected_paren = "expected `)'";
 const char *expected_comma_or_paren = "expected `,' or `)'";
@@ -28,7 +31,7 @@ const char *unexpected_eof = "unexpected EOF";
  * null terminated string and return it */
 static char *token_to_string(struct lex_state *state, struct token *t) {
     char *string;
-    unsigned int len, len2;
+    unsigned int len, len2, current;
 
     len = t->file_end - t->file_start;
     string = (char *) malloc(len + 1);
@@ -37,12 +40,14 @@ static char *token_to_string(struct lex_state *state, struct token *t) {
         exit(1);
     }
 
+    current = ftell(state->stream);
     fseek(state->stream, t->file_start, SEEK_SET);
     if ((len2 = fread(string, 1, len, state->stream)) != len) {
         free(string);
         return NULL;
     }
     string[len] = 0;
+    fseek(state->stream, current, SEEK_SET);
 
     return string;
 }
@@ -50,13 +55,13 @@ static char *token_to_string(struct lex_state *state, struct token *t) {
 /* given a token, read the area in the file it points to and parse it into a
  * number of the given base, up to base 16 */
 /* TODO: add binary notation (0b...) support since it'll be easy */
-static unsigned long parse_number(
+static unsigned long token_to_number(
     struct lex_state *state,
     struct token *t,
     unsigned long base
 ) {
     unsigned long result = 0;
-    unsigned int len, len2, i = 0;
+    unsigned int len, i = 0;
     char c;
 
     len = t->file_end - t->file_start;
@@ -361,7 +366,7 @@ static void parse_array_internal(
     (*first_derivation)->size = -1;
     /*    (*first_derivation)->type.derived.derivation->size * */
     (*first_derivation)->type.derived.type.array.length =
-        parse_number(state, &t, base);
+        token_to_number(state, &t, base);
     if (!lex(state, &t) || t.kind != T_CLOSE_BRACKET)
         lex_error(state, bad_array_syntax);
 }
@@ -372,7 +377,6 @@ static void parse_array(
     struct type **last_derivation
 ) {
     struct token t;
-    struct pointer_type *p;
     struct type *first_array = NULL;
     struct type *last_array = NULL;
 
@@ -421,13 +425,13 @@ static void parse_array(
     }
 }
 
-static void parse_function_arguments(
+static void parse_function_type_arguments(
     struct lex_state *state,
     struct type **first_derivation,
     struct type **last_derivation
 );
 
-static char parse_type_after_name(
+static void parse_type_after_name(
     struct lex_state *state,
     struct type **first_derivation,
     struct type **last_derivation
@@ -442,7 +446,7 @@ static char parse_type_after_name(
             parse_array(state, first_derivation, last_derivation);
             break;
         case T_OPEN_PAREN:
-            parse_function_arguments(state, first_derivation, last_derivation);
+            parse_function_type_arguments(state, first_derivation, last_derivation);
             break;
         default:
             lex_rewind(state);
@@ -524,7 +528,7 @@ static char parse_type_derivation(
                         lex_error(state, expected_paren);
                 } else {
                     lex_rewind(state);
-                    parse_function_arguments(
+                    parse_function_type_arguments(
                         state,
                         first_derivation,
                         last_derivation
@@ -552,7 +556,7 @@ static char parse_type_derivation(
                 return 1;
             default:
                 lex_rewind(state);
-                return 1;
+                return 0;
         }
 
     }
@@ -574,7 +578,7 @@ static char parse_type_derivations(
         &last_derivation,
         name
     ))
-        return 1;
+        return 0;
 
     /* merge the basic type into the derivation list */
     if (first_derivation != NULL) {
@@ -627,9 +631,9 @@ static char parse_type_signature(
     struct type **type,
     char **name
 ) {
-    struct token t;
+    *type = (struct type *) malloc(sizeof(struct type));
 
-    if ((*type = (struct type *) malloc(sizeof(struct type))) == NULL) {
+    if (*type == NULL) {
         perror(malloc_failed);
         exit(1);
     }
@@ -717,7 +721,7 @@ static struct struct_union_field *parse_struct_union(struct lex_state *state) {
     return first;
 }
 
-static void parse_function_arguments(
+static void parse_function_type_arguments(
     struct lex_state *state,
     struct type **first_derivation,
     struct type **last_derivation
@@ -747,7 +751,8 @@ static void parse_function_arguments(
         if (!parse_type_signature(state, &type, &name))
             lex_error(state, expected_type);
 
-        if ((new = malloc(sizeof(struct function_type))) == NULL) {
+        new = (struct function_type *) malloc(sizeof(struct function_type));
+        if (new == NULL) {
             perror(malloc_failed);
             exit(1);
         }
@@ -766,21 +771,835 @@ static void parse_function_arguments(
         if (!lex(state, &t))
             lex_error(state, expected_comma_or_paren);
 
-        switch (t.kind) {
-            case T_COMMA:
-                continue;
-            case T_CLOSE_PAREN:
-                break;
-        }
-
-        break;
+        if (t.kind != T_COMMA)
+            break;
     }
 
     (*last_derivation)->type.derived.type.function = first;
 }
 
+const char *expected_args = "expected expression or `)'";
+const char *undeclared_identifier = "undeclared identifier";
+const char *uninitialized_var = "variable uninitialized";
+const char *expected_expression = "expected expression";
+const char *no_variable_name = "variables must be named";
+const char *duplicate_variable = "duplicate variable name";
+const char *bad_operands = "operands must be arithmetic types";
+const char *bad_lvalue = "assignment left-hand side must be an lvalue";
+
+static struct node *parse_assignment_expression(
+    struct lex_state *state,
+    struct scope *scope
+);
+
+static struct node *parse_expression(
+    struct lex_state *state,
+    struct scope *scope
+);
+
+static struct node *parse_function_arguments(
+    struct lex_state *state,
+    struct scope *scope,
+    struct token *ident
+) {
+    struct token t;
+    struct node *new = NULL;
+
+    if (!lex(state, &t))
+        lex_error(state, expected_args);
+
+    /* TODO: proper argument parsing */
+
+    if (t.kind != T_CLOSE_PAREN)
+        lex_error(state, expected_paren);
+
+    new = (struct node *) malloc(sizeof(struct node));
+    if (new == NULL) {
+        perror(malloc_failed);
+        exit(1);
+    }
+    new->kind = N_CALL;
+    new->references = 0;
+    new->prev = NULL;
+    /* TODO: get return type from function declaration */
+    new->type = NULL;
+    new->visited = 0;
+    new->is_arith_type = 1;
+    new->has_side_effects = 1;
+    new->is_lvalue = 0;
+    new->data.tag = token_to_string(state, ident);
+
+    return new;
+}
+
+/* identifier
+ * constant
+ * string-literal
+ * (expression) */
+static struct node *parse_primary_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    struct token t, t2;
+    struct node *new = NULL;
+    char *name;
+    unsigned long hash_value;
+    struct scope *current;
+    struct variable *variable;
+
+    if (!lex(state, &t))
+        return NULL;
+
+    switch (t.kind) {
+        case T_IDENT:
+            /* check whether function arguments follow and parse them.
+             * technically this counts as a postfix expression, not a primary
+             * expression, however primary expressions are only used in parsing
+             * posfix expressions so it doesn't matter */
+            if (lex(state, &t2))
+                if (t2.kind == T_OPEN_PAREN)
+                    return parse_function_arguments(state, scope, &t);
+                else
+                    lex_rewind(state);
+
+            name = token_to_string(state, &t);
+            hash_string(name, &hash_value);
+            for (current = scope; current != NULL; current = current->next)
+                if (
+                    current->variables != NULL &&
+                    (variable = (struct variable *) hashtable_lookup_hashed(
+                        current->variables,
+                        name,
+                        hash_value
+                    )) != NULL
+                )
+                    if (variable->last_assignment == NULL)
+                        /* TODO: handle this without throwing an error */
+                        lex_error(state, uninitialized_var);
+                    else
+                        return variable->last_assignment;
+            lex_error(state, undeclared_identifier);
+
+            break;
+        case T_NUMBER:
+            new = (struct node *) malloc(sizeof(struct node));
+            if (new == NULL) {
+                perror(malloc_failed);
+                exit(1);
+            }
+            new->kind = N_LITERAL;
+            new->references = 0;
+            new->prev = NULL;
+            new->type = NULL;
+            new->visited = 0;
+            new->is_arith_type = 1;
+            new->has_side_effects = 0;
+            new->is_lvalue = 0;
+            new->data.literal = token_to_number(state, &t, 10);
+            break;
+        case T_HEX_NUMBER:
+            new = (struct node *) malloc(sizeof(struct node));
+            if (new == NULL) {
+                perror(malloc_failed);
+                exit(1);
+            }
+            new->kind = N_LITERAL;
+            new->references = 0;
+            new->prev = NULL;
+            new->type = NULL;
+            new->visited = 0;
+            new->is_arith_type = 1;
+            new->has_side_effects = 0;
+            new->is_lvalue = 0;
+            new->data.literal = token_to_number(state, &t, 16);
+            break;
+        case T_OCT_NUMBER:
+            new = (struct node *) malloc(sizeof(struct node));
+            if (new == NULL) {
+                perror(malloc_failed);
+                exit(1);
+            }
+            new->kind = N_LITERAL;
+            new->references = 0;
+            new->prev = NULL;
+            new->type = NULL;
+            new->visited = 0;
+            new->is_arith_type = 1;
+            new->has_side_effects = 0;
+            new->is_lvalue = 0;
+            new->data.literal = token_to_number(state, &t, 8);
+            break;
+        case T_OPEN_PAREN:
+            new = parse_expression(state, scope);
+            if (new == NULL)
+                lex_error(state, expected_expression);
+            if (!lex(state, &t) || t.kind != T_CLOSE_PAREN)
+                lex_error(state, expected_paren);
+            break;
+        default:
+            lex_rewind(state);
+            break;
+    }
+
+    return new;
+}
+
+/* primary-expression
+ * postfix-expression [expression] 
+ * postfix-expression (argument-expression-list<opt>) 
+ * postfix-expression . identifier
+ * postfix-expression -> identifier
+ * postfix-expression ++ 
+ * postfix-expression -- */
+static struct node *parse_postfix_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    /* TODO: handle array/struct/union indexing, increment and decrement */
+    return parse_primary_expression(state, scope);
+}
+
+/* postfix-expression
+ * ++ unary-expression
+ * -- unary-expression
+ * unary-operator cast-expression
+ * sizeof unary-expression
+ * sizeof(type-name) */
+static struct node *parse_unary_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    struct token t;
+
+    if (!lex(state, &t))
+        return NULL;
+
+    switch (t.kind) {
+        case T_INCREMENT:
+            /* TODO: handle pre-increment */
+        case T_DECREMENT:
+            /* TODO: handle pre-decrement */
+        case T_AMPERSAND:
+            /* TODO: handle reference operator */
+        case T_ASTERISK:
+            /* TODO: handle dereference operator */
+        case T_PLUS:
+            /* TODO: handle plus operator */
+        case T_MINUS:
+            /* TODO: handle minus operator */
+        case T_BITWISE_NOT:
+            /* TODO: handle the bitwise NOT operator */
+        case T_LOGICAL_NOT:
+            /* TODO: handle the logical NOT operator */
+        case T_SIZEOF:
+            /* TODO: handle sizeof */
+            lex_error(state, "unimplemented");
+            break;
+        default:
+            lex_rewind(state);
+            return parse_postfix_expression(state, scope);
+    }
+}
+
+/* unary-expression
+ * (type-name) cast-expression */
+struct node *parse_cast_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    /* TODO: handle casting */
+    return parse_unary_expression(state, scope);
+}
+
+static struct node *lhs_rhs_to_node(
+    struct lex_state *state,
+    struct node *lhs,
+    struct node *rhs,
+    enum node_kind kind
+) {
+    struct node *new;
+
+    if (rhs == NULL)
+        lex_error(state, expected_expression);
+
+    if (!lhs->is_arith_type || !rhs->is_arith_type)
+        lex_error(state, bad_operands);
+
+    lhs->references ++;
+    rhs->references ++;
+
+    new = (struct node *) malloc(sizeof(struct node));
+    if (new == NULL) {
+        perror(malloc_failed);
+        exit(1);
+    }
+
+    new->kind = kind;
+    new->references = 0;
+    new->prev = NULL;
+
+    /* figure out what type this node should have. if one side has an explicit
+     * type and the other doesn't, then this node takes the explicit type. if
+     * both sides have types, the type with the largest size is used */
+    if (lhs->type != NULL && rhs->type == NULL) {
+        new->type = lhs->type;
+        lhs->type->references ++;
+    } else if (lhs->type == NULL && rhs->type != NULL) {
+        new->type = rhs->type;
+        rhs->type->references ++;
+    } else if (lhs->type != NULL && rhs->type != NULL)
+        if (rhs->type->size > lhs->type->size) {
+            new->type = rhs->type;
+            rhs->type->references ++;
+        } else {
+            new->type = lhs->type;
+            lhs->type->references ++;
+        }
+    else
+        new->type = NULL;
+
+    new->visited = 0;
+    new->is_arith_type = 1;
+    new->has_side_effects = lhs->has_side_effects || rhs->has_side_effects;
+    new->is_lvalue = 0;
+    new->deps.op.left = lhs;
+    new->deps.op.right = rhs;
+
+    return new;
+}
+
+/* cast-expression
+ * multiplicative-expression * cast-expression
+ * multiplicative-expression / cast-expression
+ * multiplicative-expression % cast-expression */
+static struct node *parse_mul_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    struct node *lhs = parse_cast_expression(state, scope);
+    struct token t;
+
+    while (1) {
+        if (!lex(state, &t))
+            return lhs;
+
+        switch (t.kind) {
+            case T_ASTERISK:
+                lhs = lhs_rhs_to_node(
+                    state,
+                    lhs,
+                    parse_cast_expression(state, scope),
+                    N_MUL
+                );
+                break;
+            case T_DIVIDE:
+                lhs = lhs_rhs_to_node(
+                    state,
+                    lhs,
+                    parse_cast_expression(state, scope),
+                    N_DIV
+                );
+                break;
+            case T_MODULO:
+                lhs = lhs_rhs_to_node(
+                    state,
+                    lhs,
+                    parse_cast_expression(state, scope),
+                    N_MOD
+                );
+                break;
+            default:
+                lex_rewind(state);
+                return lhs;
+        }
+    }
+}
+
+/* multiplicative-expression
+ * additive-expression + multiplicative-expression
+ * additive-expression - multiplicative-expression */
+static struct node *parse_add_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    struct node *lhs = parse_mul_expression(state, scope);
+    struct token t;
+
+    while (1) {
+        if (!lex(state, &t))
+            return lhs;
+
+        switch (t.kind) {
+            case T_PLUS:
+                lhs = lhs_rhs_to_node(
+                    state,
+                    lhs,
+                    parse_mul_expression(state, scope),
+                    N_ADD
+                );
+                break;
+            case T_MINUS:
+                lhs = lhs_rhs_to_node(
+                    state,
+                    lhs,
+                    parse_mul_expression(state, scope),
+                    N_SUB
+                );
+                break;
+            default:
+                lex_rewind(state);
+                return lhs;
+        }
+    }
+}
+
+/* additive-expression
+ * shift-expression << additive-expression
+ * shift-expression >> additive-expression */
+static struct node *parse_shift_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    struct node *lhs = parse_add_expression(state, scope);
+    struct token t;
+
+    while (1) {
+        if (!lex(state, &t))
+            return lhs;
+
+        switch (t.kind) {
+            case T_LEFT_SHIFT:
+                lhs = lhs_rhs_to_node(
+                    state,
+                    lhs,
+                    parse_add_expression(state, scope),
+                    N_SHIFT_LEFT
+                );
+                break;
+            case T_RIGHT_SHIFT:
+                lhs = lhs_rhs_to_node(
+                    state,
+                    lhs,
+                    parse_add_expression(state, scope),
+                    N_SHIFT_RIGHT
+                );
+                break;
+            default:
+                lex_rewind(state);
+                return lhs;
+        }
+    }
+}
+
+/* shift-expression
+ * relational-expression < shift-expression
+ * relational-expression > shift-expression
+ * relational-expression <= shift-expression
+ * relational-expression >= shift-expression */
+static struct node *parse_rel_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    struct node *lhs = parse_shift_expression(state, scope);
+    struct token t;
+
+    while (1) {
+        if (!lex(state, &t))
+            return lhs;
+
+        switch (t.kind) {
+            case T_LESS_THAN:
+                lhs = lhs_rhs_to_node(
+                    state,
+                    lhs,
+                    parse_shift_expression(state, scope),
+                    N_LESS
+                );
+                break;
+            case T_GREATER_THAN:
+                lhs = lhs_rhs_to_node(
+                    state,
+                    lhs,
+                    parse_shift_expression(state, scope),
+                    N_GREATER
+                );
+                break;
+            case T_LESS_EQ:
+                lhs = lhs_rhs_to_node(
+                    state,
+                    lhs,
+                    parse_shift_expression(state, scope),
+                    N_LESS_EQ
+                );
+                break;
+            case T_GREATER_EQ:
+                lhs = lhs_rhs_to_node(
+                    state,
+                    lhs,
+                    parse_shift_expression(state, scope),
+                    N_GREATER_EQ
+                );
+                break;
+            default:
+                lex_rewind(state);
+                return lhs;
+        }
+    }
+}
+
+/* relational-expression
+ * equality-expression == relational-expression
+ * equality-expression != relational-expression */
+static struct node *parse_eq_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    struct node *lhs = parse_rel_expression(state, scope);
+    struct token t;
+
+    while (1) {
+        if (!lex(state, &t))
+            return lhs;
+
+        switch (t.kind) {
+            case T_EQUALS:
+                lhs = lhs_rhs_to_node(
+                    state,
+                    lhs,
+                    parse_rel_expression(state, scope),
+                    N_EQUALS
+                );
+                break;
+            case T_NOT_EQ:
+                lhs = lhs_rhs_to_node(
+                    state,
+                    lhs,
+                    parse_rel_expression(state, scope),
+                    N_NOT_EQ
+                );
+                break;
+            default:
+                lex_rewind(state);
+                return lhs;
+        }
+    }
+}
+
+/* equality-expression
+ * AND-expression & equality-expression */
+static struct node *parse_bitwise_and_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    struct node *lhs = parse_eq_expression(state, scope);
+    struct token t;
+
+    while (1) {
+        if (!lex(state, &t))
+            return lhs;
+
+        if (t.kind == T_AMPERSAND)
+            lhs = lhs_rhs_to_node(
+                state,
+                lhs,
+                parse_eq_expression(state, scope),
+                N_BITWISE_AND
+            );
+        else {
+            lex_rewind(state);
+            return lhs;
+        }
+    }
+}
+
+/* AND-expression
+ * exclusive-OR-expression ^ AND-expression */
+static struct node *parse_bitwise_xor_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    struct node *lhs = parse_bitwise_and_expression(state, scope);
+    struct token t;
+
+    while (1) {
+        if (!lex(state, &t))
+            return lhs;
+
+        if (t.kind == T_BITWISE_XOR)
+            lhs = lhs_rhs_to_node(
+                state,
+                lhs,
+                parse_bitwise_and_expression(state, scope),
+                N_BITWISE_XOR
+            );
+        else {
+            lex_rewind(state);
+            return lhs;
+        }
+    }
+}
+
+/* exclusive-OR-expression
+ * inclusive-OR-expression | exclusive-OR-expression */
+static struct node *parse_bitwise_or_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    struct node *lhs = parse_bitwise_xor_expression(state, scope);
+    struct token t;
+
+    while (1) {
+        if (!lex(state, &t))
+            return lhs;
+
+        if (t.kind == T_BITWISE_OR)
+            lhs = lhs_rhs_to_node(
+                state,
+                lhs,
+                parse_bitwise_xor_expression(state, scope),
+                N_BITWISE_OR
+            );
+        else {
+            lex_rewind(state);
+            return lhs;
+        }
+    }
+}
+
+/* inclusive-OR-expression
+ * logical-AND-expression && inclusive-OR-expression */
+static struct node *parse_logical_and_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    struct node *lhs = parse_bitwise_or_expression(state, scope);
+    struct token t;
+
+    while (1) {
+        if (!lex(state, &t))
+            return lhs;
+
+        if (t.kind == T_LOGICAL_AND)
+            lhs = lhs_rhs_to_node(
+                state,
+                lhs,
+                parse_bitwise_or_expression(state, scope),
+                N_AND
+            );
+        else {
+            lex_rewind(state);
+            return lhs;
+        }
+    }
+}
+
+/* logical-AND-expression
+ * logical-OR-expression || logical-AND-expression */
+static struct node *parse_logical_or_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    struct node *lhs = parse_logical_and_expression(state, scope);
+    struct token t;
+
+    while (1) {
+        if (!lex(state, &t))
+            return lhs;
+
+        if (t.kind == T_LOGICAL_OR)
+            lhs = lhs_rhs_to_node(
+                state,
+                lhs,
+                parse_logical_and_expression(state, scope),
+                N_OR
+            );
+        else {
+            lex_rewind(state);
+            return lhs;
+        }
+    }
+}
+
+/* logical-OR-expression
+ * logical-OR-expression ? expression : conditional-expression */
+static struct node *parse_conditional_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    /* TODO */
+    return parse_logical_or_expression(state, scope);
+}
+
+static struct node *parse_variable_assignment(
+    struct lex_state *state,
+    struct scope *scope,
+    struct variable *variable
+) {
+    struct node *new = (struct node *) malloc(sizeof(struct node));
+    if (new == NULL) {
+        perror(malloc_failed);
+        exit(1);
+    }
+
+    new->kind = N_LVALUE;
+    if (
+        (new->deps.single = parse_assignment_expression(state, scope))
+        == NULL
+    )
+        lex_error(state, expected_expression);
+    new->deps.single->references ++;
+    new->prev = NULL;
+    new->data.lvalue = variable;
+    variable->references ++;
+    new->type = variable->type;
+    new->references = 1; /* single reference is last_assignment */
+    new->visited = 0;
+    new->is_arith_type =
+        variable->type->top == TOP_BASIC &&
+        variable->type->type.basic.type_specifier <= TY_LONG_LONG;
+    /* ordering will be forced for this node, so nodes don't need to
+     * inherit side effects from it */
+    new->has_side_effects = 0;
+    new->is_lvalue = 1;
+
+    if (variable->last_assignment != NULL) {
+        if (variable->last_assignment->references <= 1)
+            fprintf(stderr, "TODO: free variable last assignment node\n");
+
+        variable->last_assignment->references --;
+    }
+
+    variable->last_assignment = new;
+
+    /* add ordering edge for nodes with side effects */
+    if (new->deps.single->has_side_effects) {
+        if ((new->prev = scope->last_side_effect) != NULL)
+            scope->last_side_effect->references ++;
+
+        scope->last_side_effect = new;
+    }
+
+    return new;
+}
+
+/* conditional-expression
+ * unary-expression assignment-operator assignment-expression
+ * (this parser doesn't allow parsing strictly a unary expression, so anything
+ * that produces an lvalue is accepted) */
+static struct node *parse_assignment_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    struct node *lhs = parse_conditional_expression(state, scope);
+    struct token t;
+
+    if (!lex(state, &t))
+        return lhs;
+
+    if (t.kind == T_ASSIGN) {
+        if (!lhs->is_lvalue)
+            lex_error(state, bad_lvalue);
+
+        if (lhs->data.lvalue != NULL)
+            return parse_variable_assignment(state, scope, lhs->data.lvalue);
+
+        lex_error(state, "unimplemented");
+    } else {
+        lex_rewind(state);
+        return lhs;
+    }
+}
+
+/* assignment-expression
+ * expression , assignment-expression */
+static struct node *parse_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    /* TODO */
+    return parse_assignment_expression(state, scope);
+}
+
+static void parse_declaration(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    struct type *basic_type, *type;
+    char *name;
+    struct token t;
+
+    basic_type = (struct type *) malloc(sizeof(struct type));
+    if (basic_type == NULL) {
+        perror(malloc_failed);
+        exit(1);
+    }
+
+    if (!parse_basic_type(state, basic_type))
+        return;
+
+    for (
+        name = NULL, type = basic_type;
+        parse_type_derivations(state, &type, &name);
+    ) {
+        struct variable *variable;
+
+        if (name == NULL)
+            lex_error(state, no_variable_name);
+
+        if (type->size == 0)
+            lex_error(state, unknown_size);
+
+        if (scope->variables == NULL) {
+            scope->variables = (struct hashtable *)
+                malloc(sizeof(struct hashtable));
+            if (scope->variables == NULL) {
+                perror(malloc_failed);
+                exit(1);
+            }
+            hashtable_init(scope->variables);
+        }
+
+        variable = (struct variable *) malloc(sizeof(struct variable));
+        if (variable == NULL) {
+            perror(malloc_failed);
+            exit(1);
+        }
+
+        variable->type = type;
+        variable->first_load = NULL;
+        variable->last_assignment = NULL;
+        variable->phi_list = NULL;
+        variable->parent = NULL;
+        variable->references = 1;
+
+        if (!hashtable_insert(scope->variables, name, variable))
+            lex_error(state, duplicate_variable);
+
+        if (!lex(state, &t))
+            lex_error(state, expected_semicolon);
+
+        if (t.kind == T_ASSIGN) {
+            parse_variable_assignment(state, scope, variable);
+
+            if (!lex(state, &t))
+                lex_error(state, expected_semicolon);
+        }
+
+        switch (t.kind) {
+            case T_COMMA:
+                continue;
+            case T_SEMICOLON:
+                break;
+            default:
+                lex_error(state, expected_semicolon);
+        }
+
+        break;
+    }
+}
+
 int parse(struct lex_state *state) {
-    struct type *uwu;
+    /*struct type *uwu;
     char *name;
     struct token t;
     if (!parse_type_signature(state, &uwu, &name))
@@ -795,5 +1614,18 @@ int parse(struct lex_state *state) {
     else
         printf("nothing after\n");
     free_type(uwu);
-    return 1;
+    return 1;*/
+
+    struct scope scope = {
+        .variables = NULL,
+        .last_side_effect = NULL,
+        .next = NULL
+    };
+
+    struct node *last;
+
+    parse_declaration(state, &scope);
+    last = parse_assignment_expression(state, &scope);
+
+    debug_graph(last);
 }

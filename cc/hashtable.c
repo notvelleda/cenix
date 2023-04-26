@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "hashtable.h"
@@ -97,12 +98,12 @@ char hashtable_insert(struct hashtable *table, const char *key, void *value) {
     return 1;
 }
 
-void *hashtable_lookup(struct hashtable *table, const char *key) {
-    unsigned long hash_value;
-    struct bucket *bucket;
-
-    hash_string(key, &hash_value);
-    bucket = table->buckets[hash_value % NUM_BUCKETS];
+void *hashtable_lookup_hashed(
+    struct hashtable *table,
+    const char *key,
+    unsigned long hash_value
+) {
+    struct bucket *bucket = table->buckets[hash_value % NUM_BUCKETS];
 
     if (bucket == NULL)
         return NULL;
@@ -117,4 +118,10 @@ void *hashtable_lookup(struct hashtable *table, const char *key) {
         else
             bucket = bucket->next;
     }
+}
+
+void *hashtable_lookup(struct hashtable *table, const char *key) {
+    unsigned long hash_value;
+    hash_string(key, &hash_value);
+    hashtable_lookup_hashed(table, key, hash_value);
 }

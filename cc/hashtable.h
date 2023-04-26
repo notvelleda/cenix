@@ -36,6 +36,14 @@ void hashtable_free(struct hashtable *table, void (*free_value)(void *value));
  * returns 1 on success, 0 if the value is already in the table */
 char hashtable_insert(struct hashtable *table, const char *key, void *value);
 
+/* same as `hashtable_lookup` but the hash value is provided, so it doesn't have
+ * to be hashed a lot of times on many consecutive lookups */
+void *hashtable_lookup_hashed(
+    struct hashtable *table,
+    const char *key,
+    unsigned long hash_value
+);
+
 /* looks up the value for the given key in the hash table, returning the pointer
  * to the value on success and NULL on failure */
 void *hashtable_lookup(struct hashtable *table, const char *key);

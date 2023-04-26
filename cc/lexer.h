@@ -39,8 +39,8 @@ enum token_kind {
     /* an ampersand, used to create a pointer to something or as the
      * bitwise and operator */
     T_AMPERSAND,
-    /* the add operator */
-    T_ADD,
+    /* the plus operator (add) */
+    T_PLUS,
     /* the increment operator (++) */
     T_INCREMENT,
     /* the decrement operator (--) */

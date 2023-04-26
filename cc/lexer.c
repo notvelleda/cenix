@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include "lexer.h"
 
 void lex_error(struct lex_state* state, const char* message) {
@@ -145,7 +146,7 @@ char lex(struct lex_state *state, struct token *out) {
                 if (fread(&c, 1, 1, state->stream) && c == '+') {
                     out->kind = T_INCREMENT;
                 } else {
-                    out->kind = T_ADD;
+                    out->kind = T_PLUS;
                     fseek(state->stream, -1, SEEK_CUR);
                 }
                 break;

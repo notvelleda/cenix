@@ -1,6 +1,8 @@
 #ifndef IR_H
 #define IR_H
 
+/* IR types */
+
 enum storage_class {
     C_AUTO = 0, /* keyword for this isn't supported since it's the default */
     C_EXTERN = 1,
@@ -97,5 +99,58 @@ void print_type(struct type *type, const char *name);
 
 /* frees memory allocated for a type with proper reference counting */
 void free_type(struct type *type);
+
+/* IR graph representation */
+
+enum node_kind {
+    N_LITERAL = 0,
+    N_CALL,
+    N_MUL,
+    N_DIV,
+    N_MOD,
+    N_ADD,
+    N_SUB,
+    N_SHIFT_LEFT,
+    N_SHIFT_RIGHT,
+    N_LESS,
+    N_GREATER,
+    N_LESS_EQ,
+    N_GREATER_EQ,
+    N_EQUALS,
+    N_NOT_EQ,
+    N_BITWISE_AND,
+    N_BITWISE_XOR,
+    N_BITWISE_OR,
+    N_AND,
+    N_OR,
+    N_LVALUE,
+};
+
+struct op_edges {
+    struct node *left;
+    struct node *right;
+};
+
+struct node {
+    enum node_kind kind;
+    union {
+        struct node *single;
+        struct op_edges op;
+    } deps;
+    struct node *prev;
+    union {
+        const char *tag;
+        unsigned long long literal;
+        struct variable *lvalue;
+    } data;
+    struct type *type;
+    unsigned int references;
+    unsigned char visited: 1; /* for debugging */
+    unsigned char is_arith_type: 1;
+    unsigned char has_side_effects: 1;
+    unsigned char is_lvalue: 1;
+};
+
+void debug_graph(struct node *node);
 
 #endif
