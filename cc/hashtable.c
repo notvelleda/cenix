@@ -123,5 +123,5 @@ void *hashtable_lookup_hashed(
 void *hashtable_lookup(struct hashtable *table, const char *key) {
     unsigned long hash_value;
     hash_string(key, &hash_value);
-    hashtable_lookup_hashed(table, key, hash_value);
+    return hashtable_lookup_hashed(table, key, hash_value);
 }

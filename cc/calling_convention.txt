@@ -1,0 +1,15 @@
+first 4 16-bit arguments (or 8 8-bit arguments) are in registers a, b, y, z
+if a 16-bit argument occurs after an 8-bit argument, the 16-bit argument will
+be stored in the next register pair, and if an 8-bit argument follows it will be
+stored in the same register pair as the last 8-bit argument
+all subsequent arguments (and any arguments that don't fit in a single register
+or in a register pair) will be pushed to the stack
+
+16-bit return values will be stored in the a register, 8-bit return values will
+be stored in the al register, and any return values that don't fit will be
+pushed to the stack
+
+it's up to the caller to save registers before calling, as the only register to
+be preserved is x (simply because of how the hardware works). the callee must
+clean up all of its stack allocations so that the caller can properly restore
+its state

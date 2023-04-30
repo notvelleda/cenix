@@ -94,17 +94,23 @@ struct struct_union_field {
     struct struct_union_field *next;
 };
 
-/* prints a type and its derivations, useful for debugging*/
+/* prints a type and its derivations, useful for debugging */
 void print_type(struct type *type, const char *name);
 
-/* frees memory allocated for a type with proper reference counting */
+/* frees memory allocated for a type with proper reference counting. make sure
+ * to decrement the references field before calling if a reference is removed */
 void free_type(struct type *type);
 
 /* IR graph representation */
 
 enum node_kind {
+    /* no dependencies */
     N_LITERAL = 0,
     N_CALL,
+    /* 1 dependency */
+    N_LVALUE,
+    N_RETURN,
+    /* 2 dependencies */
     N_MUL,
     N_DIV,
     N_MOD,
@@ -123,7 +129,6 @@ enum node_kind {
     N_BITWISE_OR,
     N_AND,
     N_OR,
-    N_LVALUE,
 };
 
 struct op_edges {
@@ -152,5 +157,40 @@ struct node {
 };
 
 void debug_graph(struct node *node);
+
+/* frees memory associated with a node with proper reference counting */
+void free_node(struct node *node);
+
+/* an entry in a linked list of scopes. if this scope has no variables declared,
+ * `variables` will be set to NULL */
+struct scope {
+    struct hashtable *variables;
+    struct node *last_side_effect;
+    struct scope *next;
+};
+
+struct variable {
+    /* what type this variable is */
+    struct type *type;
+    /* the first place a value is read from this variable */
+    struct node *first_load;
+    /* the node containing the value last assigned to the variable */
+    struct node *last_assignment;
+    /* stores the last assignments made to this variable in scopes other than
+     * the one it was created in */
+    struct phi_list *phi_list;
+    /* if this variable didn't originate in the current scope, this points to
+     * the instance of the variable in the scope it originated from */
+    struct variable *parent;
+    unsigned int references;
+};
+
+struct phi_list {
+    struct node *last_assignment;
+    struct phi_list *next;
+};
+
+/* frees memory associate with a variable with proper reference counting */
+void free_variable(struct variable *variable);
 
 #endif

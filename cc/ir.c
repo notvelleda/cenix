@@ -126,61 +126,61 @@ void free_type(struct type *type) {
     struct type *next = type;
 
     while (next != NULL) {
+        if (type->references != 0)
+            break;
+
         if (type->top == TOP_BASIC)
             next = NULL;
         else
             next = type->type.derived.derivation;
 
-        if (type->references <= 1) {
-            if (type->top == TOP_BASIC) {
-                /* free struct/union field names/types */
-                if (type->type.basic.name_field_ptr != NULL)
-                    if (type->type.basic.has_fields) {
-                        struct struct_union_field *current =
-                            type->type.basic.name_field_ptr,
-                            *next;
+        if (type->top == TOP_BASIC) {
+            /* free struct/union field names/types */
+            if (type->type.basic.name_field_ptr != NULL)
+                if (type->type.basic.has_fields) {
+                    struct struct_union_field *current =
+                        type->type.basic.name_field_ptr,
+                        *next;
 
-                        while (current != NULL) {
-                            next = current->next;
+                    while (current != NULL) {
+                        next = current->next;
 
-                            free_type(current->type);
+                        current->type->references --;
+                        free_type(current->type);
 
-                            if (current->name != NULL)
-                                free((void *) current->name);
+                        if (current->name != NULL)
+                            free((void *) current->name);
 
-                            free(current);
+                        free(current);
 
-                            current = next;
-                        }
-                    } else
-                        free(type->type.basic.name_field_ptr);
-            } else if (type->top == TOP_FUNCTION) {
-                /* free function argument names/types */
-                struct function_type *current =
-                    type->type.derived.type.function,
-                    *next;
+                        current = next;
+                    }
+                } else
+                    free(type->type.basic.name_field_ptr);
+        } else if (type->top == TOP_FUNCTION) {
+            /* free function argument names/types */
+            struct function_type *current =
+                type->type.derived.type.function,
+                *next;
 
-                while (current != NULL) {
-                    next = current->next;
+            while (current != NULL) {
+                next = current->next;
 
-                    free_type(current->type);
+                current->type->references --;
+                free_type(current->type);
 
-                    if (current->name != NULL)
-                        free((void *) current->name);
+                if (current->name != NULL)
+                    free((void *) current->name);
 
-                    free(current);
+                free(current);
 
-                    current = next;
-                }
+                current = next;
             }
-
-            free(type);
-
-            type = next;
-        } else {
-            type->references --;
-            break;
         }
+
+        free(type);
+
+        type = next;
     }
 }
 
@@ -192,6 +192,12 @@ static void label_node(struct node *node) {
             break;
         case N_CALL:
             printf("call %s", node->data.tag);
+            break;
+        case N_LVALUE:
+            printf("lvalue");
+            break;
+        case N_RETURN:
+            printf("return");
             break;
         case N_MUL:
             printf("*");
@@ -247,13 +253,11 @@ static void label_node(struct node *node) {
         case N_OR:
             printf("||");
             break;
-        case N_LVALUE:
-            printf("lvalue");
-            break;
         default:
             printf("(unknown)");
             break;
     }
+    printf(" (%d references)", node->references);
     printf("\"]");
 
     if (node->has_side_effects)
@@ -263,43 +267,26 @@ static void label_node(struct node *node) {
 }
 
 static void debug_graph_recurse(struct node *node) {
-    switch (node->kind) {
-        case N_MUL:
-        case N_DIV:
-        case N_MOD:
-        case N_ADD:
-        case N_SUB:
-        case N_SHIFT_LEFT:
-        case N_SHIFT_RIGHT:
-        case N_LESS:
-        case N_GREATER:
-        case N_LESS_EQ:
-        case N_GREATER_EQ:
-        case N_EQUALS:
-        case N_NOT_EQ:
-        case N_BITWISE_AND:
-        case N_BITWISE_XOR:
-        case N_BITWISE_OR:
-        case N_AND:
-        case N_OR:
-            if (!node->deps.op.left->visited) {
-                node->deps.op.left->visited = 1;
-                label_node(node->deps.op.left);
-                debug_graph_recurse(node->deps.op.left);
-            }
-            if (!node->deps.op.right->visited) {
-                node->deps.op.right->visited = 1;
-                label_node(node->deps.op.right);
-                debug_graph_recurse(node->deps.op.right);
-            }
-            printf("n%x -> n%x [label=right]; ", node, node->deps.op.right);
-            printf("n%x -> n%x [label=left]; ", node, node->deps.op.left);
-            break;
-        case N_LVALUE:
+    if (node->kind >= N_MUL && node->kind <= N_OR) {
+        if (!node->deps.op.left->visited) {
+            node->deps.op.left->visited = 1;
+            label_node(node->deps.op.left);
+            debug_graph_recurse(node->deps.op.left);
+        }
+        if (!node->deps.op.right->visited) {
+            node->deps.op.right->visited = 1;
+            label_node(node->deps.op.right);
+            debug_graph_recurse(node->deps.op.right);
+        }
+        printf("n%x -> n%x [label=right]; ", node, node->deps.op.right);
+        printf("n%x -> n%x [label=left]; ", node, node->deps.op.left);
+    } else if (node->kind >= N_LVALUE && node->kind <= N_RETURN) {
+        if (!node->deps.single->visited) {
+            node->deps.single->visited = 1;
             label_node(node->deps.single);
-            printf("n%x -> n%x; ", node, node->deps.single);
             debug_graph_recurse(node->deps.single);
-            break;
+        }
+        printf("n%x -> n%x; ", node, node->deps.single);
     }
 
     if (node->prev != NULL) {
@@ -319,4 +306,97 @@ void debug_graph(struct node *node) {
         debug_graph_recurse(node);
     }
     printf("}\n");
+}
+
+void free_node(struct node *node) {
+    if (node == NULL)
+        return;
+
+    while (1) {
+        struct node *next = NULL;
+
+        if (node->references != 0)
+            break;
+
+        if (node->kind >= N_MUL && node->kind <= N_OR) {
+            next = node->deps.op.left;
+            node->deps.op.right->references --;
+            free_node(node->deps.op.right);
+        } else if (node->kind >= N_LVALUE && node->kind <= N_RETURN)
+            next = node->deps.single;
+
+        if (node->prev != NULL)
+            if (next == NULL)
+                next = node->prev;
+            else {
+                node->prev->references --;
+                free_node(node->prev);
+            }
+
+        if (node->type != NULL) {
+            node->type->references --;
+            free_type(node->type);
+        }
+
+        if (node->kind == N_CALL)
+            free((void *) node->data.tag);
+        else if (node->kind == N_LVALUE) {
+            node->data.lvalue->references --;
+            free_variable(node->data.lvalue);
+        }
+
+        free(node);
+
+        if (next == NULL)
+            break;
+
+        node = next;
+        node->references --;
+    }
+}
+
+void free_variable(struct variable *variable) {
+    struct phi_list *current;
+
+    if (variable == NULL)
+        return;
+
+    if (variable->references == 1 && variable->last_assignment != NULL) {
+        variable->last_assignment->references --;
+        free_node(variable->last_assignment);
+        return;
+    }
+
+    if (variable->references != 0)
+        return;
+
+    /*fprintf(stderr, "freeing variable %x\n", variable);*/
+
+    if (variable->type != NULL) {
+        variable->type->references --;
+        free_type(variable->type);
+    }
+    if (variable->first_load != NULL) {
+        variable->first_load->references --;
+        free_node(variable->first_load);
+    }
+    if (variable->last_assignment != NULL) {
+        variable->last_assignment->references --;
+        free_node(variable->last_assignment);
+    }
+    for (
+        current = variable->phi_list;
+        current != NULL;
+        current = current->next
+    ) {
+        current->last_assignment->references --;
+        free_node(current->last_assignment);
+    }
+    if (variable->parent != NULL) {
+        variable->parent->references --;
+        fprintf(stderr, "%d parent references\n", variable->parent->references);
+        /* this call is probably useless */
+        free_variable(variable->parent);
+    }
+    free(variable);
 }
