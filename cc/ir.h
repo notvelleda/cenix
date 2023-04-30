@@ -136,6 +136,14 @@ struct op_edges {
     struct node *right;
 };
 
+#define NODE_VISITED 1
+#define NODE_IS_ARITH_TYPE 2
+#define NODE_HAS_SIDE_EFFECTS 4
+#define NODE_IS_LVALUE 8
+#define NODE_LEFT_VISITED 16
+#define NODE_RIGHT_VISITED 32
+#define NODE_PREV_VISITED 64
+
 struct node {
     enum node_kind kind;
     union {
@@ -143,6 +151,7 @@ struct node {
         struct op_edges op;
     } deps;
     struct node *prev;
+    struct node *sorted_next;
     union {
         const char *tag;
         unsigned long long literal;
@@ -150,13 +159,13 @@ struct node {
     } data;
     struct type *type;
     unsigned int references;
-    unsigned char visited: 1; /* for debugging */
-    unsigned char is_arith_type: 1;
-    unsigned char has_side_effects: 1;
-    unsigned char is_lvalue: 1;
+    unsigned int visits;
+    unsigned char reg_num;
+    unsigned char flags;
 };
 
 void debug_graph(struct node *node);
+void debug_sorted(struct node *node);
 
 /* frees memory associated with a node with proper reference counting */
 void free_node(struct node *node);
@@ -192,5 +201,7 @@ struct phi_list {
 
 /* frees memory associate with a variable with proper reference counting */
 void free_variable(struct variable *variable);
+
+struct node *topological_sort(struct node *node);
 
 #endif

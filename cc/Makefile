@@ -3,7 +3,7 @@ CFLAGS=-I. -I../include -std=c89
 LDFLAGS=
 
 BINARY=cc
-OBJECTS=lexer.o main.o parser.o hashtable.o ir.o
+OBJECTS=lexer.o main.o parser.o hashtable.o ir.o codegen.o
 
 all: ${BINARY}
 

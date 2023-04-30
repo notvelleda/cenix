@@ -257,32 +257,34 @@ static void label_node(struct node *node) {
             printf("(unknown)");
             break;
     }
-    printf(" (%d references)", node->references);
+    printf(" (%d, %d)", node->references, node->visits);
     printf("\"]");
 
-    if (node->has_side_effects)
+    if (node->flags & NODE_HAS_SIDE_EFFECTS)
         printf(" [shape=box]");
 
     printf("; ");
 }
 
 static void debug_graph_recurse(struct node *node) {
-    if (node->kind >= N_MUL && node->kind <= N_OR) {
-        if (!node->deps.op.left->visited) {
-            node->deps.op.left->visited = 1;
+    if (node->kind >= N_MUL) {
+        /* handle 2 dependency nodes */
+        if (!(node->deps.op.left->flags & NODE_VISITED)) {
+            node->deps.op.left->flags |= NODE_VISITED;
             label_node(node->deps.op.left);
             debug_graph_recurse(node->deps.op.left);
         }
-        if (!node->deps.op.right->visited) {
-            node->deps.op.right->visited = 1;
+        if (!(node->deps.op.right->flags & NODE_VISITED)) {
+            node->deps.op.right->flags |= NODE_VISITED;
             label_node(node->deps.op.right);
             debug_graph_recurse(node->deps.op.right);
         }
         printf("n%x -> n%x [label=right]; ", node, node->deps.op.right);
         printf("n%x -> n%x [label=left]; ", node, node->deps.op.left);
-    } else if (node->kind >= N_LVALUE && node->kind <= N_RETURN) {
-        if (!node->deps.single->visited) {
-            node->deps.single->visited = 1;
+    } else if (node->kind >= N_LVALUE) {
+        /* handle 1 dependency nodes */
+        if (!(node->deps.single->flags & NODE_VISITED)) {
+            node->deps.single->flags |= NODE_VISITED;
             label_node(node->deps.single);
             debug_graph_recurse(node->deps.single);
         }
@@ -290,8 +292,8 @@ static void debug_graph_recurse(struct node *node) {
     }
 
     if (node->prev != NULL) {
-        if (!node->prev->visited) {
-            node->prev->visited = 1;
+        if (!(node->prev->flags & NODE_VISITED)) {
+            node->prev->flags |= NODE_VISITED;
             label_node(node->prev);
             debug_graph_recurse(node->prev);
         }
@@ -308,6 +310,52 @@ void debug_graph(struct node *node) {
     printf("}\n");
 }
 
+void debug_sorted(struct node *node) {
+    struct node *cur;
+
+    printf(
+        "digraph { "
+        "rankdir=LR; graph [ordering=out]; "
+        "subgraph { "
+        "rank=same; "
+    );
+
+    for (cur = node; cur != NULL; cur = cur->sorted_next) {
+        label_node(cur);
+
+        if (cur->kind >= N_MUL) {
+            /* handle 2 dependency nodes */
+            printf(
+                "n%x -> n%x [label=right] [constraint=false]; ",
+                cur,
+                cur->deps.op.right
+            );
+            printf(
+                "n%x -> n%x [label=left] [constraint=false]; ",
+                cur,
+                cur->deps.op.left
+            );
+        } else if (cur->kind >= N_LVALUE)
+            /* handle 1 dependency nodes */
+            printf("n%x -> n%x [constraint=false]; ", cur, cur->deps.single);
+
+        if (cur->prev != NULL)
+            printf(
+                "n%x -> n%x [constraint=false] [style=dotted]; ",
+                cur,
+                cur->prev
+            );
+    }
+
+    /* add additional ordering edges because dot is wacky */
+    printf("n%x", node);
+    for (cur = node->sorted_next; cur != NULL; cur = cur->sorted_next)
+        printf(" -> n%x", cur);
+    printf(" [style=invis]; ");
+
+    printf("}}\n");
+}
+
 void free_node(struct node *node) {
     if (node == NULL)
         return;
@@ -318,11 +366,13 @@ void free_node(struct node *node) {
         if (node->references != 0)
             break;
 
-        if (node->kind >= N_MUL && node->kind <= N_OR) {
+        if (node->kind >= N_MUL) {
+            /* handle 2 dependency nodes */
             next = node->deps.op.left;
             node->deps.op.right->references --;
             free_node(node->deps.op.right);
-        } else if (node->kind >= N_LVALUE && node->kind <= N_RETURN)
+        } else if (node->kind >= N_LVALUE)
+            /* handle 1 dependency nodes */
             next = node->deps.single;
 
         if (node->prev != NULL)
@@ -399,4 +449,43 @@ void free_variable(struct variable *variable) {
         free_variable(variable->parent);
     }
     free(variable);
+}
+
+static void sort_visit(
+    struct node *node,
+    struct node **head,
+    struct node **tail,
+    unsigned char ignore_visit
+) {
+    if (node->flags & NODE_VISITED) {
+        if (!ignore_visit)
+            node->visits ++;
+        return;
+    }
+
+    if (node->prev != NULL)
+        sort_visit(node->prev, head, tail, 1);
+
+    if (node->kind >= N_MUL) {
+        /* handle 2 dependency nodes */
+        sort_visit(node->deps.op.left, head, tail, 0);
+        sort_visit(node->deps.op.right, head, tail, 0);
+    } else if (node->kind >= N_LVALUE)
+        /* handle 1 dependency nodes */
+        sort_visit(node->deps.single, head, tail, 0);
+
+    node->flags |= NODE_VISITED;
+    node->visits = !ignore_visit;
+    if (*tail == NULL)
+        *head = node;
+    else
+        (*tail)->sorted_next = node;
+    *tail = node;
+}
+
+struct node *topological_sort(struct node *node) {
+    struct node *head, *tail = NULL;
+    node->sorted_next = NULL;
+    sort_visit(node, &head, &tail, 1);
+    return head;
 }

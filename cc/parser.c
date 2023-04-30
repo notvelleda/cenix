@@ -823,10 +823,7 @@ static struct node *parse_function_arguments(
     new->prev = NULL;
     /* TODO: get return type from function declaration */
     new->type = NULL;
-    new->visited = 0;
-    new->is_arith_type = 1;
-    new->has_side_effects = 1;
-    new->is_lvalue = 0;
+    new->flags = NODE_IS_ARITH_TYPE | NODE_HAS_SIDE_EFFECTS;
     new->data.tag = token_to_string(state, ident);
 
     return new;
@@ -887,10 +884,7 @@ static struct node *parse_primary_expression(
             new->references = 0;
             new->prev = NULL;
             new->type = NULL;
-            new->visited = 0;
-            new->is_arith_type = 1;
-            new->has_side_effects = 0;
-            new->is_lvalue = 0;
+            new->flags = NODE_IS_ARITH_TYPE;
             new->data.literal = token_to_number(state, &t, 10);
             break;
         case T_HEX_NUMBER:
@@ -903,10 +897,7 @@ static struct node *parse_primary_expression(
             new->references = 0;
             new->prev = NULL;
             new->type = NULL;
-            new->visited = 0;
-            new->is_arith_type = 1;
-            new->has_side_effects = 0;
-            new->is_lvalue = 0;
+            new->flags = NODE_IS_ARITH_TYPE;
             new->data.literal = token_to_number(state, &t, 16);
             break;
         case T_OCT_NUMBER:
@@ -919,10 +910,7 @@ static struct node *parse_primary_expression(
             new->references = 0;
             new->prev = NULL;
             new->type = NULL;
-            new->visited = 0;
-            new->is_arith_type = 1;
-            new->has_side_effects = 0;
-            new->is_lvalue = 0;
+            new->flags = NODE_IS_ARITH_TYPE;
             new->data.literal = token_to_number(state, &t, 8);
             break;
         case T_OPEN_PAREN:
@@ -989,7 +977,7 @@ static struct node *parse_unary_expression(
             /* TODO: handle the logical NOT operator */
         case T_SIZEOF:
             /* TODO: handle sizeof */
-            lex_error(state, "unimplemented");
+            lex_error(state, "unary expressions unimplemented");
             break;
         default:
             lex_rewind(state);
@@ -1018,7 +1006,10 @@ static struct node *lhs_rhs_to_node(
     if (rhs == NULL)
         lex_error(state, expected_expression);
 
-    if (!lhs->is_arith_type || !rhs->is_arith_type)
+    if (
+        !(lhs->flags & NODE_IS_ARITH_TYPE) ||
+        !(rhs->flags & NODE_IS_ARITH_TYPE)
+    )
         lex_error(state, bad_operands);
 
     lhs->references ++;
@@ -1049,10 +1040,12 @@ static struct node *lhs_rhs_to_node(
     else
         new->type = NULL;
 
-    new->visited = 0;
-    new->is_arith_type = 1;
-    new->has_side_effects = lhs->has_side_effects || rhs->has_side_effects;
-    new->is_lvalue = 0;
+    new->flags =
+        NODE_IS_ARITH_TYPE |
+        (
+            (lhs->flags & NODE_HAS_SIDE_EFFECTS) |
+            (lhs->flags & NODE_HAS_SIDE_EFFECTS)
+        );
     new->deps.op.left = lhs;
     new->deps.op.right = rhs;
 
@@ -1444,14 +1437,12 @@ static struct node *parse_variable_assignment(
     variable->references ++;
     new->type = variable->type;
     new->references = 1; /* single reference is last_assignment */
-    new->visited = 0;
-    new->is_arith_type =
+    new->flags = NODE_IS_LVALUE;
+    if (
         variable->type->top == TOP_BASIC &&
-        variable->type->type.basic.type_specifier <= TY_LONG_LONG;
-    /* ordering will be forced for this node, so nodes don't need to
-     * inherit side effects from it */
-    new->has_side_effects = 0;
-    new->is_lvalue = 1;
+        variable->type->type.basic.type_specifier <= TY_LONG_LONG
+    )
+        new->flags |= NODE_IS_ARITH_TYPE;
 
     if (variable->last_assignment != NULL) {
         variable->last_assignment->references --;
@@ -1461,7 +1452,7 @@ static struct node *parse_variable_assignment(
     variable->last_assignment = new;
 
     /* add ordering edge for nodes with side effects */
-    if (new->deps.single->has_side_effects) {
+    if (new->deps.single->flags & NODE_HAS_SIDE_EFFECTS) {
         new->prev = scope->last_side_effect;
 
         scope->last_side_effect = new;
@@ -1486,13 +1477,13 @@ static struct node *parse_assignment_expression(
         return lhs;
 
     if (t.kind == T_ASSIGN) {
-        if (!lhs->is_lvalue)
+        if (!(lhs->flags & NODE_IS_LVALUE))
             lex_error(state, bad_lvalue);
 
         if (lhs->data.lvalue != NULL)
             return parse_variable_assignment(state, scope, lhs->data.lvalue);
 
-        lex_error(state, "unimplemented");
+        lex_error(state, "other assignment expressions unimplemented");
     } else {
         lex_rewind(state);
         return lhs;
@@ -1521,7 +1512,7 @@ static struct node *parse_expression(
             return new;
 
         if (t.kind == T_COMMA) {
-            if (new->has_side_effects) {
+            if (new->flags & NODE_HAS_SIDE_EFFECTS) {
                 new->prev = scope->last_side_effect;
 
                 scope->last_side_effect = new;
@@ -1613,12 +1604,12 @@ static char parse_declaration(struct lex_state *state, struct scope *scope) {
             variable->references ++;
             new->type = variable->type;
             new->references = 1; /* single reference is last_assignment */
-            new->visited = 0;
-            new->is_arith_type =
+            new->flags = NODE_IS_LVALUE;
+            if (
                 variable->type->top == TOP_BASIC &&
-                variable->type->type.basic.type_specifier <= TY_LONG_LONG;
-            new->has_side_effects = 0;
-            new->is_lvalue = 1;
+                variable->type->type.basic.type_specifier <= TY_LONG_LONG
+            )
+                new->flags |= NODE_IS_ARITH_TYPE;
 
             variable->last_assignment = new;
         }
@@ -1695,7 +1686,7 @@ static struct node *parse_compound(
                 if (new == NULL)
                     lex_error(state, expected_statement);
 
-                if (new->has_side_effects) {
+                if (new->flags & NODE_HAS_SIDE_EFFECTS) {
                     new->prev = new_scope.last_side_effect;
 
                     new_scope.last_side_effect = new;
@@ -1760,7 +1751,7 @@ static struct node *parse_statement(
         /* labeled-statement*/
         case T_CONTINUE:
         case T_BREAK:
-            lex_error(state, "unimplemented");
+            lex_error(state, "labeled statements unimplemented");
         case T_RETURN:
             new = (struct node *) malloc(sizeof(struct node));
             if (new == NULL) {
@@ -1775,10 +1766,7 @@ static struct node *parse_statement(
             new->prev = NULL;
             new->type = NULL;
             new->references = 0;
-            new->visited = 0;
-            new->is_arith_type = 0;
-            new->has_side_effects = 1;
-            new->is_lvalue = 0;
+            new->flags = NODE_HAS_SIDE_EFFECTS;
 
             if (!lex(state, &t) || t.kind != T_SEMICOLON)
                 lex_error(state, expected_semicolon);
@@ -1790,6 +1778,9 @@ static struct node *parse_statement(
     return parse_expression_statement(state, scope);
 }
 
+#include "codegen.h"
+
 int parse(struct lex_state *state) {
-    debug_graph(parse_statement(state, NULL));
+    codegen(topological_sort(parse_statement(state, NULL)));
+    return 0;
 }
