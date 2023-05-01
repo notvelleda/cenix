@@ -110,6 +110,13 @@ enum node_kind {
     /* 1 dependency */
     N_LVALUE,
     N_RETURN,
+    N_PRE_INC,
+    N_PRE_DEC,
+    N_REFERENCE,
+    N_DEREF,
+    N_NEGATE,
+    N_BITWISE_NOT,
+    N_NOT,
     /* 2 dependencies */
     N_MUL,
     N_DIV,
@@ -129,6 +136,7 @@ enum node_kind {
     N_BITWISE_OR,
     N_AND,
     N_OR,
+    N_DEREF_ASSIGN,
 };
 
 struct op_edges {
@@ -178,6 +186,8 @@ struct scope {
     struct scope *next;
 };
 
+#define VAR_IS_ARITH_TYPE 1
+
 struct variable {
     /* what type this variable is */
     struct type *type;
@@ -192,6 +202,7 @@ struct variable {
      * the instance of the variable in the scope it originated from */
     struct variable *parent;
     unsigned int references;
+    unsigned char flags;
 };
 
 struct phi_list {

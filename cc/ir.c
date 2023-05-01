@@ -199,6 +199,27 @@ static void label_node(struct node *node) {
         case N_RETURN:
             printf("return");
             break;
+        case N_PRE_INC:
+            printf("pre-increment");
+            break;
+        case N_PRE_DEC:
+            printf("pre-decrement");
+            break;
+        case N_REFERENCE:
+            printf("reference");
+            break;
+        case N_DEREF:
+            printf("deref");
+            break;
+        case N_NEGATE:
+            printf("-");
+            break;
+        case N_BITWISE_NOT:
+            printf("~");
+            break;
+        case N_NOT:
+            printf("!");
+            break;
         case N_MUL:
             printf("*");
             break;
@@ -252,6 +273,9 @@ static void label_node(struct node *node) {
             break;
         case N_OR:
             printf("||");
+            break;
+        case N_DEREF_ASSIGN:
+            printf("deref assign");
             break;
         default:
             printf("(unknown)");
@@ -348,10 +372,12 @@ void debug_sorted(struct node *node) {
     }
 
     /* add additional ordering edges because dot is wacky */
-    printf("n%x", node);
-    for (cur = node->sorted_next; cur != NULL; cur = cur->sorted_next)
-        printf(" -> n%x", cur);
-    printf(" [style=invis]; ");
+    if (node != NULL) {
+        printf("n%x", node);
+        for (cur = node->sorted_next; cur != NULL; cur = cur->sorted_next)
+            printf(" -> n%x", cur);
+        printf(" [style=invis]; ");
+    }
 
     printf("}}\n");
 }
@@ -457,6 +483,9 @@ static void sort_visit(
     struct node **tail,
     unsigned char ignore_visit
 ) {
+    if (node == NULL)
+        return;
+
     if (node->flags & NODE_VISITED) {
         if (!ignore_visit)
             node->visits ++;
@@ -485,6 +514,10 @@ static void sort_visit(
 
 struct node *topological_sort(struct node *node) {
     struct node *head, *tail = NULL;
+
+    if (node == NULL)
+        return NULL;
+
     node->sorted_next = NULL;
     sort_visit(node, &head, &tail, 1);
     return head;

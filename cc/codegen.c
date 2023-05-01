@@ -26,6 +26,20 @@ struct cpu_state {
     unsigned int op_count;
 };
 
+void assign_register(
+    struct cpu_state *state,
+    struct node *target,
+    unsigned char reg_num,
+    unsigned char size
+) {
+    struct register_use *reg = &state->registers[reg_num];
+
+    reg->is_used = 1;
+    reg->last_assigned = state->op_count;
+    reg->contents = target;
+    target->reg_num = reg_num;
+}
+
 void save_register(
     struct cpu_state *state,
     struct node *target,
@@ -123,7 +137,7 @@ unsigned char consume_register(
         old->visits --;
 
     if (new != NULL)
-        save_register(state, new, reg_num, 2);
+        save_register(state, new, reg_num, new->type->size);
 
     return reg_num;
 }
@@ -134,11 +148,15 @@ void emit_return(struct node *node) {
     if (node->kind == N_LVALUE)
         node = node->deps.single;
 
+    /* TODO: non-register values */
     reg_num = node->reg_num;
 
-    /* TODO: non-paired register */
-    if (reg_num != 0)
-        printf("xfr %%%s, %%aw\n", whole_reg_names[reg_num]);
+    if (node->type->size == 1) {
+        if (reg_num != 1)
+            printf("xfr %%%s, %%al\n", half_reg_names[reg_num]);
+    } else
+        if (reg_num != 0)
+            printf("xfr %%%s, %%aw\n", whole_reg_names[reg_num]);
 
     printf("rsr\n");
 }
@@ -177,6 +195,37 @@ void codegen(struct node *head) {
                 /* TODO: unwind stack */
                 emit_return(cur->deps.single);
                 break;
+            case N_PRE_INC:
+                fprintf(stderr, "pre-increment unimplemented\n", cur->kind);
+                continue;
+            case N_PRE_DEC:
+                fprintf(stderr, "pre-decrement unimplemented\n", cur->kind);
+                continue;
+            case N_REFERENCE:
+                fprintf(stderr, "reference unimplemented\n", cur->kind);
+                continue;
+            case N_DEREF:
+                fprintf(stderr, "deref unimplemented\n", cur->kind);
+                continue;
+            case N_NEGATE:
+                printf(
+                    "ivr %%%s, 1\n",
+                    whole_reg_names[
+                        consume_register(&state, cur->deps.single, cur)
+                    ]
+                );
+                break;
+            case N_BITWISE_NOT:
+                printf(
+                    "ivr %%%s\n",
+                    whole_reg_names[
+                        consume_register(&state, cur->deps.single, cur)
+                    ]
+                );
+                break;
+            case N_NOT:
+                fprintf(stderr, "logical not unimplemented\n", cur->kind);
+                continue;
 
             case N_MUL:
                 printf(
@@ -286,6 +335,34 @@ void codegen(struct node *head) {
             case N_OR:
                 fprintf(stderr, "logical or unimplemented\n", cur->kind);
                 continue;
+            case N_DEREF_ASSIGN:
+                /* this operation doesn't clobber the register, so there's no
+                 * need to save it */
+                assign_register(
+                    &state,
+                    cur,
+                    cur->deps.op.right->reg_num,
+                    cur->type->size
+                );
+
+                if (cur->deps.op.left == NULL) {
+                    /* save to constant address */
+                    printf(
+                        "st %%%s, %llu\n",
+                        whole_reg_names[cur->reg_num],
+                        cur->data.literal
+                    );
+                } else {
+                    /* dereference register */
+                    printf(
+                        "st %%%s, (%%%s)\n",
+                        whole_reg_names[cur->reg_num],
+                        whole_reg_names[
+                            consume_register(&state, cur->deps.op.left, NULL)
+                        ]
+                    );
+                }
+                break;
         }
 
         state.op_count ++;

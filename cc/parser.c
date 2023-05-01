@@ -783,9 +783,10 @@ const char *undeclared_identifier = "undeclared identifier";
 const char *expected_expression = "expected expression";
 const char *no_variable_name = "variables must be named";
 const char *duplicate_variable = "duplicate variable name";
-const char *bad_operands = "operands must be arithmetic types";
+const char *bad_operands = "operand(s) must be arithmetic types";
 const char *bad_lvalue = "assignment left-hand side must be an lvalue";
 const char *expected_statement = "expected statement";
+const char *type_mismatch = "type mismatch";
 
 static struct node *parse_assignment_expression(
     struct lex_state *state,
@@ -943,6 +944,92 @@ static struct node *parse_postfix_expression(
     return parse_primary_expression(state, scope);
 }
 
+struct node *parse_cast_expression(
+    struct lex_state *state,
+    struct scope *scope
+);
+
+static struct node *parse_arith_unary(
+    struct lex_state *state,
+    struct scope *scope,
+    struct node *child,
+    enum node_kind kind
+) {
+    struct node *parent;
+    if (child == NULL)
+        lex_error(state, expected_expression);
+
+    if (!(child->flags & NODE_IS_ARITH_TYPE))
+        lex_error(state, bad_operands);
+
+    parent = (struct node *) malloc(sizeof(struct node));
+    if (parent == NULL) {
+        perror(malloc_failed);
+        exit(1);
+    }
+
+    parent->kind = kind;
+    parent->references = 0;
+    parent->prev = NULL;
+    parent->type = child->type;
+    parent->flags = NODE_IS_ARITH_TYPE;
+    parent->deps.single = child;
+    child->references ++;
+
+    return parent;
+}
+
+static struct node *parse_unary_expression(
+    struct lex_state *state,
+    struct scope *scope
+);
+
+/* sizeof unary-expression
+ * sizeof ( type-name ) */
+static struct node *parse_sizeof(struct lex_state *state, struct scope *scope) {
+    struct node *temp;
+    struct token t;
+    unsigned long long size = 0;
+
+    if (!lex(state, &t))
+        lex_error(state, expected_expression);
+
+    if (t.kind == T_OPEN_PAREN) {
+        struct type *type;
+        char *unused;
+
+        if (!parse_type_signature(state, &type, &unused))
+            lex_error(state, expected_type);
+
+        size = type->size;
+
+        free_type(type);
+    } else {
+        lex_rewind(state);
+
+        temp = parse_unary_expression(state, scope);
+        if (temp == NULL)
+            lex_error(state, expected_expression);
+
+        if (temp->type != NULL)
+            size = temp->type->size;
+
+        free_node(temp);
+    }
+
+    temp = (struct node *) malloc(sizeof(struct node));
+    if (temp == NULL) {
+        perror(malloc_failed);
+        exit(1);
+    }
+    temp->kind = N_LITERAL;
+    temp->references = 0;
+    temp->prev = NULL;
+    temp->type = NULL;
+    temp->flags = NODE_IS_ARITH_TYPE;
+    temp->data.literal = size;
+}
+
 /* postfix-expression
  * ++ unary-expression
  * -- unary-expression
@@ -954,31 +1041,72 @@ static struct node *parse_unary_expression(
     struct scope *scope
 ) {
     struct token t;
+    struct node *temp;
 
     if (!lex(state, &t))
         return NULL;
 
     switch (t.kind) {
         case T_INCREMENT:
-            /* TODO: handle pre-increment */
+            return parse_arith_unary(
+                state,
+                scope,
+                parse_unary_expression(state, scope),
+                N_PRE_INC
+            );
         case T_DECREMENT:
-            /* TODO: handle pre-decrement */
+            return parse_arith_unary(
+                state,
+                scope,
+                parse_unary_expression(state, scope),
+                N_PRE_DEC
+            );
         case T_AMPERSAND:
             /* TODO: handle reference operator */
+            lex_error(state, "reference unimplemented");
         case T_ASTERISK:
-            /* TODO: handle dereference operator */
+            temp = parse_arith_unary(
+                state,
+                scope,
+                parse_cast_expression(state, scope),
+                N_DEREF
+            );
+            temp->flags |= NODE_IS_LVALUE;
+            temp->data.lvalue = NULL;
+            return temp;
         case T_PLUS:
-            /* TODO: handle plus operator */
+            /* this does literally nothing lmao */
+            temp = parse_cast_expression(state, scope);
+            if (temp == NULL)
+                lex_error(state, expected_expression);
+
+            if (!(temp->flags & NODE_IS_ARITH_TYPE))
+                lex_error(state, bad_operands);
+
+            return temp;
         case T_MINUS:
-            /* TODO: handle minus operator */
+            return parse_arith_unary(
+                state,
+                scope,
+                parse_cast_expression(state, scope),
+                N_NEGATE
+            );
         case T_BITWISE_NOT:
-            /* TODO: handle the bitwise NOT operator */
+            return parse_arith_unary(
+                state,
+                scope,
+                parse_cast_expression(state, scope),
+                N_BITWISE_NOT
+            );
         case T_LOGICAL_NOT:
-            /* TODO: handle the logical NOT operator */
+            return parse_arith_unary(
+                state,
+                scope,
+                parse_cast_expression(state, scope),
+                N_NOT
+            );
         case T_SIZEOF:
-            /* TODO: handle sizeof */
-            lex_error(state, "unary expressions unimplemented");
-            break;
+            return parse_sizeof(state, scope);
         default:
             lex_rewind(state);
             return parse_postfix_expression(state, scope);
@@ -993,6 +1121,22 @@ struct node *parse_cast_expression(
 ) {
     /* TODO: handle casting */
     return parse_unary_expression(state, scope);
+}
+
+static void propagate_type(struct node *node, struct type *type) {
+    while (node != NULL && node->type == NULL) {
+        (node->type = type)->references ++;
+
+        if (node->kind >= N_MUL) {
+            /* handle 2 dependency nodes */
+            propagate_type(node->deps.op.left, type);
+            node = node->deps.op.right;
+        } else if (node->kind >= N_LVALUE)
+            /* handle single dependency nodes */
+            node = node->deps.single;
+        else
+            break;
+    }
 }
 
 static struct node *lhs_rhs_to_node(
@@ -1028,11 +1172,13 @@ static struct node *lhs_rhs_to_node(
     /* figure out what type this node should have. if one side has an explicit
      * type and the other doesn't, then this node takes the explicit type. if
      * both sides have types, the type with the largest size is used */
-    if (lhs->type != NULL && rhs->type == NULL)
+    if (lhs->type != NULL && rhs->type == NULL) {
         (new->type = lhs->type)->references ++;
-    else if (lhs->type == NULL && rhs->type != NULL)
+        propagate_type(rhs, new->type);
+    } else if (lhs->type == NULL && rhs->type != NULL) {
         (new->type = rhs->type)->references ++;
-    else if (lhs->type != NULL && rhs->type != NULL)
+        propagate_type(lhs, new->type);
+    } else if (lhs->type != NULL && rhs->type != NULL)
         if (rhs->type->size > lhs->type->size)
             (new->type = rhs->type)->references ++;
         else
@@ -1414,6 +1560,10 @@ static struct node *parse_conditional_expression(
     return parse_logical_or_expression(state, scope);
 }
 
+static unsigned char are_types_compatible(struct type *a, struct type *b) {
+    return 0;
+}
+
 static struct node *parse_variable_assignment(
     struct lex_state *state,
     struct scope *scope,
@@ -1436,13 +1586,34 @@ static struct node *parse_variable_assignment(
     new->data.lvalue = variable;
     variable->references ++;
     new->type = variable->type;
-    new->references = 1; /* single reference is last_assignment */
+
     new->flags = NODE_IS_LVALUE;
     if (
-        variable->type->top == TOP_BASIC &&
-        variable->type->type.basic.type_specifier <= TY_LONG_LONG
+        (
+            variable->type->top == TOP_BASIC &&
+            variable->type->type.basic.type_specifier <= TY_LONG_LONG
+        ) || variable->type->top == TOP_POINTER
     )
         new->flags |= NODE_IS_ARITH_TYPE;
+
+    if (new->deps.single->type == NULL)
+        /* if the new value doesn't have an associated type, it gains the type
+         * of the variable */
+        propagate_type(new->deps.single, new->type);
+    else if (
+        (variable->flags & VAR_IS_ARITH_TYPE) !=
+        ((new->flags >> 1) & 1) /* isolate NODE_IS_ARITH_TYPE */
+    )
+        /* ensure both sides are or are not arithmetic types */
+        lex_error(state, type_mismatch);
+    else if (
+        !(new->flags & NODE_IS_ARITH_TYPE) &&
+        !are_types_compatible(new->type, new->deps.single->type)
+    )
+        /* ensure both non-arithmetic types are compatible */
+        lex_error(state, type_mismatch);
+
+    new->references = 1; /* single reference is last_assignment */
 
     if (variable->last_assignment != NULL) {
         variable->last_assignment->references --;
@@ -1473,6 +1644,9 @@ static struct node *parse_assignment_expression(
     struct node *lhs = parse_conditional_expression(state, scope);
     struct token t;
 
+    if (lhs == NULL)
+        return NULL;
+
     if (!lex(state, &t))
         return lhs;
 
@@ -1481,7 +1655,45 @@ static struct node *parse_assignment_expression(
             lex_error(state, bad_lvalue);
 
         if (lhs->data.lvalue != NULL)
+            /* parse assignment to variable */
             return parse_variable_assignment(state, scope, lhs->data.lvalue);
+
+        if (lhs->kind == N_DEREF) {
+            /* parse assignment to dereferenced value */
+            struct node *new, *rhs = parse_assignment_expression(state, scope);
+            if (rhs == NULL)
+                lex_error(state, expected_expression);
+
+            new = (struct node *) malloc(sizeof(struct node));
+            if (new == NULL) {
+                perror(malloc_failed);
+                exit(1);
+            }
+
+            new->kind = N_DEREF_ASSIGN;
+            new->references = 0;
+            new->prev = NULL;
+            new->type = rhs->type;
+            new->flags = 
+                NODE_HAS_SIDE_EFFECTS |
+                (rhs->flags & NODE_IS_ARITH_TYPE);
+
+            if (lhs->deps.single->kind == N_LITERAL) {
+                /* embed the constant value in the node itself */
+                new->data.literal = lhs->deps.single->data.literal;
+                new->deps.op.left = NULL;
+            } else {
+                /* reference the child of the deref node */
+                (new->deps.op.left = lhs->deps.single)->references ++;
+                free_node(lhs);
+                new->data.literal = 0;
+            }
+
+            rhs->references ++;
+            new->deps.op.right = rhs;
+
+            return new;
+        }
 
         lex_error(state, "other assignment expressions unimplemented");
     } else {
@@ -1578,6 +1790,14 @@ static char parse_declaration(struct lex_state *state, struct scope *scope) {
         variable->phi_list = NULL;
         variable->parent = NULL;
         variable->references = 1;
+        variable->flags = 0;
+        if (
+            (
+                type->top == TOP_BASIC &&
+                type->type.basic.type_specifier <= TY_LONG_LONG
+            ) || type->top == TOP_POINTER
+        )
+            variable->flags |= VAR_IS_ARITH_TYPE;
 
         if (!hashtable_insert(scope->variables, name, variable))
             lex_error(state, duplicate_variable);
@@ -1605,10 +1825,7 @@ static char parse_declaration(struct lex_state *state, struct scope *scope) {
             new->type = variable->type;
             new->references = 1; /* single reference is last_assignment */
             new->flags = NODE_IS_LVALUE;
-            if (
-                variable->type->top == TOP_BASIC &&
-                variable->type->type.basic.type_specifier <= TY_LONG_LONG
-            )
+            if (variable->flags & VAR_IS_ARITH_TYPE)
                 new->flags |= NODE_IS_ARITH_TYPE;
 
             variable->last_assignment = new;
@@ -1772,6 +1989,8 @@ static struct node *parse_statement(
                 lex_error(state, expected_semicolon);
 
             return new;
+        default:
+            lex_rewind(state);
     }
 
     /* expression-statement */
