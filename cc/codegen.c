@@ -161,10 +161,22 @@ void emit_return(struct node *node) {
     printf("rsr\n");
 }
 
+const char *get_register_name(unsigned char reg_num, unsigned int size) {
+    if (size == 1)
+        return half_reg_names[reg_num];
+    else if (size == 2)
+        return whole_reg_names[reg_num];
+    else {
+        fprintf(stderr, "size %d too big\n", size);
+        return "?";
+    }
+}
+
 void codegen(struct node *head) {
     struct cpu_state state;
     struct node *cur;
-    unsigned int reg_num;
+    unsigned char reg_num;
+    const char *name;
 
     for (reg_num = 0; reg_num < NUM_REGISTERS; reg_num ++)
         state.registers[reg_num].is_used = 0;
@@ -175,16 +187,18 @@ void codegen(struct node *head) {
     for (cur = head; cur != NULL; cur = cur->sorted_next) {
         switch (cur->kind) {
             case N_LITERAL:
-                reg_num = find_register(&state, cur, 2);
                 printf(
                     "ld %%%s, $%d\n",
-                    whole_reg_names[reg_num],
+                    get_register_name(
+                        find_register(&state, cur, cur->type->size),
+                        cur->type->size
+                    ),
                     cur->data.literal
                 );
                 break;
             case N_CALL:
                 /* TODO: save/restore all used registers */
-                save_register(&state, cur, 0, 2);
+                save_register(&state, cur, 0, cur->type->size);
                 printf("jsr %s\n", cur->data.tag);
                 break;
 
@@ -196,144 +210,189 @@ void codegen(struct node *head) {
                 emit_return(cur->deps.single);
                 break;
             case N_PRE_INC:
-                fprintf(stderr, "pre-increment unimplemented\n", cur->kind);
-                continue;
+                printf(
+                    "inr %%%s\n",
+                    get_register_name(
+                        consume_register(&state, cur->deps.single, cur),
+                        cur->type->size
+                    )
+                );
+                break;
             case N_PRE_DEC:
-                fprintf(stderr, "pre-decrement unimplemented\n", cur->kind);
-                continue;
+                printf(
+                    "dcr %%%s\n",
+                    get_register_name(
+                        consume_register(&state, cur->deps.single, cur),
+                        cur->type->size
+                    )
+                );
+                break;
             case N_REFERENCE:
-                fprintf(stderr, "reference unimplemented\n", cur->kind);
+                fprintf(stderr, "reference unimplemented\n");
                 continue;
             case N_DEREF:
-                fprintf(stderr, "deref unimplemented\n", cur->kind);
-                continue;
+                name = get_register_name(
+                    consume_register(&state, cur->deps.single, NULL),
+                    cur->type->size
+                );
+                printf(
+                    "ld %%%s, (%%%s)\n",
+                    get_register_name(
+                        find_register(&state, cur, cur->type->size),
+                        cur->type->size
+                    ),
+                    name
+                );
+                break;
             case N_NEGATE:
                 printf(
                     "ivr %%%s, 1\n",
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.single, cur)
-                    ]
+                    get_register_name(
+                        consume_register(&state, cur->deps.single, cur),
+                        cur->type->size
+                    )
                 );
                 break;
             case N_BITWISE_NOT:
                 printf(
                     "ivr %%%s\n",
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.single, cur)
-                    ]
+                    get_register_name(
+                        consume_register(&state, cur->deps.single, cur),
+                        cur->type->size
+                    )
                 );
                 break;
             case N_NOT:
-                fprintf(stderr, "logical not unimplemented\n", cur->kind);
+                fprintf(stderr, "logical not unimplemented\n");
+                continue;
+            case N_INC:
+                fprintf(stderr, "increment unimplemented\n");
+                continue;
+            case N_DEC:
+                fprintf(stderr, "decrement unimplemented\n");
                 continue;
 
             case N_MUL:
                 printf(
                     "mulu %%%s, %%%s\n",
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.op.left, NULL)
-                    ],
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.op.right, cur)
-                    ]
+                    get_register_name(
+                        consume_register(&state, cur->deps.op.left, NULL),
+                        cur->deps.op.left->type->size
+                    ),
+                    get_register_name(
+                        consume_register(&state, cur->deps.op.right, cur),
+                        cur->deps.op.right->type->size
+                    )
                 );
                 break;
             case N_DIV:
                 printf(
                     "divu %%%s, %%%s\n",
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.op.left, NULL)
-                    ],
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.op.right, cur)
-                    ]
+                    get_register_name(
+                        consume_register(&state, cur->deps.op.left, NULL),
+                        cur->deps.op.left->type->size
+                    ),
+                    get_register_name(
+                        consume_register(&state, cur->deps.op.right, cur),
+                        cur->deps.op.right->type->size
+                    )
                 );
                 break;
             case N_MOD:
             case N_ADD:
                 printf(
                     "add %%%s, %%%s\n",
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.op.left, NULL)
-                    ],
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.op.right, cur)
-                    ]
+                    get_register_name(
+                        consume_register(&state, cur->deps.op.left, NULL),
+                        cur->deps.op.left->type->size
+                    ),
+                    get_register_name(
+                        consume_register(&state, cur->deps.op.right, cur),
+                        cur->deps.op.right->type->size
+                    )
                 );
                 break;
             case N_SUB:
                 printf(
                     "sub %%%s, %%%s\n",
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.op.left, NULL)
-                    ],
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.op.right, cur)
-                    ]
+                    get_register_name(
+                        consume_register(&state, cur->deps.op.left, NULL),
+                        cur->deps.op.left->type->size
+                    ),
+                    get_register_name(
+                        consume_register(&state, cur->deps.op.right, cur),
+                        cur->deps.op.right->type->size
+                    )
                 );
                 break;
             case N_SHIFT_LEFT:
-                fprintf(stderr, "shift left unimplemented\n", cur->kind);
+                fprintf(stderr, "shift left unimplemented\n");
                 continue;
             case N_SHIFT_RIGHT:
-                fprintf(stderr, "shift right unimplemented\n", cur->kind);
+                fprintf(stderr, "shift right unimplemented\n");
                 continue;
             case N_LESS:
-                fprintf(stderr, "less than unimplemented\n", cur->kind);
+                fprintf(stderr, "less than unimplemented\n");
                 continue;
             case N_GREATER:
-                fprintf(stderr, "greater than unimplemented\n", cur->kind);
+                fprintf(stderr, "greater than unimplemented\n");
                 continue;
             case N_LESS_EQ:
-                fprintf(stderr, "less eq unimplemented\n", cur->kind);
+                fprintf(stderr, "less eq unimplemented\n");
                 continue;
             case N_GREATER_EQ:
-                fprintf(stderr, "greater eq unimplemented\n", cur->kind);
+                fprintf(stderr, "greater eq unimplemented\n");
                 continue;
             case N_EQUALS:
-                fprintf(stderr, "eq unimplemented\n", cur->kind);
+                fprintf(stderr, "eq unimplemented\n");
                 continue;
             case N_NOT_EQ:
-                fprintf(stderr, "not eq unimplemented\n", cur->kind);
+                fprintf(stderr, "not eq unimplemented\n");
                 continue;
             case N_BITWISE_AND:
                 printf(
                     "and %%%s, %%%s\n",
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.op.left, NULL)
-                    ],
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.op.right, cur)
-                    ]
+                    get_register_name(
+                        consume_register(&state, cur->deps.op.left, NULL),
+                        cur->deps.op.left->type->size
+                    ),
+                    get_register_name(
+                        consume_register(&state, cur->deps.op.right, cur),
+                        cur->deps.op.right->type->size
+                    )
                 );
                 break;
             case N_BITWISE_OR:
                 printf(
                     "ori %%%s, %%%s\n",
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.op.left, NULL)
-                    ],
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.op.right, cur)
-                    ]
+                    get_register_name(
+                        consume_register(&state, cur->deps.op.left, NULL),
+                        cur->deps.op.left->type->size
+                    ),
+                    get_register_name(
+                        consume_register(&state, cur->deps.op.right, cur),
+                        cur->deps.op.right->type->size
+                    )
                 );
                 break;
             case N_BITWISE_XOR:
                 printf(
                     "ore %%%s, %%%s\n",
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.op.left, NULL)
-                    ],
-                    whole_reg_names[
-                        consume_register(&state, cur->deps.op.right, cur)
-                    ]
+                    get_register_name(
+                        consume_register(&state, cur->deps.op.left, NULL),
+                        cur->deps.op.left->type->size
+                    ),
+                    get_register_name(
+                        consume_register(&state, cur->deps.op.right, cur),
+                        cur->deps.op.right->type->size
+                    )
                 );
                 break;
             case N_AND:
-                fprintf(stderr, "logical and unimplemented\n", cur->kind);
+                fprintf(stderr, "logical and unimplemented\n");
                 continue;
             case N_OR:
-                fprintf(stderr, "logical or unimplemented\n", cur->kind);
+                fprintf(stderr, "logical or unimplemented\n");
                 continue;
             case N_DEREF_ASSIGN:
                 /* this operation doesn't clobber the register, so there's no
@@ -349,17 +408,18 @@ void codegen(struct node *head) {
                     /* save to constant address */
                     printf(
                         "st %%%s, %llu\n",
-                        whole_reg_names[cur->reg_num],
+                        get_register_name(cur->reg_num, cur->type->size),
                         cur->data.literal
                     );
                 } else {
                     /* dereference register */
                     printf(
                         "st %%%s, (%%%s)\n",
-                        whole_reg_names[cur->reg_num],
-                        whole_reg_names[
-                            consume_register(&state, cur->deps.op.left, NULL)
-                        ]
+                        get_register_name(cur->reg_num, cur->type->size),
+                        get_register_name(
+                            consume_register(&state, cur->deps.op.left, NULL),
+                            cur->deps.op.left->type->size
+                        )
                     );
                 }
                 break;

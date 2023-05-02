@@ -205,6 +205,12 @@ static void label_node(struct node *node) {
         case N_PRE_DEC:
             printf("pre-decrement");
             break;
+        case N_INC:
+            printf("increment");
+            break;
+        case N_DEC:
+            printf("decrement");
+            break;
         case N_REFERENCE:
             printf("reference");
             break;
@@ -281,7 +287,7 @@ static void label_node(struct node *node) {
             printf("(unknown)");
             break;
     }
-    printf(" (%d, %d)", node->references, node->visits);
+    printf(" (r %d, v %d)", node->references, node->visits);
     printf("\"]");
 
     if (node->flags & NODE_HAS_SIDE_EFFECTS)
@@ -293,26 +299,32 @@ static void label_node(struct node *node) {
 static void debug_graph_recurse(struct node *node) {
     if (node->kind >= N_MUL) {
         /* handle 2 dependency nodes */
-        if (!(node->deps.op.left->flags & NODE_VISITED)) {
-            node->deps.op.left->flags |= NODE_VISITED;
-            label_node(node->deps.op.left);
-            debug_graph_recurse(node->deps.op.left);
+        if (node->deps.op.left != NULL) {
+            if (!(node->deps.op.left->flags & NODE_VISITED)) {
+                node->deps.op.left->flags |= NODE_VISITED;
+                label_node(node->deps.op.left);
+                debug_graph_recurse(node->deps.op.left);
+            }
+            printf("n%x -> n%x [label=left]; ", node, node->deps.op.left);
         }
-        if (!(node->deps.op.right->flags & NODE_VISITED)) {
-            node->deps.op.right->flags |= NODE_VISITED;
-            label_node(node->deps.op.right);
-            debug_graph_recurse(node->deps.op.right);
+        if (node->deps.op.right != NULL) {
+            if (!(node->deps.op.right->flags & NODE_VISITED)) {
+                node->deps.op.right->flags |= NODE_VISITED;
+                label_node(node->deps.op.right);
+                debug_graph_recurse(node->deps.op.right);
+            }
+            printf("n%x -> n%x [label=right]; ", node, node->deps.op.right);
         }
-        printf("n%x -> n%x [label=right]; ", node, node->deps.op.right);
-        printf("n%x -> n%x [label=left]; ", node, node->deps.op.left);
     } else if (node->kind >= N_LVALUE) {
         /* handle 1 dependency nodes */
-        if (!(node->deps.single->flags & NODE_VISITED)) {
-            node->deps.single->flags |= NODE_VISITED;
-            label_node(node->deps.single);
-            debug_graph_recurse(node->deps.single);
+        if (node->deps.single != NULL) {
+            if (!(node->deps.single->flags & NODE_VISITED)) {
+                node->deps.single->flags |= NODE_VISITED;
+                label_node(node->deps.single);
+                debug_graph_recurse(node->deps.single);
+            }
+            printf("n%x -> n%x; ", node, node->deps.single);
         }
-        printf("n%x -> n%x; ", node, node->deps.single);
     }
 
     if (node->prev != NULL) {
@@ -477,48 +489,156 @@ void free_variable(struct variable *variable) {
     free(variable);
 }
 
+struct node_list {
+    struct node *head;
+    struct node *tail;
+    unsigned int longest_path;
+};
+
+static void join_lists(struct node_list *a, struct node_list *b) {
+    if (a->tail == NULL) {
+        if (b->head != NULL) {
+            a->head = b->head;
+            a->tail = b->tail;
+        }
+        return;
+    } else if (b->head == NULL)
+        return;
+
+    (a->tail->sorted_next = b->head)->references ++;
+    a->tail = b->tail;
+}
+
+static void sort_2_lists(
+    struct node_list *parent,
+    struct node_list *a,
+    struct node_list *b
+) {
+    if (a->tail == NULL)
+        join_lists(parent, b);
+    else if (b->tail == NULL)
+        join_lists(parent, a);
+    else if (a->longest_path >= b->longest_path) {
+        join_lists(a, b);
+        join_lists(parent, a);
+    } else {
+        join_lists(b, a);
+        join_lists(parent, b);
+    }
+}
+
+/* modified version of https://stackoverflow.com/a/31939937 */
+static unsigned int sort_3_lists(
+    struct node_list *parent,
+    struct node_list *a,
+    struct node_list *b,
+    struct node_list *c
+) {
+    if (b->longest_path < c->longest_path) {
+        unsigned int longest = c->longest_path;
+
+        if (a->longest_path < c->longest_path) {
+            if (a->longest_path < b->longest_path) {
+                /* ordering is c, b, a */
+                join_lists(parent, c);
+                join_lists(parent, b);
+                join_lists(parent, a);
+            } else {
+                /* ordering is c, a, b */
+                join_lists(parent, c);
+                join_lists(parent, a);
+                join_lists(parent, b);
+            }
+        } else {
+            /* ordering is a, c, b */
+            join_lists(parent, a);
+            join_lists(parent, c);
+            join_lists(parent, b);
+        }
+
+        return longest;
+    } else {
+        unsigned int longest = b->longest_path;
+
+        if (a->longest_path < b->longest_path) {
+            if (a->longest_path < c->longest_path) {
+                /* ordering is b, c, a */
+                join_lists(parent, b);
+                join_lists(parent, c);
+                join_lists(parent, a);
+            } else {
+                /* ordering is b, a, c */
+                join_lists(parent, b);
+                join_lists(parent, a);
+                join_lists(parent, c);
+            }
+        } else {
+            /* ordering is a, b, c */
+            join_lists(parent, a);
+            join_lists(parent, b);
+            join_lists(parent, c);
+        }
+
+        return longest;
+    }
+}
+
 static void sort_visit(
     struct node *node,
-    struct node **head,
-    struct node **tail,
+    struct node_list *list,
     unsigned char ignore_visit
 ) {
+    struct node_list prev = { NULL, NULL, 0 };
+
     if (node == NULL)
         return;
 
     if (node->flags & NODE_VISITED) {
         if (!ignore_visit)
             node->visits ++;
+
         return;
     }
 
     if (node->prev != NULL)
-        sort_visit(node->prev, head, tail, 1);
+        sort_visit(node->prev, &prev, 1);
 
     if (node->kind >= N_MUL) {
         /* handle 2 dependency nodes */
-        sort_visit(node->deps.op.left, head, tail, 0);
-        sort_visit(node->deps.op.right, head, tail, 0);
-    } else if (node->kind >= N_LVALUE)
+        struct node_list left = { NULL, NULL, 0 }, right = { NULL, NULL, 0 };
+        sort_visit(node->deps.op.left, &left, 0);
+        sort_visit(node->deps.op.right, &right, 0);
+
+        list->longest_path = sort_3_lists(list, &prev, &left, &right) + 1;
+    } else if (node->kind >= N_LVALUE) {
         /* handle 1 dependency nodes */
-        sort_visit(node->deps.single, head, tail, 0);
+        struct node_list dep = { NULL, NULL, 0 };
+        sort_visit(node->deps.single, &dep, 0);
+
+        sort_2_lists(list, &prev, &dep);
+        list->longest_path = dep.longest_path + 1;
+    } else {
+        join_lists(list, &prev);
+        list->longest_path = 1;
+    }
 
     node->flags |= NODE_VISITED;
     node->visits = !ignore_visit;
-    if (*tail == NULL)
-        *head = node;
+
+    if (list->tail == NULL)
+        list->head = list->tail = node;
     else
-        (*tail)->sorted_next = node;
-    *tail = node;
+        (list->tail->sorted_next = node)->references ++;
+    list->tail = node;
 }
 
 struct node *topological_sort(struct node *node) {
-    struct node *head, *tail = NULL;
+    struct node_list list = { NULL, NULL, 0 };
 
     if (node == NULL)
         return NULL;
 
     node->sorted_next = NULL;
-    sort_visit(node, &head, &tail, 1);
-    return head;
+    sort_visit(node, &list, 1);
+    return list.head;
 }

@@ -788,6 +788,23 @@ const char *bad_lvalue = "assignment left-hand side must be an lvalue";
 const char *expected_statement = "expected statement";
 const char *type_mismatch = "type mismatch";
 
+static struct node *get_value(struct node *node) {
+    struct node *first = node;
+
+    while (node->kind == N_LVALUE)
+        if (node->deps.single == NULL)
+            return node;
+        else
+            node = node->deps.single;
+
+    /* add a reference to ensure the resulting node won't be freed */
+    node->references ++;
+    free_node(first);
+    node->references --;
+
+    return node;
+}
+
 static struct node *parse_assignment_expression(
     struct lex_state *state,
     struct scope *scope
@@ -929,27 +946,7 @@ static struct node *parse_primary_expression(
     return new;
 }
 
-/* primary-expression
- * postfix-expression [expression] 
- * postfix-expression (argument-expression-list<opt>) 
- * postfix-expression . identifier
- * postfix-expression -> identifier
- * postfix-expression ++ 
- * postfix-expression -- */
-static struct node *parse_postfix_expression(
-    struct lex_state *state,
-    struct scope *scope
-) {
-    /* TODO: handle array/struct/union indexing, increment and decrement */
-    return parse_primary_expression(state, scope);
-}
-
-struct node *parse_cast_expression(
-    struct lex_state *state,
-    struct scope *scope
-);
-
-static struct node *parse_arith_unary(
+static struct node *make_unary_node(
     struct lex_state *state,
     struct scope *scope,
     struct node *child,
@@ -958,6 +955,8 @@ static struct node *parse_arith_unary(
     struct node *parent;
     if (child == NULL)
         lex_error(state, expected_expression);
+
+    child = get_value(child);
 
     if (!(child->flags & NODE_IS_ARITH_TYPE))
         lex_error(state, bad_operands);
@@ -978,6 +977,46 @@ static struct node *parse_arith_unary(
 
     return parent;
 }
+
+/* primary-expression
+ * postfix-expression [expression] 
+ * postfix-expression (argument-expression-list<opt>) 
+ * postfix-expression . identifier
+ * postfix-expression -> identifier
+ * postfix-expression ++ 
+ * postfix-expression -- */
+static struct node *parse_postfix_expression(
+    struct lex_state *state,
+    struct scope *scope
+) {
+    struct node *node = parse_primary_expression(state, scope);
+    struct token t;
+
+    if (!lex(state, &t))
+        return node;
+
+    switch (t.kind) {
+        case T_OPEN_BRACKET:
+            lex_error(state, "indexing unimplemented");
+        case T_OPEN_PAREN:
+            lex_error(state, "function call unimplemented");
+        case T_PERIOD:
+        case T_ARROW:
+            lex_error(state, "field access unimplemented");
+        case T_INCREMENT:
+            return make_unary_node(state, scope, node, N_INC);
+        case T_DECREMENT:
+            return make_unary_node(state, scope, node, N_DEC);
+        default:
+            lex_rewind(state);
+            return node;
+    }
+}
+
+struct node *parse_cast_expression(
+    struct lex_state *state,
+    struct scope *scope
+);
 
 static struct node *parse_unary_expression(
     struct lex_state *state,
@@ -1048,14 +1087,14 @@ static struct node *parse_unary_expression(
 
     switch (t.kind) {
         case T_INCREMENT:
-            return parse_arith_unary(
+            return make_unary_node(
                 state,
                 scope,
                 parse_unary_expression(state, scope),
                 N_PRE_INC
             );
         case T_DECREMENT:
-            return parse_arith_unary(
+            return make_unary_node(
                 state,
                 scope,
                 parse_unary_expression(state, scope),
@@ -1065,7 +1104,7 @@ static struct node *parse_unary_expression(
             /* TODO: handle reference operator */
             lex_error(state, "reference unimplemented");
         case T_ASTERISK:
-            temp = parse_arith_unary(
+            temp = make_unary_node(
                 state,
                 scope,
                 parse_cast_expression(state, scope),
@@ -1080,26 +1119,27 @@ static struct node *parse_unary_expression(
             if (temp == NULL)
                 lex_error(state, expected_expression);
 
+            temp = get_value(temp);
             if (!(temp->flags & NODE_IS_ARITH_TYPE))
                 lex_error(state, bad_operands);
 
             return temp;
         case T_MINUS:
-            return parse_arith_unary(
+            return make_unary_node(
                 state,
                 scope,
                 parse_cast_expression(state, scope),
                 N_NEGATE
             );
         case T_BITWISE_NOT:
-            return parse_arith_unary(
+            return make_unary_node(
                 state,
                 scope,
                 parse_cast_expression(state, scope),
                 N_BITWISE_NOT
             );
         case T_LOGICAL_NOT:
-            return parse_arith_unary(
+            return make_unary_node(
                 state,
                 scope,
                 parse_cast_expression(state, scope),
@@ -1149,6 +1189,9 @@ static struct node *lhs_rhs_to_node(
 
     if (rhs == NULL)
         lex_error(state, expected_expression);
+
+    lhs = get_value(lhs);
+    rhs = get_value(rhs);
 
     if (
         !(lhs->flags & NODE_IS_ARITH_TYPE) ||
@@ -1569,19 +1612,20 @@ static struct node *parse_variable_assignment(
     struct scope *scope,
     struct variable *variable
 ) {
-    struct node *new = (struct node *) malloc(sizeof(struct node));
+    struct node *new = (struct node *) malloc(sizeof(struct node)), *child;
     if (new == NULL) {
         perror(malloc_failed);
         exit(1);
     }
 
     new->kind = N_LVALUE;
-    if (
-        (new->deps.single = parse_assignment_expression(state, scope))
-        == NULL
-    )
+
+    child = get_value(parse_assignment_expression(state, scope));
+    if (child == NULL)
         lex_error(state, expected_expression);
-    new->deps.single->references ++;
+    child->references ++;
+    new->deps.single = child;
+
     new->prev = NULL;
     new->data.lvalue = variable;
     variable->references ++;
@@ -1660,7 +1704,8 @@ static struct node *parse_assignment_expression(
 
         if (lhs->kind == N_DEREF) {
             /* parse assignment to dereferenced value */
-            struct node *new, *rhs = parse_assignment_expression(state, scope);
+            struct node *new, *rhs =
+                get_value(parse_assignment_expression(state, scope));
             if (rhs == NULL)
                 lex_error(state, expected_expression);
 
@@ -1678,16 +1723,18 @@ static struct node *parse_assignment_expression(
                 NODE_HAS_SIDE_EFFECTS |
                 (rhs->flags & NODE_IS_ARITH_TYPE);
 
+#if 0
             if (lhs->deps.single->kind == N_LITERAL) {
                 /* embed the constant value in the node itself */
                 new->data.literal = lhs->deps.single->data.literal;
                 new->deps.op.left = NULL;
             } else {
+#endif
                 /* reference the child of the deref node */
                 (new->deps.op.left = lhs->deps.single)->references ++;
                 free_node(lhs);
                 new->data.literal = 0;
-            }
+            /*}*/
 
             rhs->references ++;
             new->deps.op.right = rhs;
@@ -2000,6 +2047,6 @@ static struct node *parse_statement(
 #include "codegen.h"
 
 int parse(struct lex_state *state) {
-    codegen(topological_sort(parse_statement(state, NULL)));
+    debug_sorted(topological_sort(parse_statement(state, NULL)));
     return 0;
 }

@@ -117,6 +117,8 @@ enum node_kind {
     N_NEGATE,
     N_BITWISE_NOT,
     N_NOT,
+    N_INC,
+    N_DEC,
     /* 2 dependencies */
     N_MUL,
     N_DIV,
