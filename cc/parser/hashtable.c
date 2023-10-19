@@ -9,9 +9,9 @@
  * null byte
  * returns the length of the string including the null terminator to make
  * duplicating it easier, since it avoids a strlen call */
-unsigned int hash_string(const char *string, unsigned long *value) {
+size_t hash_string(const char *string, uint32_t *value) {
     char c;
-    unsigned int length = 1;
+    size_t length = 1;
     *value = 0x811c9dc5;
     while (c = *(string ++)) {
         *value ^= c;
@@ -22,13 +22,13 @@ unsigned int hash_string(const char *string, unsigned long *value) {
 }
 
 void hashtable_init(struct hashtable *table) {
-    unsigned int i = 0;
+    size_t i = 0;
     for (; i < NUM_BUCKETS; i ++)
         table->buckets[i] = NULL;
 }
 
 void hashtable_free(struct hashtable *table, void (*free_value)(void *value)) {
-    unsigned int i = 0;
+    size_t i = 0;
     struct bucket *current;
     struct bucket *next;
     for (; i < NUM_BUCKETS; i ++)
@@ -50,8 +50,8 @@ void hashtable_free(struct hashtable *table, void (*free_value)(void *value)) {
 }
 
 char hashtable_insert(struct hashtable *table, const char *key, void *value) {
-    unsigned long hash_value;
-    unsigned int length;
+    uint32_t hash_value;
+    uint16_t length;
     struct bucket *bucket;
 
     length = hash_string(key, &hash_value);
@@ -101,7 +101,7 @@ char hashtable_insert(struct hashtable *table, const char *key, void *value) {
 void *hashtable_lookup_hashed(
     struct hashtable *table,
     const char *key,
-    unsigned long hash_value
+    uint32_t hash_value
 ) {
     struct bucket *bucket = table->buckets[hash_value % NUM_BUCKETS];
 
@@ -121,7 +121,7 @@ void *hashtable_lookup_hashed(
 }
 
 void *hashtable_lookup(struct hashtable *table, const char *key) {
-    unsigned long hash_value;
+    uint32_t hash_value;
     hash_string(key, &hash_value);
     return hashtable_lookup_hashed(table, key, hash_value);
 }

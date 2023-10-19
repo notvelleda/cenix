@@ -1,6 +1,9 @@
 #ifndef LEXER_H
 #define LEXER_H
 
+#include <stdint.h>
+#include <sys/types.h>
+
 /* list of all kinds of tokens we understand */
 enum token_kind {
     /* an identifier/keyword/type/etc */
@@ -122,11 +125,11 @@ struct token {
     /* what kind of token this is */
     enum token_kind kind;
     /* start of the token in the file */
-    long file_start;
+    off_t file_start;
     /* end of the token in the file */
-    long file_end;
+    off_t file_end;
     /* the line number this token is located on */
-    unsigned int line;
+    uint16_t line;
 };
 
 /* the state of the lexer */
@@ -134,7 +137,7 @@ struct lex_state {
     /* the stream currently being lexed */
     FILE *stream;
     /* the line number the lexer is on, useful for error messages */
-    unsigned int line;
+    uint16_t line;
     /* the name of the file being lexed */
     char *filename;
     /* whether the current token should be repeated */
@@ -154,5 +157,18 @@ char lex(struct lex_state *state, struct token *out);
 
 /* tells the lexer to repeat the current token */
 void lex_rewind(struct lex_state *state);
+
+/* given a token, read the area in the file it points to into a newly allocated
+ * null terminated string and return it */
+char *token_to_string(struct lex_state *state, struct token *t);
+
+/* given a token, read the area in the file it points to and parse it into a
+ * number of the given base, up to base 16 */
+/* TODO: add binary notation (0b...) support since it'll be easy */
+uint32_t token_to_number(
+    struct lex_state *state,
+    struct token *t,
+    uint32_t base
+);
 
 #endif

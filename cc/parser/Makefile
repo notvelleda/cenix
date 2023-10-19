@@ -1,9 +1,9 @@
 CC=cc
-CFLAGS=-I. -I../include -std=c89
+CFLAGS=-I. -I../include -std=c89 -Os
 LDFLAGS=
 
-BINARY=cc
-OBJECTS=lexer.o main.o parser.o hashtable.o ir.o codegen.o
+BINARY=parser
+OBJECTS=lexer.o main.o parser.o hashtable.o ir.o type.o output.o
 
 all: ${BINARY}
 

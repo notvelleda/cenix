@@ -561,3 +561,59 @@ char lex(struct lex_state *state, struct token *out) {
 void lex_rewind(struct lex_state *state) {
     state->repeat = 1;
 }
+
+static const char *malloc_failed = "failed to allocate memory";
+
+char *token_to_string(struct lex_state *state, struct token *t) {
+    char *string;
+    size_t len, len2;
+    off_t current;
+
+    len = t->file_end - t->file_start;
+    string = (char *) malloc(len + 1);
+    if (string == NULL) {
+        perror(malloc_failed);
+        exit(1);
+    }
+
+    current = ftell(state->stream);
+    fseek(state->stream, t->file_start, SEEK_SET);
+    if ((len2 = fread(string, 1, len, state->stream)) != len) {
+        free(string);
+        return NULL;
+    }
+    string[len] = 0;
+    fseek(state->stream, current, SEEK_SET);
+
+    return string;
+}
+
+uint32_t token_to_number(
+    struct lex_state *state,
+    struct token *t,
+    uint32_t base
+) {
+    uint32_t result = 0;
+    off_t len, i = 0;
+    char c;
+
+    len = t->file_end - t->file_start;
+
+    fseek(state->stream, t->file_start, SEEK_SET);
+
+    for (; i < len; i ++) {
+        if (!fread(&c, 1, 1, state->stream))
+            lex_error(state, "what the fuck");
+
+        result *= base;
+
+        if (isdigit(c))
+            result += c - '0';
+        else if (c >= 'a' && c <= 'f')
+            result += c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F')
+            result += c - 'A' + 10;
+    }
+
+    return result;
+}

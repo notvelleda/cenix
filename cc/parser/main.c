@@ -2,19 +2,20 @@
 
 #include <libgen.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "lexer.h"
 #include "parser.h"
 #include "ir.h"
-
-#include <stdlib.h>
 #include "hashtable.h"
+#include "output.h"
 
 int main(int argc, char **argv) {
     /*struct token the_token;*/
     struct lex_state state;
+    FILE *output_file;
 
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s <filename>\n", argv[0]);
+    if (argc != 3) {
+        fprintf(stderr, "usage: %s <input file> <output file>\n", argv[0]);
         return 1;
     }
 
@@ -24,8 +25,13 @@ int main(int argc, char **argv) {
         fprintf(stderr, "failed to open %s\n", argv[1]);
         return 1;
     }
+    if (!(output_file = fopen(argv[2], "w"))) {
+        fprintf(stderr, "failed to open %s\n", argv[1]);
+        return 1;
+    }
     /*while (lex(&state, &the_token))
         printf("%d: %d - %d\n", the_token.kind, the_token.file_start, the_token.file_end);*/
+    set_output_file(output_file);
     parse(&state);
     fclose(state.stream);
 

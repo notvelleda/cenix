@@ -3,187 +3,7 @@
 #include <stdlib.h>
 #include "ir.h"
 
-static void print_type_internal(
-    struct type *type,
-    const char *name,
-    unsigned char indent,
-    char do_indent
-) {
-    unsigned char i;
-    struct function_type *f;
-    if (do_indent)
-        for (i = 0; i < indent; i ++)
-            printf(" ");
-
-    if (type == NULL) {
-        printf("(null pointer)\n");
-        return;
-    }
-
-    switch (type->top) {
-        case TOP_BASIC:
-            switch (type->type.basic.storage_class) {
-                case C_EXTERN:
-                    printf("extern ");
-                    break;
-                case C_STATIC:
-                    printf("static ");
-                    break;
-            }
-            if (type->type.basic.const_qualified)
-                printf("const ");
-            if (type->type.basic.volatile_qualified)
-                printf("volatile ");
-            switch (type->type.basic.sign_specifier) {
-                case S_SIGNED:
-                    printf("signed ");
-                    break;
-                case S_UNSIGNED:
-                    printf("unsigned ");
-                    break;
-            }
-            switch (type->type.basic.type_specifier) {
-                case TY_VOID:
-                    printf("void ");
-                    break;
-                case TY_CHAR:
-                    printf("char ");
-                    break;
-                case TY_SHORT:
-                    printf("short ");
-                    break;
-                case TY_INT:
-                    printf("int ");
-                    break;
-                case TY_LONG:
-                    printf("long ");
-                    break;
-                case TY_LONG_LONG:
-                    printf("long long ");
-                    break;
-                case TY_STRUCT:
-                case TY_UNION:
-                    printf(
-                        type->type.basic.type_specifier == TY_STRUCT ?
-                        "struct " : "union "
-                    );
-                    if (type->type.basic.has_fields) {
-                        struct struct_union_field *current =
-                            type->type.basic.name_field_ptr;
-
-                        printf("{\n");
-                        for (; current != NULL; current = current->next) {
-                            print_type_internal(
-                                current->type,
-                                current->name,
-                                indent + 4,
-                                1
-                            );
-                        }
-                        for (i = 0; i < indent; i ++)
-                            printf(" ");
-                        printf("} ");
-                    } else
-                        printf("%s ", type->type.basic.name_field_ptr);
-                    break;
-                case TY_ENUM:
-                    break;
-            }
-            if (name == NULL)
-                printf("(unnamed)\n");
-            else
-                printf("`%s'\n", name);
-            break;
-        case TOP_ARRAY:
-            printf("array[%d] -> ", type->type.derived.type.array.length);
-            print_type_internal(type->type.derived.derivation, name, indent, 0);
-            break;
-        case TOP_POINTER:
-            if (type->type.derived.type.pointer.const_qualified)
-                printf("const ");
-            if (type->type.derived.type.pointer.volatile_qualified)
-                printf("volatile ");
-            printf("pointer -> ");
-            print_type_internal(type->type.derived.derivation, name, indent, 0);
-            break;
-        case TOP_FUNCTION:
-            printf("function (\n");
-            for (f = type->type.derived.type.function; f != NULL; f = f->next)
-                print_type_internal(f->type, f->name, indent + 4, 1);
-            for (i = 0; i < indent; i ++)
-                printf(" ");
-            printf(") -> ");
-            print_type_internal(type->type.derived.derivation, name, indent, 0);
-            break;
-    }
-}
-
-void print_type(struct type *type, const char *name) {
-    print_type_internal(type, name, 0, 0);
-}
-
-void free_type(struct type *type) {
-    struct type *next = type;
-
-    while (next != NULL) {
-        if (type->references != 0)
-            break;
-
-        if (type->top == TOP_BASIC)
-            next = NULL;
-        else
-            next = type->type.derived.derivation;
-
-        if (type->top == TOP_BASIC) {
-            /* free struct/union field names/types */
-            if (type->type.basic.name_field_ptr != NULL)
-                if (type->type.basic.has_fields) {
-                    struct struct_union_field *current =
-                        type->type.basic.name_field_ptr,
-                        *next;
-
-                    while (current != NULL) {
-                        next = current->next;
-
-                        current->type->references --;
-                        free_type(current->type);
-
-                        if (current->name != NULL)
-                            free((void *) current->name);
-
-                        free(current);
-
-                        current = next;
-                    }
-                } else
-                    free(type->type.basic.name_field_ptr);
-        } else if (type->top == TOP_FUNCTION) {
-            /* free function argument names/types */
-            struct function_type *current =
-                type->type.derived.type.function,
-                *next;
-
-            while (current != NULL) {
-                next = current->next;
-
-                current->type->references --;
-                free_type(current->type);
-
-                if (current->name != NULL)
-                    free((void *) current->name);
-
-                free(current);
-
-                current = next;
-            }
-        }
-
-        free(type);
-
-        type = next;
-    }
-}
-
+#if 0
 static void label_node(struct node *node) {
     printf("n%x [label=\"", node);
     switch (node->kind) {
@@ -193,23 +13,8 @@ static void label_node(struct node *node) {
         case N_CALL:
             printf("call %s", node->data.tag);
             break;
-        case N_LVALUE:
-            printf("lvalue");
-            break;
         case N_RETURN:
             printf("return");
-            break;
-        case N_PRE_INC:
-            printf("pre-increment");
-            break;
-        case N_PRE_DEC:
-            printf("pre-decrement");
-            break;
-        case N_INC:
-            printf("increment");
-            break;
-        case N_DEC:
-            printf("decrement");
             break;
         case N_REFERENCE:
             printf("reference");
@@ -315,7 +120,7 @@ static void debug_graph_recurse(struct node *node) {
             }
             printf("n%x -> n%x [label=right]; ", node, node->deps.op.right);
         }
-    } else if (node->kind >= N_LVALUE) {
+    } else if (node->kind >= N_RETURN) {
         /* handle 1 dependency nodes */
         if (node->deps.single != NULL) {
             if (!(node->deps.single->flags & NODE_VISITED)) {
@@ -371,7 +176,7 @@ void debug_sorted(struct node *node) {
                 cur,
                 cur->deps.op.left
             );
-        } else if (cur->kind >= N_LVALUE)
+        } else if (cur->kind >= N_RETURN)
             /* handle 1 dependency nodes */
             printf("n%x -> n%x [constraint=false]; ", cur, cur->deps.single);
 
@@ -409,7 +214,7 @@ void free_node(struct node *node) {
             next = node->deps.op.left;
             node->deps.op.right->references --;
             free_node(node->deps.op.right);
-        } else if (node->kind >= N_LVALUE)
+        } else if (node->kind >= N_RETURN)
             /* handle 1 dependency nodes */
             next = node->deps.single;
 
@@ -428,10 +233,6 @@ void free_node(struct node *node) {
 
         if (node->kind == N_CALL)
             free((void *) node->data.tag);
-        else if (node->kind == N_LVALUE) {
-            node->data.lvalue->references --;
-            free_variable(node->data.lvalue);
-        }
 
         free(node);
 
@@ -463,10 +264,6 @@ void free_variable(struct variable *variable) {
     if (variable->type != NULL) {
         variable->type->references --;
         free_type(variable->type);
-    }
-    if (variable->first_load != NULL) {
-        variable->first_load->references --;
-        free_node(variable->first_load);
     }
     if (variable->last_assignment != NULL) {
         variable->last_assignment->references --;
@@ -610,7 +407,7 @@ static void sort_visit(
         sort_visit(node->deps.op.right, &right, 0);
 
         list->longest_path = sort_3_lists(list, &prev, &left, &right) + 1;
-    } else if (node->kind >= N_LVALUE) {
+    } else if (node->kind >= N_RETURN) {
         /* handle 1 dependency nodes */
         struct node_list dep = { NULL, NULL, 0 };
         sort_visit(node->deps.single, &dep, 0);
@@ -642,3 +439,4 @@ struct node *topological_sort(struct node *node) {
     sort_visit(node, &list, 1);
     return list.head;
 }
+#endif
