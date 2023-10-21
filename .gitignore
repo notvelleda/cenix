@@ -1,7 +1,7 @@
 **/*.o
-as/as
-as/lex.yy.c
-as/y.tab.*
-cc/cc
-ld/ld
+toolchain/as/as
+toolchain/as/lex.yy.c
+toolchain/as/y.tab.*
+toolchain/cc/cc
+toolchain/ld/ld
 kernel/kernel
