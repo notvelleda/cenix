@@ -4,3 +4,4 @@ as/lex.yy.c
 as/y.tab.*
 cc/cc
 ld/ld
+kernel/kernel
