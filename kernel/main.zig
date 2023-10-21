@@ -1,7 +1,8 @@
-const builtin = @import("builtin");
+const std = @import("std");
 
 export fn kmain() callconv(.C) void {
     puts("HellOwOrld\n");
+    @panic(":3c");
 }
 
 inline fn outb(addr: u16, data: u8) void {
@@ -29,12 +30,13 @@ inline fn inb(addr: u16) u8 {
 }
 
 fn exit(code: u32) noreturn {
+    @setCold(true);
     outl(0x501, code);
     while (true)
         asm volatile ("cli; hlt");
 }
 
-fn putchar(c: u8) void {
+fn putc(c: u8) void {
     while ((inb(0x3f8 + 5) & 0x20) == 0) {}
     outb(0x3f8, c);
     outb(0xe9, c);
@@ -42,12 +44,25 @@ fn putchar(c: u8) void {
 
 fn puts(s: []const u8) void {
     for (s) |c|
-        putchar(c);
+        putc(c);
 }
 
-export fn memset(ptr: [*]u8, value: c_int, num: usize) [*]u8 {
-    var i: usize = 0;
-    while (i < num) : (i += 1)
-        ptr[i] = @intCast(u8, value);
+export fn memset(ptr: [*c]u8, value: c_int, num: usize) [*c]u8 {
+    var actual_ptr = ptr;
+    for (0..num) |_| {
+        actual_ptr.* = @intCast(value);
+        actual_ptr += 1;
+    }
     return ptr;
+}
+
+pub fn panic(message: []const u8, stack_trace: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
+    @setCold(true);
+    _ = stack_trace;
+    _ = addr;
+
+    puts("PANIC: ");
+    puts(message);
+    putc('\n');
+    exit(0x31);
 }

@@ -1,5 +1,5 @@
 LDFLAGS += -melf_i386 -Tkernel.ld
-ZIGFLAGS += -target i386-freestanding -fno-stack-check -O ReleaseSmall
+ZIGFLAGS += -target x86-freestanding -fno-stack-check -O ReleaseSmall
 ASFLAGS += -32 -march=i386
 
 OBJECTS = main.o init.o
