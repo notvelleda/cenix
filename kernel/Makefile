@@ -2,11 +2,8 @@ LDFLAGS += -melf_i386 -Tkernel.ld
 ZIGFLAGS += -target x86-freestanding -fno-stack-check -O ReleaseSmall
 ASFLAGS += -32 -march=i386
 
-OBJECTS = main.o init.o
+OBJECTS = src/main.o src/init.o
 BINARY = kernel
-
-.PHONY: all
-all: $(BINARY)
 
 $(BINARY): $(OBJECTS)
 	$(LD) $(LDFLAGS) $(OBJECTS) -o $(BINARY)
@@ -14,9 +11,9 @@ $(BINARY): $(OBJECTS)
 %.o: %.S
 	$(AS) $(ASFLAGS) $< -o $@
 
-%.o: %.zig
-	zig build-obj $< $(ZIGFLAGS)
+src/main.o: src/main.zig
+	cd src && zig build-obj main.zig $(ZIGFLAGS)
 
 .PHONY: clean
 clean:
-	rm -f $(OBJECTS) $(BINARY) *.o.o
+	rm -f $(OBJECTS) $(BINARY) src/main.o.o
