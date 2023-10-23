@@ -1,45 +1,25 @@
 const std = @import("std");
+const io = @import("arch/i386/io.zig");
+const interrupts = @import("arch/i386/interrupts.zig");
 
 export fn kmain() callconv(.C) void {
     puts("HellOwOrld\n");
+    interrupts.initIDT();
+    asm volatile ("int3");
     @panic(":3c");
-}
-
-inline fn outb(addr: u16, data: u8) void {
-    asm volatile ("outb %[data], %[addr]"
-        :
-        : [addr] "{dx}" (addr), [data] "{al}" (data)
-        : "dx", "al"
-    );
-}
-
-inline fn outl(addr: u16, data: u32) void {
-    asm volatile ("outl %[data], %[addr]"
-        :
-        : [addr] "{dx}" (addr), [data] "{eax}" (data)
-        : "dx", "al"
-    );
-}
-
-inline fn inb(addr: u16) u8 {
-    return asm volatile ("inb %[addr], %[ret]"
-        : [ret] "={al}" (-> u8)
-        : [addr] "{dx}" (addr)
-        : "dx", "al"
-    );
 }
 
 fn exit(code: u32) noreturn {
     @setCold(true);
-    outl(0x501, code);
+    io.outl(0x501, code);
     while (true)
         asm volatile ("cli; hlt");
 }
 
 fn putc(c: u8) void {
-    while ((inb(0x3f8 + 5) & 0x20) == 0) {}
-    outb(0x3f8, c);
-    outb(0xe9, c);
+    while ((io.inb(0x3f8 + 5) & 0x20) == 0) {}
+    io.outb(0x3f8, c);
+    io.outb(0xe9, c);
 }
 
 fn puts(s: []const u8) void {
