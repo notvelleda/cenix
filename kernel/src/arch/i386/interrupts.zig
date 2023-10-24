@@ -1,3 +1,6 @@
+const std = @import("std");
+const io = @import("io.zig");
+
 // http://www.jamesmolloy.co.uk/tutorial_html/4.-The%20GDT%20and%20IDT.html
 const IDTEntry = packed struct {
     base_lo: u16,   // The lower 16 bits of the address to jump to when this interrupt fires.
@@ -169,6 +172,61 @@ pub fn initIDT() void {
     );
 }
 
+// https://wiki.osdev.org/Exceptions
+const interrupt_names: [32][]const u8 = .{
+    "division error",
+    "debug",
+    "non-maskable interrupt",
+    "breakpoint",
+    "overflow",
+    "bound range exceeded",
+    "invalid opcode",
+    "device not available",
+    "double fault",
+    "coprocessor segment overrun",
+    "invalid TSS",
+    "segment not present",
+    "stack segment fault",
+    "general protection fault",
+    "page fault",
+    "reserved",
+    "x87 floating point exception",
+    "alignment check",
+    "machine check",
+    "SIMD floating point exception",
+    "virtualization exception",
+    "control protection exception",
+    "reserved",
+    "reserved",
+    "reserved",
+    "reserved",
+    "reserved",
+    "reserved",
+    "hypervisor injection exception",
+    "VMM communication exception",
+    "security exception",
+    "reserved",
+};
+
+fn getExceptionName(exception: u32) []const u8 {
+    if (exception < 32)
+        return interrupt_names[exception];
+
+    return "unknown";
+}
+
 export fn isrHandler(registers: IntRegisters) callconv(.C) void {
-    _ = registers;
+    if (registers.int_no == 3) {
+        std.log.info("breakpoint interrupt!", .{});
+        return;
+    }
+
+    if (registers.int_no < 32) {
+        std.log.err("fatal exception {x:0>8} ({s}) at {x:0>8}, error code {x:0>8}", .{registers.int_no, getExceptionName(registers.int_no), registers.eip, registers.error_code});
+        std.log.err("eax = {x:0>8}, ebx = {x:0>8}, ecx = {x:0>8}, edx = {x:0>8}", .{registers.eax, registers.ebx, registers.ecx, registers.edx});
+        std.log.err("esi = {x:0>8}, edi = {x:0>8}, ebp = {x:0>8}, esp = {x:0>8}", .{registers.esi, registers.edi, registers.ebp, registers.esp});
+        std.log.err("eip = {x:0>8}, eflags = {x:0>8}", .{registers.eip, registers.eflags});
+        std.log.err("cs = {x:0>4}, ds = {x:0>4}, ss = {x:0>4}", .{registers.cs & 0xffff, registers.ds & 0xffff, registers.ss & 0xffff});
+        @panic("fatal exception in kernel mode");
+    }
 }
