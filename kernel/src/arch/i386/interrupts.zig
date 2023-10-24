@@ -161,6 +161,26 @@ pub fn initIDT() void {
     IDT[46] = makeIDTEntry(@intFromPtr(&isr46), 0x08, 0x8e);
     IDT[47] = makeIDTEntry(@intFromPtr(&isr47), 0x08, 0x8e);
 
+    // reset PICs
+    io.outb(0x20, 0x11);
+    io.outb(0xa0, 0x11);
+
+    // map primary PIC to interrupt 0x20-0x27
+    io.outb(0x21, 0x20);
+
+    // map secondary PIC to interrupt 0x28-0x2f
+    io.outb(0xa1, 0x28);
+
+    // set up cascading
+    io.outb(0x21, 0x04);
+    io.outb(0xa1, 0x02);
+
+    io.outb(0x21, 0x01);
+    io.outb(0xa1, 0x01);
+
+    io.outb(0x21, 0x0);
+    io.outb(0xa1, 0x0);
+
     var idt_ptr = IDTPtr {
         .limit = @sizeOf(IDTEntry) * IDTEntries - 1,
         .base = @intFromPtr(&IDT),
