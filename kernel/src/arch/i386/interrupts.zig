@@ -229,24 +229,27 @@ const interrupt_names: [32][]const u8 = .{
 };
 
 fn getExceptionName(exception: u32) []const u8 {
-    if (exception < 32)
+    if (exception < 32) {
         return interrupt_names[exception];
-
-    return "unknown";
+    } else {
+        return "unknown";
+    }
 }
+
+const log_scope = std.log.scoped(.arch);
 
 export fn isrHandler(registers: IntRegisters) callconv(.C) void {
     if (registers.int_no == 3) {
-        std.log.info("breakpoint interrupt!", .{});
+        log_scope.info("breakpoint interrupt!", .{});
         return;
     }
 
     if (registers.int_no < 32) {
-        std.log.err("fatal exception {x:0>8} ({s}) at {x:0>8}, error code {x:0>8}", .{registers.int_no, getExceptionName(registers.int_no), registers.eip, registers.error_code});
-        std.log.err("eax = {x:0>8}, ebx = {x:0>8}, ecx = {x:0>8}, edx = {x:0>8}", .{registers.eax, registers.ebx, registers.ecx, registers.edx});
-        std.log.err("esi = {x:0>8}, edi = {x:0>8}, ebp = {x:0>8}, esp = {x:0>8}", .{registers.esi, registers.edi, registers.ebp, registers.esp});
-        std.log.err("eip = {x:0>8}, eflags = {x:0>8}", .{registers.eip, registers.eflags});
-        std.log.err("cs = {x:0>4}, ds = {x:0>4}, ss = {x:0>4}", .{registers.cs & 0xffff, registers.ds & 0xffff, registers.ss & 0xffff});
+        log_scope.err("fatal exception {x:0>8} ({s}) at {x:0>8}, error code {x:0>8}", .{registers.int_no, getExceptionName(registers.int_no), registers.eip, registers.error_code});
+        log_scope.err("eax = {x:0>8}, ebx = {x:0>8}, ecx = {x:0>8}, edx = {x:0>8}", .{registers.eax, registers.ebx, registers.ecx, registers.edx});
+        log_scope.err("esi = {x:0>8}, edi = {x:0>8}, ebp = {x:0>8}, esp = {x:0>8}", .{registers.esi, registers.edi, registers.ebp, registers.esp});
+        log_scope.err("eip = {x:0>8}, eflags = {x:0>8}", .{registers.eip, registers.eflags});
+        log_scope.err("cs = {x:0>4}, ds = {x:0>4}, ss = {x:0>4}", .{registers.cs & 0xffff, registers.ds & 0xffff, registers.ss & 0xffff});
         @panic("fatal exception in kernel mode");
     }
 }
