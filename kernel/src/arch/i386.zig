@@ -15,7 +15,7 @@ fn serialWrite(context: Context, bytes: []const u8) !usize {
     return bytes.len;
 }
 
-pub const SerialWriter = std.io.Writer(Context, anyerror, serialWrite);
+const SerialWriter = std.io.Writer(Context, anyerror, serialWrite);
 
 pub fn logFn(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     SerialWriter.print(SerialWriter, "{s: >5} [{s}] ", .{level.asText(), @tagName(scope)}) catch return;
