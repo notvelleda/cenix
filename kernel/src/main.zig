@@ -1,5 +1,6 @@
 const std = @import("std");
 const arch = @import("arch/i386.zig");
+const mm = @import("mm.zig");
 
 pub const std_options = struct {
     pub const log_level = .info;

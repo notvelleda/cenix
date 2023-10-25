@@ -1,6 +1,10 @@
 const std = @import("std");
 const io = @import("i386/io.zig");
 const interrupts = @import("i386/interrupts.zig");
+const mm = @import("../mm.zig");
+
+extern const kernel_start: usize;
+extern const kernel_end: usize;
 
 const Context = struct {};
 
@@ -40,5 +44,11 @@ pub fn panic(message: []const u8, stack_trace: ?*std.builtin.StackTrace, addr: ?
 }
 
 pub fn init() void {
+    mm.init(.{
+        .kernel_start = &kernel_start,
+        .kernel_end = &kernel_end,
+        .memory_start = @ptrFromInt(4),
+        .memory_end = @ptrFromInt(640 * 1024),
+    });
     interrupts.initIDT();
 }
