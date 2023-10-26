@@ -25,9 +25,9 @@ pub const InitBlock = struct {
     kernel_start: *usize,
     /// a pointer to the end of the kernel (exclusive)
     kernel_end: *usize,
-    /// a pointer to the start of the contiguous block of memory containing the kernel (inclusive)
+    /// a pointer to the start of a contiguous block of memory (inclusive)
     memory_start: *usize,
-    /// a pointer to the end of the contiguous block of memory containing the kernel (exclusive)
+    /// a pointer to the end of the contiguous block of memory (exclusive)
     memory_end: *usize,
 };
 
@@ -40,33 +40,46 @@ pub fn init(init_block: InitBlock) void {
         @intFromPtr(init_block.kernel_end),
     });
 
-    // todo: properly handle heap at the very beginning or end of the memory block
+    if (@intFromPtr(init_block.memory_start) >= @intFromPtr(init_block.kernel_start) or @intFromPtr(init_block.memory_end) <= @intFromPtr(init_block.kernel_end)) {
+        var header: *Header = @ptrCast(init_block.memory_start);
+        header.kind = .Available;
+        header.size = @intFromPtr(init_block.memory_end) - @intFromPtr(init_block.memory_start);
+        header.prev = null;
+        header.next = null;
 
-    var kernel_header: *Header = @ptrFromInt(@intFromPtr(init_block.kernel_start) - @sizeOf(Header));
-    kernel_header.kind = BlockKind.Immovable;
-    kernel_header.size = @intFromPtr(init_block.kernel_end) - @intFromPtr(kernel_header);
+        heap_base = header;
 
-    var header_low: *Header = @ptrCast(init_block.memory_start);
-    header_low.kind = BlockKind.Available;
-    header_low.size = @intFromPtr(kernel_header) - @intFromPtr(header_low);
+        total_memory = header.size;
+        used_memory = 0;
+    } else {
+        // TODO: properly handle heap at the very beginning or end of the memory block
 
-    heap_base = header_low;
+        var kernel_header: *Header = @ptrFromInt(@intFromPtr(init_block.kernel_start) - @sizeOf(Header));
+        kernel_header.kind = .Immovable;
+        kernel_header.size = @intFromPtr(init_block.kernel_end) - @intFromPtr(kernel_header);
 
-    var header_high: *Header = @ptrCast(init_block.kernel_end);
-    header_high.kind = BlockKind.Available;
-    header_high.size = @intFromPtr(init_block.memory_end) - @intFromPtr(header_high);
+        var header_low: *Header = @ptrCast(init_block.memory_start);
+        header_low.kind = .Available;
+        header_low.size = @intFromPtr(kernel_header) - @intFromPtr(header_low);
 
-    header_low.prev = null;
-    header_low.next = kernel_header;
+        heap_base = header_low;
 
-    kernel_header.prev = header_low;
-    kernel_header.next = header_high;
+        var header_high: *Header = @ptrCast(init_block.kernel_end);
+        header_high.kind = .Available;
+        header_high.size = @intFromPtr(init_block.memory_end) - @intFromPtr(header_high);
 
-    header_high.prev = kernel_header;
-    header_high.next = null;
+        header_low.prev = null;
+        header_low.next = kernel_header;
 
-    total_memory = @intFromPtr(init_block.memory_end) - @intFromPtr(init_block.memory_start);
-    used_memory = kernel_header.size;
+        kernel_header.prev = header_low;
+        kernel_header.next = header_high;
+
+        header_high.prev = kernel_header;
+        header_high.next = null;
+
+        total_memory = @intFromPtr(init_block.memory_end) - @intFromPtr(init_block.memory_start);
+        used_memory = kernel_header.size;
+    }
 
     log_scope.debug("total memory: {} KiB, used memory: {} KiB", .{total_memory / 1024, used_memory / 1024});
 }
@@ -76,12 +89,7 @@ pub fn addMemoryBlock(start: *u8, end: *u8) void {
     log_scope.debug("adding memory to heap from {x:0>8} - {x:0>8}", .{@intFromPtr(start), @intFromPtr(end)});
 }
 
-pub const AllocError = error {
-    /// no consecutive conbination of blocks can fit the requested allocation
-    NoFittingBlocks,
-    /// not enough memory is available to move around blocks to fit the required allocation
-    CantMove,
-};
+pub const AllocError = error { OutOfMemory };
 
 /// allocates a region of memory, returning a pointer to it. the newly allocated region of memory is set as locked (immovable)
 pub fn alloc(actual_size: usize) AllocError![*]u8 {
@@ -95,6 +103,10 @@ pub fn alloc(actual_size: usize) AllocError![*]u8 {
     var total_size = heap_base.size;
     var to_move: usize = 0;
     var available_memory = total_memory - used_memory;
+
+    if (size > available_memory) {
+        return AllocError.OutOfMemory;
+    }
 
     while (true) {
         switch (end_header.kind) {
@@ -110,24 +122,28 @@ pub fn alloc(actual_size: usize) AllocError![*]u8 {
                     available_memory = total_memory - used_memory;
                     continue;
                 } else {
-                    return AllocError.NoFittingBlocks;
+                    return AllocError.OutOfMemory;
                 }
             }
         }
 
         if (total_size >= size) {
-            break;
+            // found a potential series of blocks, make sure everything will work out
+            if (to_move <= available_memory) {
+                break;
+            } else {
+                // more data needs to be reallocated and moved around than there is available memory, attempt to find a different series of blocks
+                start_header = end_header;
+                total_size = end_header.size;
+                to_move = 0;
+                available_memory = total_memory - used_memory;
+            }
         } else if (end_header.next) |next| {
             end_header = next;
             total_size += next.size;
         } else {
-            return AllocError.NoFittingBlocks;
+            return AllocError.OutOfMemory;
         }
-    }
-
-    if (to_move > available_memory) {
-        // more data needs to be reallocated and moved around than there is available memory
-        return AllocError.CantMove;
     }
 
     log_scope.debug("alloc: moving 0x{x}, 0x{x} available", .{to_move, available_memory});
@@ -143,80 +159,106 @@ pub fn alloc(actual_size: usize) AllocError![*]u8 {
     // if the allocation fails that makes it easier to clean up
     if (split_pos > @sizeOf(Header) and end_header.kind == .Available) {
         log_scope.debug("alloc: splitting end_header at {}", .{split_pos});
-
-        // the header of the newly split block that won't be used for this allocation
-        var new_header: *Header = @ptrFromInt(@intFromPtr(end_header) + split_pos);
-        new_header.size = end_header.size - split_pos;
-        new_header.kind = .Available;
-        new_header.next = end_header.next;
-        new_header.prev = end_header;
-
-        end_header.size = split_pos;
-        end_header.next = new_header;
+        splitHeader(end_header, split_pos);
     }
 
-    var original_header = start_header.*;
-
-    // set up the header and footer of the new allocation
-    start_header.size = size;
-    start_header.kind = .Immovable;
-    start_header.next = end_header.next;
+    var end_header_movable = end_header.kind == .Movable;
 
     if (to_move > 0) {
         var header = start_header;
         while (header != end_header) : (header = header.next.?) {
             if (header.kind == .Movable) {
                 var alloc_size = header.size - @sizeOf(Header);
-                var ptr = alloc(alloc_size) catch {
-                    header.* = original_header;
-                    return AllocError.CantMove;
-                };
+                var ptr = try alloc(alloc_size);
                 var srcPtr: [*]u8 = @ptrFromInt(@intFromPtr(header) + @sizeOf(Header));
                 @memcpy(ptr, srcPtr[0..alloc_size]);
+                // this is faster than just calling free() since alloc() will automatically merge consecutive blocks
+                header.kind = .Available;
+                used_memory -= header.size;
                 // TODO: notify whatever owns the newly moved block that it was moved
             }
         }
     }
 
     // since the contents of end_header have been properly moved, it can be split now
-    if (split_pos > @sizeOf(Header) and end_header.kind == .Movable) {
+    if (split_pos > @sizeOf(Header) and end_header_movable) {
         log_scope.debug("alloc: splitting end_header at {}", .{split_pos});
-
-        // the header of the newly split block that won't be used for this allocation
-        var new_header: *Header = @ptrFromInt(@intFromPtr(end_header) + split_pos);
-        new_header.size = end_header.size - split_pos;
-        new_header.kind = .Available;
-        new_header.next = end_header.next;
-        new_header.prev = end_header;
-
-        end_header.size = split_pos;
-        end_header.next = new_header;
+        splitHeader(end_header, split_pos);
     }
 
+    // set up the header and footer of the new allocation
+    start_header.size = size;
+    start_header.kind = .Immovable;
+    start_header.next = end_header.next;
+    if (start_header.next) |next| {
+        next.prev = start_header;
+    }
+
+    used_memory += size;
+
     return @ptrFromInt(@intFromPtr(start_header) + @sizeOf(Header));
+}
+
+fn splitHeader(header: *Header, at: usize) void {
+    // the header of the newly split block
+    var new_header: *Header = @ptrFromInt(@intFromPtr(header) + at);
+    new_header.size = header.size - at;
+    new_header.kind = .Available;
+    new_header.next = header.next;
+    new_header.prev = header;
+
+    if (new_header.next) |next| {
+        next.prev = new_header;
+    }
+
+    header.size = at;
+    header.next = new_header;
 }
 
 /// locks an allocated region of memory in place, allowing for any pointers to it to remain valid
 pub fn lock(ptr: [*]u8) void {
     var header: *Header = @ptrFromInt(@intFromPtr(ptr) - @sizeOf(Header));
 
-    header.kind = BlockKind.Immovable;
+    header.kind = .Immovable;
 }
 
 /// unlocks an allocated region of memory, invalidating any existing pointers to it and allowing it to be moved anywhere else in memory if required
 pub fn unlock(ptr: [*]u8) void {
     var header: *Header = @ptrFromInt(@intFromPtr(ptr) - @sizeOf(Header));
 
-    header.kind = BlockKind.Movable;
+    header.kind = .Movable;
 }
 
 /// frees a region of memory, allowing it to be reused for other things
 pub fn free(ptr: [*]u8) void {
     var header: *Header = @ptrFromInt(@intFromPtr(ptr) - @sizeOf(Header));
 
-    header.kind = BlockKind.Available;
+    header.kind = .Available;
+    used_memory -= header.size;
 
-    // TODO: combine with surrounding blocks to speed up allocation
+    // check if the block directly after this one is available, and merge them if it is
+    if (header.next) |next| {
+        if (next.kind == .Available) {
+            header.size += next.size;
+            header.next = next.next;
+
+            if (next.next) |next_next| {
+                next_next.prev = header;
+            }
+        }
+    }
+
+    // merge with the block directly before if applicable
+    if (header.prev) |prev| {
+        if (prev.kind == .Available) {
+            prev.size += header.size;
+            prev.next = header.next;
+
+            if (header.next) |next| {
+                next.prev = prev;
+            }
+        }
+    }
 }
 
 /// prints out a list of all the blocks in the heap
