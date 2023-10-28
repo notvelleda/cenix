@@ -6,9 +6,11 @@ const mm = @import("../mm.zig");
 extern const kernel_start: usize;
 extern const kernel_end: usize;
 
-const Context = struct {};
+pub const Context = interrupts.IntRegisters;
 
-fn serialWrite(context: Context, bytes: []const u8) !usize {
+const WriteContext = struct {};
+
+fn serialWrite(context: WriteContext, bytes: []const u8) !usize {
     _ = context;
 
     for (bytes) |c| {
@@ -19,7 +21,7 @@ fn serialWrite(context: Context, bytes: []const u8) !usize {
     return bytes.len;
 }
 
-const SerialWriter = std.io.Writer(Context, anyerror, serialWrite);
+const SerialWriter = std.io.Writer(WriteContext, anyerror, serialWrite);
 
 pub fn logFn(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     SerialWriter.print(SerialWriter, "{s: >5} [{s}] ", .{level.asText(), @tagName(scope)}) catch return;

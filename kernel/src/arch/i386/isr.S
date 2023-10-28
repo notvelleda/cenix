@@ -66,6 +66,7 @@ isrNoErrCode 44
 isrNoErrCode 45
 isrNoErrCode 46
 isrNoErrCode 47
+isrNoErrCode 128
 
 .extern isrHandler
 
@@ -81,7 +82,10 @@ isrCommonStub:
     mov %ax, %fs
     mov %ax, %gs
 
+    mov %esp, %ebp
+    push %esp
     call isrHandler
+    add $4, %esp
 
     pop %eax
     mov %ax, %ds

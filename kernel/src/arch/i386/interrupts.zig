@@ -15,7 +15,7 @@ const IDTPtr = packed struct {
     base: u32,
 };
 
-const IntRegisters = extern struct {
+pub const IntRegisters = extern struct {
     ds: u32,    // Data segment selector
     // Pushed by pusha.
     edi: u32,
@@ -35,6 +35,55 @@ const IntRegisters = extern struct {
     eflags: u32,
     esp: u32,
     ss: u32,
+
+    pub fn default() @This() {
+        return .{
+            .ds = 0,
+            .edi = 0,
+            .esi = 0,
+            .ebp = 0,
+            .handler_esp = 0,
+            .ebx = 0,
+            .edx = 0,
+            .ecx = 0,
+            .eax = 0,
+            .int_no = 0,
+            .error_code = 0,
+            .eip = 0,
+            .cs = 0,
+            .eflags = 0,
+            .esp = 0,
+            .ss = 0,
+        };
+    }
+
+    pub fn fromFn(fn_ptr: *const u8, stack_top: *u8) @This() {
+        var eflags = asm volatile (
+            "pushfd; pop %eax"
+            : [ret] "={eax}" (-> u32)
+            :
+            : "eax"
+        );
+
+        return .{
+            .ds = 0x10,
+            .edi = 0,
+            .esi = 0,
+            .ebp = 0,
+            .handler_esp = 0,
+            .ebx = 0,
+            .edx = 0,
+            .ecx = 0,
+            .eax = 0,
+            .int_no = 0,
+            .error_code = 0,
+            .eip = @intFromPtr(fn_ptr),
+            .cs = 0x08,
+            .eflags = eflags,
+            .esp = @intFromPtr(stack_top),
+            .ss = 0x10,
+        };
+    }
 };
 
 const IDTEntries = 256;
@@ -101,6 +150,7 @@ extern fn isr44() callconv(.C) void;
 extern fn isr45() callconv(.C) void;
 extern fn isr46() callconv(.C) void;
 extern fn isr47() callconv(.C) void;
+extern fn isr128() callconv(.C) void;
 
 pub fn initIDT() void {
     @memset(&IDT, .{
@@ -160,6 +210,7 @@ pub fn initIDT() void {
     IDT[45] = makeIDTEntry(@intFromPtr(&isr45), 0x08, 0x8e);
     IDT[46] = makeIDTEntry(@intFromPtr(&isr46), 0x08, 0x8e);
     IDT[47] = makeIDTEntry(@intFromPtr(&isr47), 0x08, 0x8e);
+    IDT[128] = makeIDTEntry(@intFromPtr(&isr128), 0x08, 0xee);
 
     // reset PICs
     io.outb(0x20, 0x11);
@@ -238,7 +289,9 @@ fn getExceptionName(exception: u32) []const u8 {
 
 const log_scope = std.log.scoped(.arch);
 
-export fn isrHandler(registers: IntRegisters) callconv(.C) void {
+const process = @import("../../process.zig");
+
+export fn isrHandler(registers: *IntRegisters) callconv(.C) void {
     if (registers.int_no == 3) {
         log_scope.info("breakpoint interrupt!", .{});
         return;
@@ -251,5 +304,8 @@ export fn isrHandler(registers: IntRegisters) callconv(.C) void {
         log_scope.err("eip = {x:0>8}, eflags = {x:0>8}", .{registers.eip, registers.eflags});
         log_scope.err("cs = {x:0>4}, ds = {x:0>4}, ss = {x:0>4}", .{registers.cs & 0xffff, registers.ds & 0xffff, registers.ss & 0xffff});
         @panic("fatal exception in kernel mode");
+    } else if (registers.int_no == 128) {
+        std.log.debug("esp is {x:0>8}", .{asm volatile ("" : [ret] "={esp}" (-> u32))});
+        process.yield(registers);
     }
 }
