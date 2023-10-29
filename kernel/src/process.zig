@@ -20,7 +20,7 @@ pub fn yield(context: *arch.Context) void {
             context.* = new_thread.context;
         }
     } else {
-        log_scope.debug("no current thread", .{});
+        @panic("no current thread");
     }
 }
 

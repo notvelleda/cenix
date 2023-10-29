@@ -1,5 +1,8 @@
 const std = @import("std");
 const io = @import("io.zig");
+const syscalls = @import("../../syscalls.zig");
+
+const log_scope = std.log.scoped(.arch);
 
 // http://www.jamesmolloy.co.uk/tutorial_html/4.-The%20GDT%20and%20IDT.html
 const IDTEntry = packed struct {
@@ -66,7 +69,13 @@ pub const IntRegisters = extern struct {
         );
 
         return .{
-            .ds = 0x10,
+            .eip = @intFromPtr(fn_ptr),
+            .esp = @intFromPtr(stack_top),
+
+            .cs = 0x1b,
+            .ds = 0x23,
+            .ss = 0x23,
+
             .edi = 0,
             .esi = 0,
             .ebp = 0,
@@ -77,11 +86,7 @@ pub const IntRegisters = extern struct {
             .eax = 0,
             .int_no = 0,
             .error_code = 0,
-            .eip = @intFromPtr(fn_ptr),
-            .cs = 0x08,
             .eflags = eflags,
-            .esp = @intFromPtr(stack_top),
-            .ss = 0x10,
         };
     }
 };
@@ -284,10 +289,6 @@ fn getExceptionName(exception: u32) []const u8 {
     }
 }
 
-const log_scope = std.log.scoped(.arch);
-
-const process = @import("../../process.zig");
-
 export fn isrHandler(registers: *IntRegisters) callconv(.C) void {
     if (registers.int_no == 3) {
         log_scope.info("breakpoint interrupt!", .{});
@@ -302,7 +303,17 @@ export fn isrHandler(registers: *IntRegisters) callconv(.C) void {
         log_scope.err("cs = {x:0>4}, ds = {x:0>4}, ss = {x:0>4}", .{registers.cs & 0xffff, registers.ds & 0xffff, registers.ss & 0xffff});
         @panic("fatal exception in kernel mode");
     } else if (registers.int_no == 128) {
-        std.log.debug("esp is {x:0>8}", .{asm volatile ("" : [ret] "={esp}" (-> u32))});
-        process.yield(registers);
+        //const actual_esp = asm volatile ("" : [ret] "={esp}" (-> u32));
+        //std.log.debug("actual stack is {x:0>8}, handler stack is {x:0>8}, thread stack is {x:0>8}", .{actual_esp, registers.handler_esp, registers.esp});
+        if (syscalls.syscall(registers, registers.eax, .{registers.ebx, registers.ecx, registers.edx})) |res| {
+            registers.eax = 1;
+            registers.ebx = res;
+        } else |err| {
+            // surely there's a more sensible way to discard the error
+            if (false) {
+                log_scope.err("syscall returned error: {}", .{err});
+            }
+            registers.eax = 0;
+        }
     }
 }
