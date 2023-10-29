@@ -56,6 +56,8 @@ halt:
 .section .data
 .globl mboot_sig
 .globl mboot_ptr
+.globl gdt
+.globl gdt_ptr
 
 mboot_sig:
     .long 0
@@ -66,10 +68,11 @@ gdt_ptr:
     .long gdt
 gdt:
     .long 0x00000000, 0x00000000    /* 00 NULL Entry */
-    .long 0x0000FFFF, 0x00CF9A00    /* 08 PL0 Code */
-    .long 0x0000FFFF, 0x00CF9200    /* 10 PL0 Data */
-    .long 0x0000FFFF, 0x00CFFA00    /* 18 PL3 Code */
-    .long 0x0000FFFF, 0x00CFF200    /* 20 PL3 Data */
+    .long 0x0000ffff, 0x00cf9a00    /* 08 PL0 Code */
+    .long 0x0000ffff, 0x00cf9200    /* 10 PL0 Data */
+    .long 0x0000ffff, 0x00cffa00    /* 18 PL3 Code */
+    .long 0x0000ffff, 0x00cff200    /* 20 PL3 Data */
+    .long 0x00000068, 0x00008900    /* 28 TSS */
 gdt_end:
 
 .section .bss

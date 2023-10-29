@@ -92,7 +92,7 @@ pub fn addMemoryBlock(start: *u8, end: *u8) void {
 pub const AllocError = error { OutOfMemory };
 
 /// allocates a region of memory, returning a pointer to it. the newly allocated region of memory is set as locked (immovable)
-pub fn alloc(actual_size: usize) AllocError![*]u8 {
+pub fn alloc(actual_size: usize) AllocError!*u8 {
     var size = actual_size + @sizeOf(Header);
     log_scope.debug("alloc: size {} (adjusted to {})", .{actual_size, size});
 
@@ -169,9 +169,9 @@ pub fn alloc(actual_size: usize) AllocError![*]u8 {
         while (header != end_header) : (header = header.next.?) {
             if (header.kind == .Movable) {
                 var alloc_size = header.size - @sizeOf(Header);
-                var ptr = try alloc(alloc_size);
-                var srcPtr: [*]u8 = @ptrFromInt(@intFromPtr(header) + @sizeOf(Header));
-                @memcpy(ptr, srcPtr[0..alloc_size]);
+                var dest_ptr: [*]u8 = @ptrFromInt(@intFromPtr(try alloc(alloc_size)));
+                var src_ptr: [*]u8 = @ptrFromInt(@intFromPtr(header) + @sizeOf(Header));
+                @memcpy(dest_ptr, src_ptr[0..alloc_size]);
                 // this is faster than just calling free() since alloc() will automatically merge consecutive blocks
                 header.kind = .Available;
                 used_memory -= header.size;
@@ -230,7 +230,7 @@ pub fn unlock(ptr: [*]u8) void {
 }
 
 /// frees a region of memory, allowing it to be reused for other things
-pub fn free(ptr: [*]u8) void {
+pub fn free(ptr: *u8) void {
     var header: *Header = @ptrFromInt(@intFromPtr(ptr) - @sizeOf(Header));
 
     header.kind = .Available;

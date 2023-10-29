@@ -237,10 +237,7 @@ pub fn initIDT() void {
         .base = @intFromPtr(&IDT),
     };
 
-    asm volatile ("lidt (%[idt])"
-        :
-        : [idt] "{eax}" (&idt_ptr)
-    );
+    asm volatile ("lidt (%[idt])" : : [idt] "{eax}" (&idt_ptr));
 }
 
 // https://wiki.osdev.org/Exceptions

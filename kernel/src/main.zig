@@ -38,13 +38,13 @@ export fn kmain() callconv(.C) void {
     const stack_size = 0x1000 * 8;
 
     const stack2 = mm.alloc(stack_size) catch @panic("allocation failed");
-    thread_2.context = arch.Context.fromFn(@ptrCast(&thread2), @ptrCast(&stack2[stack_size - 1]));
+    thread_2.context = arch.Context.fromFn(@ptrCast(&thread2), @ptrFromInt(@intFromPtr(stack2) + stack_size - 1));
 
     const stack3 = mm.alloc(stack_size) catch @panic("allocation failed");
-    thread_3.context = arch.Context.fromFn(@ptrCast(&thread3), @ptrCast(&stack3[stack_size - 1]));
+    thread_3.context = arch.Context.fromFn(@ptrCast(&thread3), @ptrFromInt(@intFromPtr(stack3) + stack_size - 1));
 
     const stack4 = mm.alloc(stack_size) catch @panic("allocation failed");
-    thread_4.context = arch.Context.fromFn(@ptrCast(&thread4), @ptrCast(&stack4[stack_size - 1]));
+    thread_4.context = arch.Context.fromFn(@ptrCast(&thread4), @ptrFromInt(@intFromPtr(stack4) + stack_size - 1));
     thread_4.next = &thread_1;
 
     mm.listBlocks();
