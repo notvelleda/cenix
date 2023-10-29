@@ -39,16 +39,16 @@ export fn kmain() callconv(.C) void {
     const stack_size = 0x1000 * 8;
 
     const stack1 = mm.alloc(stack_size) catch @panic("allocation failed");
-    thread_1.context = arch.Context.fromFn(@ptrCast(&thread1), @ptrFromInt(@intFromPtr(stack1) + stack_size));
+    thread_1.context = arch.Context.fromFn(@ptrCast(&thread1), @ptrFromInt(@intFromPtr(stack1) + stack_size), 3);
 
     const stack2 = mm.alloc(stack_size) catch @panic("allocation failed");
-    thread_2.context = arch.Context.fromFn(@ptrCast(&thread2), @ptrFromInt(@intFromPtr(stack2) + stack_size));
+    thread_2.context = arch.Context.fromFn(@ptrCast(&thread2), @ptrFromInt(@intFromPtr(stack2) + stack_size), 3);
 
     const stack3 = mm.alloc(stack_size) catch @panic("allocation failed");
-    thread_3.context = arch.Context.fromFn(@ptrCast(&thread3), @ptrFromInt(@intFromPtr(stack3) + stack_size));
+    thread_3.context = arch.Context.fromFn(@ptrCast(&thread3), @ptrFromInt(@intFromPtr(stack3) + stack_size), 0);
 
     const stack4 = mm.alloc(stack_size) catch @panic("allocation failed");
-    thread_4.context = arch.Context.fromFn(@ptrCast(&thread4), @ptrFromInt(@intFromPtr(stack4) + stack_size));
+    thread_4.context = arch.Context.fromFn(@ptrCast(&thread4), @ptrFromInt(@intFromPtr(stack4) + stack_size), 0);
     thread_4.next = &thread_1;
 
     mm.listBlocks();
@@ -62,8 +62,7 @@ export fn thread1() callconv(.C) void {
     //asm volatile ("int $0x81");
 
     while (true) {
-        //std.log.info("thread 1", .{});
-        debugMsg("thread 1");
+        std.log.info("thread 1", .{});
         waitAWhile();
         yield();
     }
@@ -71,8 +70,7 @@ export fn thread1() callconv(.C) void {
 
 export fn thread2() callconv(.C) void {
     while (true) {
-        //std.log.info("thread 2!", .{});
-        debugMsg("thread 2!");
+        std.log.info("thread 2!", .{});
         waitAWhile();
         yield();
     }

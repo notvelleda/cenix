@@ -26,7 +26,7 @@ fn serialWrite(context: WriteContext, bytes: []const u8) !usize {
 const SerialWriter = std.io.Writer(WriteContext, anyerror, serialWrite);
 
 pub fn logFn(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-    SerialWriter.print(SerialWriter, "{s: >5} [{s}] ", .{level.asText(), @tagName(scope)}) catch return;
+    SerialWriter.print(SerialWriter, "{s: >5} [{s}] ", .{ level.asText(), @tagName(scope) }) catch return;
     SerialWriter.print(SerialWriter, format ++ "\n", args) catch return;
 }
 
@@ -95,6 +95,7 @@ const TSS = packed struct {
 };
 
 extern const gdt_ptr: u8; // it's not actually a u8 but it's not being modified here so whatever
+extern const stack_end: u8;
 
 pub fn init() void {
     mm.init(.{
@@ -104,29 +105,30 @@ pub fn init() void {
         .memory_end = @ptrFromInt(640 * 1024),
     });
 
-    const stack_size = 0x1000 * 8;
-    const int_stack = mm.alloc(stack_size) catch @panic("allocation failed");
     const tss: *TSS = @alignCast(@ptrCast(mm.alloc(@sizeOf(TSS)) catch @panic("allocation failed")));
 
     tss.iobp_offset = @sizeOf(TSS);
     tss.ss0 = 0x10;
     tss.ss1 = tss.ss0;
     tss.ss2 = tss.ss0;
-    tss.esp0 = @intFromPtr(int_stack) + stack_size - 1;
+    tss.esp0 = @intFromPtr(&stack_end);
     tss.esp1 = tss.esp0;
     tss.esp2 = tss.esp0;
 
-    log_scope.debug("int stack @ {x:0>8} (top @ {x:0>8}), tss @ {x:0>8}", .{@intFromPtr(int_stack), tss.esp0, @intFromPtr(tss)});
+    log_scope.debug("tss @ {x:0>8}, int stack top @ {x:0>8}", .{ @intFromPtr(tss), tss.esp0 });
 
     const tss_addr = @intFromPtr(tss);
     gdt[5].lower |= (tss_addr & 0xffff) << 16;
     gdt[5].upper |= ((tss_addr >> 16) & 0xff) | (tss_addr & 0xff000000);
 
     // reload GDT
-    asm volatile ("lgdt (%[gdt])" : : [gdt] "{eax}" (&gdt_ptr));
+    asm volatile ("lgdt (%[gdt])"
+        :
+        : [gdt] "{eax}" (&gdt_ptr),
+    );
 
     // load TSS
-    asm volatile ("mov $0x28, %ax; ltr %ax" : : : "ax");
+    asm volatile ("mov $0x28, %ax; ltr %ax" ::: "ax");
 
     interrupts.initIDT();
 }

@@ -6,11 +6,11 @@ const log_scope = std.log.scoped(.arch);
 
 // http://www.jamesmolloy.co.uk/tutorial_html/4.-The%20GDT%20and%20IDT.html
 const IDTEntry = packed struct {
-    base_lo: u16,   // The lower 16 bits of the address to jump to when this interrupt fires.
-    sel: u16,       // Kernel segment selector.
-    always0: u8,    // This must always be zero.
-    flags: u8,      // More flags. See documentation.
-    base_hi: u16,   // The upper 16 bits of the address to jump to.
+    base_lo: u16, // The lower 16 bits of the address to jump to when this interrupt fires.
+    sel: u16, // Kernel segment selector.
+    always0: u8, // This must always be zero.
+    flags: u8, // More flags. See documentation.
+    base_hi: u16, // The upper 16 bits of the address to jump to.
 };
 
 const IDTPtr = packed struct {
@@ -19,7 +19,7 @@ const IDTPtr = packed struct {
 };
 
 pub const IntRegisters = extern struct {
-    ds: u32,    // Data segment selector
+    ds: u32, // Data segment selector
     // Pushed by pusha.
     edi: u32,
     esi: u32,
@@ -60,10 +60,9 @@ pub const IntRegisters = extern struct {
         };
     }
 
-    pub fn fromFn(fn_ptr: *const u8, stack_top: *u8) @This() {
-        var eflags = asm volatile (
-            "pushfd; pop %eax"
-            : [ret] "={eax}" (-> u32)
+    pub fn fromFn(fn_ptr: *const u8, stack_top: *u8, iopl: u2) @This() {
+        const eflags = asm volatile ("pushfd; pop %eax"
+            : [ret] "={eax}" (-> u32),
             :
             : "eax"
         );
@@ -86,7 +85,7 @@ pub const IntRegisters = extern struct {
             .eax = 0,
             .int_no = 0,
             .error_code = 0,
-            .eflags = eflags,
+            .eflags = eflags | (@as(u32, iopl) << 12),
         };
     }
 };
@@ -103,7 +102,7 @@ fn makeIDTEntry(base: u32, sel: u16, flags: u8) IDTEntry {
         .always0 = 0,
         .flags = flags,
     };
-} 
+}
 
 var IDT: [IDTEntries]IDTEntry = undefined;
 
@@ -237,12 +236,15 @@ pub fn initIDT() void {
     io.outb(0x21, 0x0);
     io.outb(0xa1, 0x0);
 
-    var idt_ptr = IDTPtr {
+    var idt_ptr = IDTPtr{
         .limit = @sizeOf(IDTEntry) * IDTEntries - 1,
         .base = @intFromPtr(&IDT),
     };
 
-    asm volatile ("lidt (%[idt])" : : [idt] "{eax}" (&idt_ptr));
+    asm volatile ("lidt (%[idt])"
+        :
+        : [idt] "{eax}" (&idt_ptr),
+    );
 }
 
 // https://wiki.osdev.org/Exceptions
@@ -296,16 +298,16 @@ export fn isrHandler(registers: *IntRegisters) callconv(.C) void {
     }
 
     if (registers.int_no < 32) {
-        log_scope.err("fatal exception {x:0>8} ({s}) at {x:0>8}, error code {x:0>8}", .{registers.int_no, getExceptionName(registers.int_no), registers.eip, registers.error_code});
-        log_scope.err("eax = {x:0>8}, ebx = {x:0>8}, ecx = {x:0>8}, edx = {x:0>8}", .{registers.eax, registers.ebx, registers.ecx, registers.edx});
-        log_scope.err("esi = {x:0>8}, edi = {x:0>8}, ebp = {x:0>8}, esp = {x:0>8}", .{registers.esi, registers.edi, registers.ebp, registers.esp});
-        log_scope.err("eip = {x:0>8}, eflags = {x:0>8}", .{registers.eip, registers.eflags});
-        log_scope.err("cs = {x:0>4}, ds = {x:0>4}, ss = {x:0>4}", .{registers.cs & 0xffff, registers.ds & 0xffff, registers.ss & 0xffff});
+        log_scope.err("fatal exception {x:0>8} ({s}) at {x:0>8}, error code {x:0>8}", .{ registers.int_no, getExceptionName(registers.int_no), registers.eip, registers.error_code });
+        log_scope.err("eax = {x:0>8}, ebx = {x:0>8}, ecx = {x:0>8}, edx = {x:0>8}", .{ registers.eax, registers.ebx, registers.ecx, registers.edx });
+        log_scope.err("esi = {x:0>8}, edi = {x:0>8}, ebp = {x:0>8}, esp = {x:0>8}", .{ registers.esi, registers.edi, registers.ebp, registers.esp });
+        log_scope.err("eip = {x:0>8}, eflags = {x:0>8}", .{ registers.eip, registers.eflags });
+        log_scope.err("cs = {x:0>4}, ds = {x:0>4}, ss = {x:0>4}", .{ registers.cs & 0xffff, registers.ds & 0xffff, registers.ss & 0xffff });
         @panic("fatal exception in kernel mode");
     } else if (registers.int_no == 128) {
         //const actual_esp = asm volatile ("" : [ret] "={esp}" (-> u32));
         //std.log.debug("actual stack is {x:0>8}, handler stack is {x:0>8}, thread stack is {x:0>8}", .{actual_esp, registers.handler_esp, registers.esp});
-        if (syscalls.syscall(registers, registers.eax, .{registers.ebx, registers.ecx, registers.edx})) |res| {
+        if (syscalls.syscall(registers, registers.eax, .{ registers.ebx, registers.ecx, registers.edx })) |res| {
             registers.eax = 1;
             registers.ebx = res;
         } else |err| {
