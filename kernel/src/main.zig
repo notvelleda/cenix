@@ -13,45 +13,45 @@ pub const panic = arch.panic;
 export fn kmain() callconv(.C) void {
     arch.init();
     std.log.info("HellOwOrld", .{});
-    mm.listBlocks();
-    var ptr1 = mm.alloc(1024) catch @panic("allocation failed");
-    mm.listBlocks();
-    var ptr2 = mm.alloc(1024) catch @panic("allocation failed");
-    mm.listBlocks();
-    var ptr3 = mm.alloc(1024) catch @panic("allocation failed");
-    mm.listBlocks();
-    mm.free(ptr2);
+    mm.the_heap.listBlocks();
+    var ptr1 = mm.the_heap.alloc(1024) catch @panic("allocation failed");
+    mm.the_heap.listBlocks();
+    var ptr2 = mm.the_heap.alloc(1024) catch @panic("allocation failed");
+    mm.the_heap.listBlocks();
+    var ptr3 = mm.the_heap.alloc(1024) catch @panic("allocation failed");
+    mm.the_heap.listBlocks();
+    mm.the_heap.free(ptr2);
     std.log.debug("freed memory", .{});
-    mm.listBlocks();
-    var ptr4 = mm.alloc(1024) catch @panic("allocation failed");
-    mm.listBlocks();
-    mm.free(ptr1);
+    mm.the_heap.listBlocks();
+    var ptr4 = mm.the_heap.alloc(1024) catch @panic("allocation failed");
+    mm.the_heap.listBlocks();
+    mm.the_heap.free(ptr1);
     std.log.debug("freed memory", .{});
-    mm.listBlocks();
-    mm.free(ptr4);
+    mm.the_heap.listBlocks();
+    mm.the_heap.free(ptr4);
     std.log.debug("freed memory", .{});
-    mm.listBlocks();
-    mm.free(ptr3);
+    mm.the_heap.listBlocks();
+    mm.the_heap.free(ptr3);
     std.log.debug("freed memory", .{});
-    mm.listBlocks();
+    mm.the_heap.listBlocks();
     asm volatile ("int3");
 
     const stack_size = 0x1000 * 8;
 
-    const stack1 = mm.alloc(stack_size) catch @panic("allocation failed");
+    const stack1 = mm.the_heap.alloc(stack_size) catch @panic("allocation failed");
     thread_1.context = arch.Context.fromFn(@ptrCast(&thread1), @ptrFromInt(@intFromPtr(stack1) + stack_size), 3);
 
-    const stack2 = mm.alloc(stack_size) catch @panic("allocation failed");
+    const stack2 = mm.the_heap.alloc(stack_size) catch @panic("allocation failed");
     thread_2.context = arch.Context.fromFn(@ptrCast(&thread2), @ptrFromInt(@intFromPtr(stack2) + stack_size), 3);
 
-    const stack3 = mm.alloc(stack_size) catch @panic("allocation failed");
-    thread_3.context = arch.Context.fromFn(@ptrCast(&thread3), @ptrFromInt(@intFromPtr(stack3) + stack_size), 0);
+    const stack3 = mm.the_heap.alloc(stack_size) catch @panic("allocation failed");
+    thread_3.context = arch.Context.fromFn(@ptrCast(&thread3), @ptrFromInt(@intFromPtr(stack3) + stack_size), 3);
 
-    const stack4 = mm.alloc(stack_size) catch @panic("allocation failed");
-    thread_4.context = arch.Context.fromFn(@ptrCast(&thread4), @ptrFromInt(@intFromPtr(stack4) + stack_size), 0);
+    const stack4 = mm.the_heap.alloc(stack_size) catch @panic("allocation failed");
+    thread_4.context = arch.Context.fromFn(@ptrCast(&thread4), @ptrFromInt(@intFromPtr(stack4) + stack_size), 3);
     thread_4.next = &thread_1;
 
-    mm.listBlocks();
+    mm.the_heap.listBlocks();
 
     // hop out of ring 0 so that context switching actually works
     process.setCurrentThread(&thread_0);
@@ -78,8 +78,7 @@ export fn thread2() callconv(.C) void {
 
 export fn thread3() callconv(.C) void {
     while (true) {
-        //std.log.info("thread 3!!", .{});
-        debugMsg("thread 3!!");
+        std.log.info("thread 3!!", .{});
         waitAWhile();
         yield();
     }
@@ -87,8 +86,7 @@ export fn thread3() callconv(.C) void {
 
 export fn thread4() callconv(.C) void {
     while (true) {
-        //std.log.info("thread 4!!!", .{});
-        debugMsg("thread 4!!!");
+        std.log.info("thread 4!!!", .{});
         waitAWhile();
         yield();
     }
@@ -124,15 +122,6 @@ fn yield() void {
         "int $0x80"
         :
         : [num] "{eax}" (syscalls.Syscalls.yield)
-        : "eax", "ebx"
-    );
-}
-
-fn debugMsg(s: []const u8) void {
-    asm volatile (
-        "int $0x80"
-        :
-        : [num] "{eax}" (syscalls.Syscalls.debugMessage), [addr] "{ebx}" (&s[0]), [len] "{ecx}" (s.len)
         : "eax", "ebx"
     );
 }

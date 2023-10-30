@@ -8,21 +8,23 @@ const debug_msg_scope = std.log.scoped(.debug_syscall);
 
 pub const Syscalls = enum(usize) {
     isComputerOn,
+    receive,
+    reply,
+    call,
     yield,
-    debugMessage,
     _,
 };
 
 pub fn syscall(context: *arch.Context, num: usize, arguments: [3]usize) SyscallErrors!usize {
+    _ = arguments;
+
     const syscall_kind: Syscalls = @enumFromInt(num);
     switch (syscall_kind) {
         .isComputerOn => return 1,
+        .receive => {},
+        .reply => {},
+        .call => {},
         .yield => process.yield(context),
-        .debugMessage => {
-            const addr: [*]u8 = @ptrFromInt(arguments[0]);
-            const len: usize = @intCast(arguments[1]);
-            debug_msg_scope.info("{s}", .{addr[0..len]});
-        },
         _ => return SyscallErrors.SyscallError,
     }
 

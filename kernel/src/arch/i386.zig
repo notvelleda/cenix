@@ -98,14 +98,14 @@ extern const gdt_ptr: u8; // it's not actually a u8 but it's not being modified 
 extern const stack_end: u8;
 
 pub fn init() void {
-    mm.init(.{
+    mm.the_heap.init(.{
         .kernel_start = &kernel_start,
         .kernel_end = &kernel_end,
         .memory_start = @ptrFromInt(4),
         .memory_end = @ptrFromInt(640 * 1024),
     });
 
-    const tss: *TSS = @alignCast(@ptrCast(mm.alloc(@sizeOf(TSS)) catch @panic("allocation failed")));
+    const tss: *TSS = @alignCast(@ptrCast(mm.the_heap.alloc(@sizeOf(TSS)) catch @panic("allocation failed")));
 
     tss.iobp_offset = @sizeOf(TSS);
     tss.ss0 = 0x10;
