@@ -1,7 +1,25 @@
 const std = @import("std");
 const arch = @import("arch/i386.zig");
+const mm = @import("mm.zig");
 
 const log_scope = std.log.scoped(.process);
+
+const num_buckets = 128;
+pub const ProcessTable = struct {
+    buckets: [num_buckets]?*Thread,
+    next_process: i16, // signed to allow for easy posix compatibility and to allow for negative process ids for kernel tasks
+};
+
+pub var process_table: *ProcessTable = undefined;
+
+pub fn init() void {
+    process_table = @alignCast(@ptrCast(mm.the_heap.alloc(@sizeOf(ProcessTable)) catch @panic("allocation failed")));
+
+    for (0..num_buckets) |i| {
+        process_table.buckets[i] = null;
+    }
+    process_table.next_process = 1;
+}
 
 pub const Thread = struct {
     context: arch.Context,

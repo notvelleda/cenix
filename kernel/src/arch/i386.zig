@@ -115,7 +115,7 @@ pub fn init() void {
     tss.esp1 = tss.esp0;
     tss.esp2 = tss.esp0;
 
-    log_scope.debug("tss @ {x:0>8}, int stack top @ {x:0>8}", .{ @intFromPtr(tss), tss.esp0 });
+    log_scope.debug("tss @ {x:0>8}, int stack top @ {x:0>8}", .{@intFromPtr(tss), tss.esp0});
 
     const tss_addr = @intFromPtr(tss);
     gdt[5].lower |= (tss_addr & 0xffff) << 16;
@@ -131,4 +131,12 @@ pub fn init() void {
     asm volatile ("mov $0x28, %ax; ltr %ax" ::: "ax");
 
     interrupts.initIDT();
+}
+
+pub inline fn disable_interrupts() void {
+    asm volatile ("cli");
+}
+
+pub inline fn enable_interrupts() void {
+    asm volatile ("sti");
 }

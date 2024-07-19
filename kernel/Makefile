@@ -1,5 +1,5 @@
 LDFLAGS += -melf_i386 -Tsrc/arch/i386/kernel.ld
-ZIGFLAGS += -target x86-freestanding -mcpu i386 -fno-stack-check -O ReleaseSmall
+ZIGFLAGS += -target x86-freestanding -mcpu i386 -fno-stack-check -O ReleaseSafe
 ASFLAGS += -32 -march=i386
 
 OBJECTS = src/main.o src/arch/i386/init.o src/arch/i386/isr.o
