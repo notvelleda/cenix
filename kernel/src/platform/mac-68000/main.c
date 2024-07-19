@@ -14,17 +14,6 @@
 #define SCREEN_HEIGHT 342
 #define CONSOLE_HEIGHT 336 // console height has to be a multiple of 8!
 
-void draw_string(const char *str, short x, short y);
-void draw_char(char c, short x, short y);
-void draw_num(unsigned int num, short x, short y);
-void draw_string_fast(const char *str, short x, short y);
-void draw_num_fast(unsigned int num, short x, short y);
-
-void print(const char *str);
-void println(const char *str);
-void print_num(unsigned int num);
-void clear();
-
 int console_x = 0;
 int console_y = 0;
 
@@ -35,7 +24,10 @@ extern char _end;
 void _start() {
     struct init_block init_block;
 
+#ifdef DEBUG
     memset((void *) SCRN_BASE, 0xff, SCRN_LEN);
+#endif
+
     printk("Hellorld!\n");
 
     init_block.kernel_start = (void *) 0;
@@ -45,11 +37,44 @@ void _start() {
     heap_init(&the_heap, &init_block);
 
     heap_list_blocks(&the_heap);
+    void *ptr1 = heap_alloc(&the_heap, 1024);
+    if (ptr1 == NULL) {
+        printk("allocation failed\n");
+        while (1);
+    }
+    heap_list_blocks(&the_heap);
+    void *ptr2 = heap_alloc(&the_heap, 1024);
+    if (ptr2 == NULL) {
+        printk("allocation failed\n");
+        while (1);
+    }
+    heap_list_blocks(&the_heap);
+    void *ptr3 = heap_alloc(&the_heap, 1024);
+    if (ptr3 == NULL) {
+        printk("allocation failed\n");
+        while (1);
+    }
+    heap_list_blocks(&the_heap);
+    heap_free(&the_heap, ptr2);
+    printk("freed memory\n");
+    heap_list_blocks(&the_heap);
+    void *ptr4 = heap_alloc(&the_heap, 1016);
+    heap_list_blocks(&the_heap);
+    heap_free(&the_heap, ptr1);
+    printk("freed memory\n");
+    heap_list_blocks(&the_heap);
+    heap_free(&the_heap, ptr4);
+    printk("freed memory\n");
+    heap_list_blocks(&the_heap);
+    heap_free(&the_heap, ptr3);
+    printk("freed memory\n");
+    heap_list_blocks(&the_heap);
 
     while (1);
 }
 
 void _putchar(char c) {
+#ifdef DEBUG
     int index_byte = SCRN_BASE + (console_x >> 3) + (console_y << 6);
     short index_sub = 7 - (console_x & 0x7);
     char col, row;
@@ -112,4 +137,5 @@ void _putchar(char c) {
             index_sub = 7 - (console_x & 0x7);
         }
     }
+#endif
 }

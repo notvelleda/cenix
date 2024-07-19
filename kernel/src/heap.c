@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include "heap.h"
 #include "debug.h"
+#include "string.h"
 
 #define KIND_AVAILABLE 0
 #define KIND_IMMOVABLE 1
@@ -23,6 +24,11 @@ struct header {
 };
 
 static void split_header(struct header *header, size_t at) {
+    // don't bother splitting headers if there isn't enough space to fit a new one
+    if (at >= header->size - sizeof(struct header)) {
+        return;
+    }
+
     // the header of the newly split block
     struct header *new_header = (struct header *) ((char *) header + at);
     new_header->size = header->size - at;
@@ -97,20 +103,168 @@ void heap_add_memory_block(struct heap *heap, void *start, void *end) {
 }
 
 void *heap_alloc(struct heap *heap, size_t actual_size) {
-    // TODO
-    return NULL;
+    size_t size = ((actual_size + sizeof(struct header)) + 3) & ~3;
+    printk("alloc: size %d (adjusted to %d)\n", actual_size, size);
+
+    // search for a series of consecutive movable or available blocks big enough to fit the allocation
+
+    struct header *start_header = heap->heap_base;
+    struct header *end_header = heap->heap_base;
+    size_t total_size = heap->heap_base->size;
+    size_t to_move = 0;
+    size_t available_memory = heap->total_memory - heap->used_memory;
+
+    if (size > available_memory) {
+        return NULL;
+    }
+
+    while (1) {
+        switch (end_header->kind) {
+        case KIND_AVAILABLE:
+            available_memory -= end_header->size;
+            break;
+        case KIND_MOVABLE:
+            to_move += end_header->size;
+            break;
+        case KIND_IMMOVABLE:
+            if (end_header->next != NULL) {
+                // start the search over from the block following this immovable block
+                start_header = end_header->next;
+                end_header = end_header->next;
+                total_size = end_header->size;
+                to_move = 0;
+                available_memory = heap->total_memory - heap->used_memory;
+                continue;
+            } else {
+                return NULL;
+            }
+        default:
+            break;
+        }
+
+        if (total_size >= size) {
+            // found a potential series of blocks, make sure everything will work out
+            if (to_move <= available_memory) {
+                break;
+            } else {
+                // more data needs to be reallocated and moved around than there is available memory, attempt to find a different series of blocks
+                start_header = end_header;
+                total_size = end_header->size;
+                to_move = 0;
+                available_memory = heap->total_memory - heap->used_memory;
+            }
+        } else if (end_header->next != NULL) {
+            end_header = end_header->next;
+            total_size += end_header->next->size;
+        } else {
+            return NULL;
+        }
+    }
+
+    printk("alloc: moving 0x%x, 0x%x available\n", to_move, available_memory);
+
+    
+    // split end_header
+    size_t split_pos = size - (total_size - end_header->size);
+
+    if (split_pos >= end_header->size) {
+        split_pos = 0;
+    }
+
+    // only split the end header if it's unallocated and if the resulting block in the area to be allocated can actually fit data in it
+    // if the allocation fails that makes it easier to clean up
+    if (split_pos > sizeof(struct header) && end_header->kind == KIND_AVAILABLE) {
+        printk("alloc: splitting end_header at %d\n", split_pos);
+        split_header(end_header, split_pos);
+    }
+
+    int is_end_header_movable = end_header->kind == KIND_MOVABLE;
+
+    if (to_move > 0) {
+        for (struct header *header = start_header; header != end_header; header = header->next) {
+            if (header->kind != KIND_MOVABLE) {
+                continue;
+            }
+
+            const size_t alloc_size = header->size - sizeof(struct header);
+            void *dest_ptr = heap_alloc(heap, alloc_size);
+
+            if (dest_ptr == NULL) {
+                return NULL;
+            }
+
+            // interrupts must be disabled since the original data can't be modified after it's copied but before any references to it are updated
+            // TODO: figure out how to handle interrupt disabling/enabling in an architecture independent manner
+            //arch.disable_interrupts();
+
+            const void *src_ptr = (void *) ((char *) header + sizeof(struct header));
+            memcpy(dest_ptr, src_ptr, alloc_size);
+
+            // this is faster than just calling free() since alloc() will automatically merge consecutive blocks
+            header->kind = KIND_AVAILABLE;
+            heap->used_memory -= header->size;
+
+            if (header->update_ptr != NULL) {
+                *header->update_ptr = (void *) dest_ptr;
+            }
+
+            //arch.enable_interrupts();
+        }
+    }
+
+    // since the contents of end_header have been properly moved, it can be split now
+    if (split_pos > sizeof(struct header) && is_end_header_movable) {
+        printk("alloc: splitting end_header at %d\n", split_pos);
+        split_header(end_header, split_pos);
+    }
+
+    // set up the header and footer of the new allocation
+    start_header->kind = KIND_IMMOVABLE;
+    start_header->next = end_header->next;
+    if (start_header->next != NULL) {
+        start_header->next->prev = start_header;
+    }
+
+    heap->used_memory += size;
+
+    return (void *) ((char *) start_header + sizeof(struct header));
 }
 
 void heap_lock(void *ptr) {
-    // TODO
+    struct header *header = (struct header *) ((char *) ptr - sizeof(struct header));
+    header->kind = KIND_IMMOVABLE;
 }
 
 void heap_unlock(void *ptr) {
-    // TODO
+    struct header *header = (struct header *) ((char *) ptr - sizeof(struct header));
+    header->kind = KIND_MOVABLE;
 }
 
 void heap_free(struct heap *heap, void *ptr) {
-    // TODO
+    struct header *header = (struct header *) ((char *) ptr - sizeof(struct header));
+
+    header->kind = KIND_AVAILABLE;
+    heap->used_memory -= header->size;
+
+    // check if the block directly after this one is available, and merge them if it is
+    if (header->next != NULL && header->next->kind == KIND_AVAILABLE) {
+        header->size += header->next->size;
+        header->next = header->next->next;
+
+        if (header->next->next != NULL) {
+            header->next->next->prev = header;
+        }
+    }
+
+    // merge with the block directly before if applicable
+    if (header->prev != NULL && header->prev->kind == KIND_AVAILABLE) {
+        header->prev->size += header->size;
+        header->prev->next = header->next;
+
+        if (header->next != NULL) {
+            header->next->prev = header->prev;
+        }
+    }
 }
 
 void heap_list_blocks(struct heap *heap) {
