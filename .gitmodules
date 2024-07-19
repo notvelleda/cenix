@@ -1,3 +1,6 @@
 [submodule "tiny-mac-bootloader"]
 	path = tiny-mac-bootloader
 	url = https://github.com/notvelleda/tiny-mac-bootloader.git
+[submodule "kernel/printf"]
+	path = kernel/printf
+	url = https://github.com/mpaland/printf.git
