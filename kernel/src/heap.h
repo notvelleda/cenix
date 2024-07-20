@@ -25,6 +25,9 @@ void heap_init(struct heap *heap, struct init_block *init_block);
 // adds a contiguous block of usable memory to the heap
 void heap_add_memory_block(struct heap *heap, void *start, void *end);
 
+// locks an existing region of memory in the heap so that it won't be used for allocations
+void heap_lock_existing_region(struct heap *heap, void *start, void *end);
+
 // allocates a region of memory, returning a pointer to it. the newly allocated region of memory is set as locked (immovable)
 void *heap_alloc(struct heap *heap, size_t actual_size);
 

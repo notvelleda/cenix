@@ -23,10 +23,12 @@ struct header {
     struct header *prev;
 };
 
-static void split_header(struct header *header, size_t at) {
+static int split_header(struct header *header, size_t at) {
     // don't bother splitting headers if there isn't enough space to fit a new one
     if (at >= header->size - sizeof(struct header)) {
-        return;
+        return 0;
+    } else if (at <= sizeof(struct header)) {
+        return 0;
     }
 
     // the header of the newly split block
@@ -42,6 +44,8 @@ static void split_header(struct header *header, size_t at) {
 
     header->size = at;
     header->next = new_header;
+
+    return 1;
 }
 
 void heap_init(struct heap *heap, struct init_block *init_block) {
@@ -93,13 +97,42 @@ void heap_init(struct heap *heap, struct init_block *init_block) {
         heap->total_memory = (size_t) init_block->memory_end - (size_t) init_block->memory_start;
         heap->used_memory = kernel_header->size;
     }
-
-    printk("total memory: %d KiB, used memory: %d KiB\n", heap->total_memory / 1024, heap->used_memory / 1024);
 }
 
 void heap_add_memory_block(struct heap *heap, void *start, void *end) {
     printk("adding memory to heap from 0x%08x - 0x%08x\n", start, end);
     // TODO: this
+}
+
+void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
+    printk("locking region from 0x%08x - 0x%08x\n", start, end);
+
+    start -= sizeof(struct header);
+
+    for (struct header *header = heap->heap_base; header != NULL; header = header->next) {
+        void *header_start = (void *) header;
+        void *header_end = header_start + header->size;
+
+        if (header_end < start || header_start >= end) {
+            continue;
+        }
+
+        if (start > header_start && start < header_end) {
+            if (split_header(header, (size_t) start - (size_t) header_start)) {
+                continue;
+            }
+            printk("TODO: shrink header and move start of next header back (split at start)\n");
+        }
+
+        if (end > header_start && end < header_end) {
+            if (!split_header(header, (size_t) end - (size_t) header_start)) {
+                printk("TODO: shrink header and move start of next header back (split at end)\n");
+            }
+        }
+
+        header->kind = KIND_IMMOVABLE;
+        heap->used_memory += header->size;
+    }
 }
 
 void *heap_alloc(struct heap *heap, size_t actual_size) {
@@ -171,9 +204,8 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
         split_pos = 0;
     }
 
-    // only split the end header if it's unallocated and if the resulting block in the area to be allocated can actually fit data in it
-    // if the allocation fails that makes it easier to clean up
-    if (split_pos > sizeof(struct header) && end_header->kind == KIND_AVAILABLE) {
+    // only split the end header if it's unallocated, if the allocation fails that makes it easier to clean up
+    if (end_header->kind == KIND_AVAILABLE) {
         printk("alloc: splitting end_header at %d\n", split_pos);
         split_header(end_header, split_pos);
     }
@@ -213,7 +245,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
     }
 
     // since the contents of end_header have been properly moved, it can be split now
-    if (split_pos > sizeof(struct header) && is_end_header_movable) {
+    if (is_end_header_movable) {
         printk("alloc: splitting end_header at %d\n", split_pos);
         split_header(end_header, split_pos);
     }
