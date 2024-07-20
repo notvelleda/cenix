@@ -35,8 +35,8 @@ void _start(void) {
 
     printk("Hellorld!\n");
 
-    init_block.kernel_start = (void *) 0;
-    init_block.kernel_end = init_block.memory_start = (void *) &_end;
+    init_block.kernel_start = init_block.memory_start = (void *) 0;
+    init_block.kernel_end = (void *) &_end;
     init_block.memory_end = MEM_TOP;
 
     heap_init(&the_heap, &init_block);

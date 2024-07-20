@@ -57,46 +57,35 @@ void heap_init(struct heap *heap, struct init_block *init_block) {
         init_block->kernel_end
     );
 
-    if (init_block->memory_start >= init_block->kernel_start || init_block->memory_end <= init_block->kernel_end) {
-        struct header *header = (struct header *) init_block->memory_start;
-        header->kind = KIND_AVAILABLE;
-        header->size = (size_t) init_block->memory_end - (size_t) init_block->memory_start;
-        header->prev = NULL;
-        header->next = NULL;
+    heap->total_memory = (size_t) init_block->memory_end - (size_t) init_block->memory_start;
+    heap->used_memory = 0;
 
-        heap->heap_base = header;
+    void *header_start = init_block->memory_start;
+    void *header_end = header_start + sizeof(struct header);
 
-        heap->total_memory = header->size;
-        heap->used_memory = 0;
-    } else {
-        // TODO: properly handle heap at the very beginning or end of the memory block
-
-        struct header *kernel_header = (struct header *) ((size_t) init_block->kernel_start - sizeof(struct header));
-        kernel_header->kind = KIND_IMMOVABLE;
-        kernel_header->size = (size_t) init_block->kernel_end - (size_t) kernel_header;
-
-        struct header *header_low = (struct header *) init_block->memory_start;
-        header_low->kind = KIND_AVAILABLE;
-        header_low->size = (size_t) kernel_header - (size_t) header_low;
-
-        heap->heap_base = header_low;
-
-        struct header *header_high = (struct header *) init_block->kernel_end;
-        header_high->kind = KIND_AVAILABLE;
-        header_high->size = (size_t) init_block->memory_end - (size_t) header_high;
-
-        header_low->prev = NULL;
-        header_low->next = kernel_header;
-
-        kernel_header->prev = header_low;
-        kernel_header->next = header_high;
-
-        header_high->prev = kernel_header;
-        header_high->next = NULL;
-
-        heap->total_memory = (size_t) init_block->memory_end - (size_t) init_block->memory_start;
-        heap->used_memory = kernel_header->size;
+    // if the location of the initial heap header in memory overlaps with the kernel, move the start of the heap above the kernel
+    // this can be handled by heap_lock_existing region, but then that would cause the start of the kernel to be overwritten
+    if (header_end >= init_block->kernel_start && header_start < init_block->kernel_end) {
+        heap->used_memory += (size_t) init_block->kernel_end - (size_t) init_block->memory_start;
+        init_block->memory_start = init_block->kernel_end;
     }
+
+    struct header *header = (struct header *) init_block->memory_start;
+    header->kind = KIND_AVAILABLE;
+    header->size = (size_t) init_block->memory_end - (size_t) init_block->memory_start;
+    header->prev = NULL;
+    header->next = NULL;
+
+    heap->heap_base = header;
+
+    heap_lock_existing_region(heap, init_block->kernel_start, init_block->kernel_end);
+
+    printk(
+        "total memory: %d KiB, used memory: %d KiB, free memory: %d KiB\n",
+        heap->total_memory / 1024,
+        heap->used_memory / 1024,
+        (heap->total_memory - heap->used_memory) / 1024
+    );
 }
 
 void heap_add_memory_block(struct heap *heap, void *start, void *end) {
@@ -110,28 +99,92 @@ void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
     start -= sizeof(struct header);
 
     for (struct header *header = heap->heap_base; header != NULL; header = header->next) {
-        void *header_start = (void *) header;
-        void *header_end = header_start + header->size;
+        void *block_start = (void *) header;
+        void *block_end = block_start + header->size;
 
-        if (header_end < start || header_start >= end) {
+        if (block_end <= start || block_start >= end) {
+            continue;
+        } else if (header->kind != KIND_AVAILABLE) {
+            printk("header at 0x%x isn't available and intersects with existing region\n", header);
+            continue;
+        }
+        // TODO: should movable overlapping regions be moved? will that ever come up?
+
+        if (start > block_start && start < block_end) {
+            size_t at = (size_t) start - (size_t) block_start;
+
+            if (at >= header->size - sizeof(struct header)) {
+                size_t offset = header->size - at;
+                header->size = at;
+
+                struct header *next = header->next;
+                if (next == NULL) {
+                    continue;
+                }
+
+                if (next->kind == KIND_AVAILABLE) {
+                    struct header tmp = *next;
+                    tmp.size += offset;
+
+                    next = (struct header *) ((char *) header + at);
+                    *next = tmp;
+                    header->next = next;
+
+                    continue;
+                } else {
+                    printk("header at 0x%x isn't available and intersects with existing region\n", next);
+                }
+
+                continue;
+            } else if (split_header(header, at)) {
+                continue;
+            }
+        }
+
+        if (end > block_start && end < block_end) {
+            size_t at = (size_t) end - (size_t) block_start;
+
+            if (at <= sizeof(struct header) && header->prev != NULL) {
+                struct header *prev = header->prev;
+
+                if (prev->kind == KIND_AVAILABLE) {
+                    prev->size -= at;
+
+                    struct header tmp = *header;
+                    tmp.size += at;
+
+                    header = (struct header *) ((char *) header - at);
+                    *header = tmp;
+                    prev->next = header;
+
+                    // try this header again
+                    header = prev;
+                    continue;
+                } else {
+                    printk("header at 0x%x isn't available and intersects with existing region\n", prev);
+                }
+            } else {
+                split_header(header, at);
+            }
+        }
+
+        heap->used_memory += header->size;
+
+        if (block_start + sizeof(struct header) <= start + sizeof(struct header) || end < block_start) {
+            header->kind = KIND_IMMOVABLE;
             continue;
         }
 
-        if (start > header_start && start < header_end) {
-            if (split_header(header, (size_t) start - (size_t) header_start)) {
-                continue;
-            }
-            printk("TODO: shrink header and move start of next header back (split at start)\n");
+        // this header lives inside of the locked region of memory, it's better for it to just Not Exist
+        if (header->prev == NULL) {
+            heap->heap_base = header->next;
+        } else {
+            header->prev->next = header->next;
         }
 
-        if (end > header_start && end < header_end) {
-            if (!split_header(header, (size_t) end - (size_t) header_start)) {
-                printk("TODO: shrink header and move start of next header back (split at end)\n");
-            }
+        if (header->next != NULL) {
+            header->next->prev = header->prev;
         }
-
-        header->kind = KIND_IMMOVABLE;
-        heap->used_memory += header->size;
     }
 }
 
@@ -279,22 +332,24 @@ void heap_free(struct heap *heap, void *ptr) {
     heap->used_memory -= header->size;
 
     // check if the block directly after this one is available, and merge them if it is
-    if (header->next != NULL && header->next->kind == KIND_AVAILABLE) {
-        header->size += header->next->size;
-        header->next = header->next->next;
+    struct header *next = header->next;
+    if (next != NULL && next->kind == KIND_AVAILABLE) {
+        header->size += next->size;
+        next = next->next;
 
-        if (header->next->next != NULL) {
-            header->next->next->prev = header;
+        if (next->next != NULL) {
+            next->next->prev = header;
         }
     }
 
     // merge with the block directly before if applicable
-    if (header->prev != NULL && header->prev->kind == KIND_AVAILABLE) {
-        header->prev->size += header->size;
-        header->prev->next = header->next;
+    struct header *prev = header->prev;
+    if (prev != NULL && prev->kind == KIND_AVAILABLE) {
+        prev->size += header->size;
+        prev->next = header->next;
 
         if (header->next != NULL) {
-            header->next->prev = header->prev;
+            header->next->prev = prev;
         }
     }
 }
