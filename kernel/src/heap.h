@@ -42,3 +42,13 @@ void heap_free(struct heap *heap, void *ptr);
 
 // prints out a list of all the blocks in the heap
 void heap_list_blocks(struct heap *heap);
+
+// sets the absolute address that should be updated if the given memory region is moved
+// this update address will replace any addresses or handles set previously
+void heap_set_update_absolute(void *ptr, void **absolute_ptr);
+
+#include "kernel_memory.h"
+
+// sets the kernel memory handle that should be updated if the given memory region is moved
+// this handle will replace any absolute addresses or handles set previously
+void heap_set_update_handle(void *ptr, kmem_handle_t handle);

@@ -1,8 +1,12 @@
 #include "string.h"
-#include "font.h"
 #include "printf.h"
 #include "debug.h"
 #include "heap.h"
+#include "kernel_memory.h"
+
+#ifdef DEBUG
+#include "font.h"
+#endif
 
 #define SCRN_BASE (*(void **) 0x0824)
 #define SCRN_LEN 0x5580
@@ -19,8 +23,8 @@
 #define SCREEN_HEIGHT 342
 #define CONSOLE_HEIGHT 336 // console height has to be a multiple of 8!
 
-int console_x = 0;
-int console_y = 0;
+static int console_x = 0;
+static int console_y = 0;
 
 struct heap the_heap = {NULL, 0, 0};
 
@@ -55,6 +59,20 @@ void _start(void) {
 void after_sp_set(void) {
     heap_lock_existing_region(&the_heap, SCRN_BASE, SCRN_BASE + SCRN_LEN);
     heap_lock_existing_region(&the_heap, SOUND_BASE, SOUND_BASE + SOUND_LEN);
+
+    size_t offset = 0xfd00 - 0xa100;
+
+    switch ((size_t) SOUND_BASE & 0xffff) {
+    case 0xfd00:
+        heap_lock_existing_region(&the_heap, SOUND_BASE - offset, SOUND_BASE - offset + SOUND_LEN);
+        break;
+    case 0xa100:
+        heap_lock_existing_region(&the_heap, SOUND_BASE + offset, SOUND_BASE + offset + SOUND_LEN);
+        break;
+    default:
+        printk("unexpected SoundBase of 0x%08x, alternate sound buffer will not be available\n", SOUND_BASE);
+        break;
+    }
 
     heap_list_blocks(&the_heap);
 
@@ -97,6 +115,54 @@ void after_sp_set(void) {
     heap_free(&the_heap, ptr3);
     printk("freed memory\n");
     heap_list_blocks(&the_heap);*/
+
+    kmem_init(&the_heap);
+
+    char *ptr;
+    kmem_handle_t handle1 = kmem_alloc(1024, true, (void **) &ptr);
+    printk("handle1 ptr is 0x%08x\n", ptr);
+    *ptr = 1;
+    kmem_unlock(handle1);
+    kmem_handle_t handle2 = kmem_alloc(512, true, (void **) &ptr);
+    printk("handle2 ptr is 0x%08x\n", ptr);
+    *ptr = 2;
+    kmem_unlock(handle2);
+    kmem_handle_t handle3 = kmem_alloc(256, true, (void **) &ptr);
+    printk("handle3 ptr is 0x%08x\n", ptr);
+    *ptr = 3;
+    kmem_unlock(handle3);
+
+    ptr = (char *) kmem_lock(handle1);
+    printk("handle1: %d, ptr is 0x%08x\n", *ptr, ptr);
+    kmem_unlock(handle1);
+
+    ptr = (char *) kmem_lock(handle2);
+    printk("handle2: %d, ptr is 0x%08x\n", *ptr, ptr);
+    kmem_unlock(handle2);
+
+    ptr = (char *) kmem_lock(handle3);
+    printk("handle3: %d, ptr is 0x%08x\n", *ptr, ptr);
+    kmem_unlock(handle3);
+
+    /*printk(" ==== alloc 1 (1024)\n");
+    void *ptr = heap_alloc(&the_heap, 1024);
+    printk(" got ptr 0x%x\n", ptr);
+    heap_unlock(ptr);
+    printk(" ==== alloc 2 (512)\n");
+    ptr = heap_alloc(&the_heap, 512);
+    printk(" got ptr 0x%x\n", ptr);
+    heap_unlock(ptr);
+    printk(" ====\n");
+
+    heap_list_blocks(&the_heap);
+
+    printk(" ==== alloc 3 (256)\n");
+    ptr = heap_alloc(&the_heap, 256);
+    printk(" got ptr 0x%x\n", ptr);
+    heap_unlock(ptr);
+    printk(" ====\n");*/
+
+    heap_list_blocks(&the_heap);
 
     while (1);
 }
