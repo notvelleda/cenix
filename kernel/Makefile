@@ -24,7 +24,9 @@ COMMON_SOURCES != find src -maxdepth 1 -name "*.c"
 68000_SOURCES != [ -n "`echo $(PLATFORM) | grep -e '.*-68000'`" ] && find src/arch/68000 -name "*.c" -o -name "*.S" || echo ""
 PLATFORM_SOURCES += $(68000_SOURCES)
 
-SOURCE_FILES = $(COMMON_SOURCES) $(PLATFORM_SOURCES) printf/printf.c
+PRINTF_SOURCES != [ "$(DEBUG)" = y ] && echo "printf/printf.c" || echo ""
+
+SOURCE_FILES = $(COMMON_SOURCES) $(PLATFORM_SOURCES) $(PRINTF_SOURCES)
 C_OBJECTS = $(SOURCE_FILES:.c=.o)
 OBJECTS = $(C_OBJECTS:.S=.o)
 

@@ -4,47 +4,18 @@
 #include "debug.h"
 #include "string.h"
 
-#define KIND_AVAILABLE 0
-#define KIND_IMMOVABLE 1
-#define KIND_MOVABLE 2
-// old kind goes here (bits 3 and 4, flag values 4 and 8)
-#define FLAG_KMEM_UPDATE 16
-
-#define KIND_MASK 3
-#define GET_KIND(header) (header->flags & KIND_MASK)
-#define SET_KIND(header, kind) { header->flags = (header->flags & ~KIND_MASK) | kind; }
-#define GET_OLD_KIND(header) ((header->flags >> 2) & KIND_MASK)
-#define SET_OLD_KIND(header, kind) { header->flags = (header->flags & ~(KIND_MASK << 2)) | (kind << 2); }
-
 const char *kind_names[] = {"available", "immovable", "movable"};
 
-struct header {
-    // the size of the memory block this header is for, including the size of the header
-    size_t size;
-    // flags describing what kind of header this is, among other things
-    uint8_t flags;
-    // the address or handle that should be updated if the region this header controls is moved
-    union {
-        void **absolute_ptr;
-        kmem_handle_t handle;
-    } update_ref;
-
-    // the next header in the list (TODO: combine this with `size`)
-    struct header *next;
-    // the previous header in the list
-    struct header *prev;
-};
-
-static bool split_header(struct header *header, size_t at) {
+static bool split_header(struct heap_header *header, size_t at) {
     // don't bother splitting headers if there isn't enough space to fit a new one
-    if (at >= header->size - sizeof(struct header)) {
+    if (at >= header->size - sizeof(struct heap_header)) {
         return false;
-    } else if (at <= sizeof(struct header)) {
+    } else if (at <= sizeof(struct heap_header)) {
         return false;
     }
 
     // the header of the newly split block
-    struct header *new_header = (struct header *) ((char *) header + at);
+    struct heap_header *new_header = (struct heap_header *) ((char *) header + at);
     new_header->size = header->size - at;
     new_header->flags = KIND_AVAILABLE;
     new_header->next = header->next;
@@ -73,7 +44,7 @@ void heap_init(struct heap *heap, struct init_block *init_block) {
     heap->used_memory = 0;
 
     void *header_start = init_block->memory_start;
-    void *header_end = header_start + sizeof(struct header);
+    void *header_end = header_start + sizeof(struct heap_header);
 
     // if the location of the initial heap header in memory overlaps with the kernel, move the start of the heap above the kernel
     // this can be handled by heap_lock_existing region, but then that would cause the start of the kernel to be overwritten
@@ -82,7 +53,7 @@ void heap_init(struct heap *heap, struct init_block *init_block) {
         init_block->memory_start = init_block->kernel_end;
     }
 
-    struct header *header = (struct header *) init_block->memory_start;
+    struct heap_header *header = (struct heap_header *) init_block->memory_start;
     header->flags = KIND_AVAILABLE;
     header->size = (size_t) init_block->memory_end - (size_t) init_block->memory_start;
     header->prev = NULL;
@@ -108,9 +79,9 @@ void heap_add_memory_block(struct heap *heap, void *start, void *end) {
 void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
     printk("locking region from 0x%08x - 0x%08x\n", start, end);
 
-    start -= sizeof(struct header);
+    start -= sizeof(struct heap_header);
 
-    for (struct header *header = heap->heap_base; header != NULL; header = header->next) {
+    for (struct heap_header *header = heap->heap_base; header != NULL; header = header->next) {
         void *block_start = (void *) header;
         void *block_end = block_start + header->size;
 
@@ -125,20 +96,20 @@ void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
         if (start > block_start && start < block_end) {
             size_t at = (size_t) start - (size_t) block_start;
 
-            if (at >= header->size - sizeof(struct header)) {
+            if (at >= header->size - sizeof(struct heap_header)) {
                 size_t offset = header->size - at;
                 header->size = at;
 
-                struct header *next = header->next;
+                struct heap_header *next = header->next;
                 if (next == NULL) {
                     continue;
                 }
 
                 if (GET_KIND(next) == KIND_AVAILABLE) {
-                    struct header tmp = *next;
+                    struct heap_header tmp = *next;
                     tmp.size += offset;
 
-                    next = (struct header *) ((char *) header + at);
+                    next = (struct heap_header *) ((char *) header + at);
                     *next = tmp;
                     header->next = next;
 
@@ -156,16 +127,16 @@ void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
         if (end > block_start && end < block_end) {
             size_t at = (size_t) end - (size_t) block_start;
 
-            if (at <= sizeof(struct header) && header->prev != NULL) {
-                struct header *prev = header->prev;
+            if (at <= sizeof(struct heap_header) && header->prev != NULL) {
+                struct heap_header *prev = header->prev;
 
                 if (GET_KIND(prev) == KIND_AVAILABLE) {
                     prev->size -= at;
 
-                    struct header tmp = *header;
+                    struct heap_header tmp = *header;
                     tmp.size += at;
 
-                    header = (struct header *) ((char *) header - at);
+                    header = (struct heap_header *) ((char *) header - at);
                     *header = tmp;
                     prev->next = header;
 
@@ -182,7 +153,7 @@ void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
 
         heap->used_memory += header->size;
 
-        if (block_start + sizeof(struct header) <= start + sizeof(struct header) || end < block_start) {
+        if (block_start + sizeof(struct heap_header) <= start + sizeof(struct heap_header) || end < block_start) {
             SET_KIND(header, KIND_IMMOVABLE);
             continue;
         }
@@ -213,15 +184,15 @@ static void print_spaces(void) {
 #endif
 
 void *heap_alloc(struct heap *heap, size_t actual_size) {
-    size_t size = ((actual_size + sizeof(struct header)) + 3) & ~3;
+    size_t size = ((actual_size + sizeof(struct heap_header)) + 3) & ~3;
     print_spaces();
     printk("alloc: size %d (adjusted to %d)\n", actual_size, size);
 
     // search for a series of consecutive movable or available blocks big enough to fit the allocation
 
-    struct header *start_header = heap->heap_base;
-    struct header *end_header = heap->heap_base;
-    size_t total_size = heap->heap_base->size;
+    struct heap_header *start_header = heap->heap_base;
+    struct heap_header *end_header = heap->heap_base;
+    size_t total_size = start_header->size;
     size_t to_move = 0;
     size_t available_memory = heap->total_memory - heap->used_memory;
 
@@ -238,19 +209,16 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
             to_move += end_header->size;
             break;
         case KIND_IMMOVABLE:
-            if (end_header->next != NULL) {
-                // start the search over from the block following this immovable block
-                start_header = end_header->next;
-                end_header = end_header->next;
-                total_size = end_header->size;
-                to_move = 0;
-                available_memory = heap->total_memory - heap->used_memory;
-                continue;
-            } else {
+            if (end_header->next == NULL) {
                 return NULL;
             }
-        default:
-            break;
+
+            // start the search over from the block following this immovable block
+            start_header = end_header = end_header->next;
+            total_size = start_header->size;
+            to_move = 0;
+            available_memory = heap->total_memory - heap->used_memory;
+            continue;
         }
 
         if (total_size >= size) {
@@ -263,13 +231,16 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
                 total_size = end_header->size;
                 to_move = 0;
                 available_memory = heap->total_memory - heap->used_memory;
+                continue;
             }
-        } else if (end_header->next != NULL) {
-            end_header = end_header->next;
-            total_size += end_header->next->size;
-        } else {
+        }
+
+        if (end_header->next == NULL) {
             return NULL;
         }
+
+        end_header = end_header->next;
+        total_size += end_header->size;
     }
 
     print_spaces();
@@ -293,7 +264,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
         // mark all the headers that'll be occupied by this allocation as immovable,
         // and save their old kind values just in case this allocation fails
         // this is required so that allocated memory for newly moved headers doesn't lie inside the area taken up by the new allocation
-        for (struct header *header = start_header;; header = header->next) {
+        for (struct heap_header *header = start_header;; header = header->next) {
             uint8_t kind = GET_KIND(header);
             SET_OLD_KIND(header, kind);
             SET_KIND(header, KIND_IMMOVABLE);
@@ -307,7 +278,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
             }
         }
 
-        for (struct header *header = start_header;; header = header->next) {
+        for (struct heap_header *header = start_header;; header = header->next) {
             // skip any headers that don't need to be moved
             if (GET_OLD_KIND(header) != KIND_MOVABLE) {
                 if (header == end_header) {
@@ -317,7 +288,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
                 }
             }
 
-            const size_t alloc_size = header->size - sizeof(struct header);
+            const size_t alloc_size = header->size - sizeof(struct heap_header);
 
 #ifdef DEBUG
             nesting ++;
@@ -329,7 +300,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
 
             if (dest_ptr == NULL) {
                 // allocation failed, revert any headers that haven't been moved to their old kind values
-                for (struct header *header = start_header;; header = header->next) {
+                for (struct heap_header *header = start_header;; header = header->next) {
                     uint8_t kind = GET_OLD_KIND(header);
                     SET_KIND(header, kind);
 
@@ -349,14 +320,14 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
             // TODO: figure out how to handle interrupt disabling/enabling in an architecture independent manner
             //arch.disable_interrupts();
 
-            const void *src_ptr = (void *) ((char *) header + sizeof(struct header));
+            const void *src_ptr = (void *) ((char *) header + sizeof(struct heap_header));
             memcpy(dest_ptr, src_ptr, alloc_size);
 
             SET_OLD_KIND(header, KIND_AVAILABLE);
 
-            if ((header->flags & FLAG_KMEM_UPDATE) != 0) {
-                kmem_update(header->update_ref.handle, (void *) dest_ptr);
-                heap_set_update_handle(dest_ptr, header->update_ref.handle);
+            if ((header->flags & FLAG_CAPABILITY_RESOURCE) != 0) {
+                update_capability_resource(header->update_ref.capability.address, header->update_ref.capability.depth, dest_ptr);
+                heap_set_update_capability(dest_ptr, header->update_ref.capability.address, header->update_ref.capability.depth);
             } else if (header->update_ref.absolute_ptr != NULL) {
                 *header->update_ref.absolute_ptr = (void *) dest_ptr;
                 heap_set_update_absolute(dest_ptr, header->update_ref.absolute_ptr);
@@ -375,6 +346,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
     // set up the header and footer of the new allocation
     start_header->size = ((size_t) end_header + end_header->size) - (size_t) start_header;
     start_header->flags = KIND_IMMOVABLE;
+    start_header->num_references = 0;
     start_header->next = end_header->next;
     if (start_header->next != NULL) {
         start_header->next->prev = start_header;
@@ -386,31 +358,21 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
 
     // try to split the newly created header to shave off any excess space
     if (split_header(start_header, size)) {
-        struct header *new_header = (struct header *) ((char *) start_header + size);
+        struct heap_header *new_header = (struct heap_header *) ((char *) start_header + size);
         heap->used_memory -= new_header->size;
     }
 
-    return (void *) ((char *) start_header + sizeof(struct header));
-}
-
-void heap_lock(void *ptr) {
-    struct header *header = (struct header *) ((char *) ptr - sizeof(struct header));
-    SET_KIND(header, KIND_IMMOVABLE);
-}
-
-void heap_unlock(void *ptr) {
-    struct header *header = (struct header *) ((char *) ptr - sizeof(struct header));
-    SET_KIND(header, KIND_MOVABLE);
+    return (void *) ((char *) start_header + sizeof(struct heap_header));
 }
 
 void heap_free(struct heap *heap, void *ptr) {
-    struct header *header = (struct header *) ((char *) ptr - sizeof(struct header));
+    struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
 
     header->flags = KIND_AVAILABLE;
     heap->used_memory -= header->size;
 
     // check if the block directly after this one is available, and merge them if it is
-    struct header *next = header->next;
+    struct heap_header *next = header->next;
     if (next != NULL && GET_KIND(next) == KIND_AVAILABLE) {
         header->size += next->size;
         next = next->next;
@@ -421,7 +383,7 @@ void heap_free(struct heap *heap, void *ptr) {
     }
 
     // merge with the block directly before if applicable
-    struct header *prev = header->prev;
+    struct heap_header *prev = header->prev;
     if (prev != NULL && GET_KIND(prev) == KIND_AVAILABLE) {
         prev->size += header->size;
         prev->next = header->next;
@@ -433,7 +395,7 @@ void heap_free(struct heap *heap, void *ptr) {
 }
 
 void heap_list_blocks(struct heap *heap) {
-    struct header *header = heap->heap_base;
+    struct heap_header *header = heap->heap_base;
 
     while (1) {
         printk(
@@ -454,17 +416,18 @@ void heap_list_blocks(struct heap *heap) {
 }
 
 void heap_set_update_absolute(void *ptr, void **absolute_ptr) {
-    struct header *header = (struct header *) ((char *) ptr - sizeof(struct header));
+    struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
 
     // TODO: this section is critical, should interrupts be disabled?
-    header->flags &= ~FLAG_KMEM_UPDATE;
+    header->flags &= ~FLAG_CAPABILITY_RESOURCE;
     header->update_ref.absolute_ptr = absolute_ptr;
 }
 
-void heap_set_update_handle(void *ptr, kmem_handle_t handle) {
-    struct header *header = (struct header *) ((char *) ptr - sizeof(struct header));
+void heap_set_update_capability(void *ptr, size_t address, size_t depth) {
+    struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
 
     // TODO: this section is critical, should interrupts be disabled?
-    header->flags |= FLAG_KMEM_UPDATE;
-    header->update_ref.handle = handle;
+    header->flags |= FLAG_CAPABILITY_RESOURCE;
+    header->update_ref.capability.address = address;
+    header->update_ref.capability.depth = depth;
 }
