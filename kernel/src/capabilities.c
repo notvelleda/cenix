@@ -1,7 +1,6 @@
 #include "capabilities.h"
 #include "string.h"
-
-#define ROOT_CAP_SLOT_BITS 4
+#include "threads.h"
 
 struct capability kernel_root_capability;
 
@@ -19,7 +18,7 @@ struct invocation_handlers node_handlers = {
 // allocates memory for a capability node and initializes it.
 // the size of this capability node is determined by slot_bits, where 2 raised to the power of slot_bits is the number of slots in this node
 // if successful, a pointer to the allocated memory is returned
-void *allocate_node(struct heap *heap, size_t slot_bits) {
+static void *allocate_node(struct heap *heap, size_t slot_bits) {
     size_t total_slots = 1 << slot_bits;
 
     size_t slots_start = sizeof(struct capability_node_header);
@@ -39,12 +38,6 @@ void *allocate_node(struct heap *heap, size_t slot_bits) {
 
     return (void *) new;
 }
-
-struct look_up_result {
-    struct capability *slot;
-    struct capability_node_header *container;
-    bool should_unlock;
-};
 
 bool look_up_capability(struct capability *root, size_t address, size_t depth, struct look_up_result *result) {
     if (root->handlers != &node_handlers && depth != 0) {
@@ -93,7 +86,6 @@ bool look_up_capability(struct capability *root, size_t address, size_t depth, s
     }
 }
 
-// TODO: find a better name for this
 void unlock_looked_up_capability(struct look_up_result *result) {
     if (result->should_unlock) {
         heap_unlock((void *) result->container);
@@ -101,7 +93,7 @@ void unlock_looked_up_capability(struct look_up_result *result) {
 }
 
 // populates a capability slot at the given address and search depth with the given heap-managed resource and invocation handlers
-bool populate_capability_slot(struct heap *heap, size_t address, size_t depth, void *resource, struct invocation_handlers *handlers) {
+static bool populate_capability_slot(struct heap *heap, size_t address, size_t depth, void *resource, struct invocation_handlers *handlers) {
     struct look_up_result result;
     if (!look_up_capability(&kernel_root_capability, address, depth, &result)) {
         heap_free(heap, resource);
@@ -112,7 +104,6 @@ bool populate_capability_slot(struct heap *heap, size_t address, size_t depth, v
     result.slot->resource = resource;
     result.slot->flags = CAP_FLAG_IS_HEAP_MANAGED;
     result.slot->badge = 0;
-    heap_add_reference(resource);
     heap_set_update_capability(resource, address, depth);
     heap_unlock(resource);
 
@@ -182,6 +173,9 @@ static size_t alloc(struct capability *slot, size_t argument, bool from_userland
         resource = allocate_node(heap, args->size);
         handlers = &node_handlers;
         break;
+    case TYPE_THREAD:
+        alloc_thread(heap, &resource, &handlers);
+        break;
     }
 
     if (resource == NULL) {
@@ -222,4 +216,25 @@ void update_capability_resource(size_t address, size_t depth, void *new_resource
     // TODO: update locations of any capabilities derived from this one
 
     unlock_looked_up_capability(&result);
+}
+
+size_t invoke_capability(size_t address, size_t depth, size_t handler_number, size_t argument, bool from_userland) {
+    struct look_up_result result;
+
+    if (!look_up_capability(&kernel_root_capability, address, depth, &result)) {
+        printk("couldn't locate capability at 0x%x (%d bits) for invocation\n", address, depth);
+        return 0;
+    }
+
+    struct invocation_handlers *handlers = result.slot->handlers;
+
+    if (handlers == NULL || handler_number >= handlers->num_handlers) {
+        printk("invocation %d on capability 0x%x (%d bits) is invalid\n", handler_number, address, depth);
+        unlock_looked_up_capability(&result);
+        return 0;
+    }
+
+    size_t return_value = handlers->handlers[handler_number](result.slot, argument, from_userland);
+    unlock_looked_up_capability(&result);
+    return return_value;
 }

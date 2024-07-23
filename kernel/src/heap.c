@@ -1,10 +1,11 @@
 #include <stdint.h>
 #include <stdbool.h>
-#include "heap.h"
+#include "arch.h"
 #include "debug.h"
+#include "heap.h"
 #include "string.h"
 
-const char *kind_names[] = {"available", "immovable", "movable"};
+#undef DEBUG_HEAP
 
 static bool split_header(struct heap_header *header, size_t at) {
     // don't bother splitting headers if there isn't enough space to fit a new one
@@ -72,7 +73,10 @@ void heap_init(struct heap *heap, struct init_block *init_block) {
 }
 
 void heap_add_memory_block(struct heap *heap, void *start, void *end) {
+#ifdef DEBUG_HEAP
     printk("adding memory to heap from 0x%08x - 0x%08x\n", start, end);
+#endif
+
     // TODO: this
 }
 
@@ -171,7 +175,7 @@ void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
     }
 }
 
-#ifdef DEBUG
+#if defined(DEBUG) && defined(DEBUG_HEAP)
 static size_t nesting = 0;
 
 static void print_spaces(void) {
@@ -179,14 +183,15 @@ static void print_spaces(void) {
         printk(" ");
     }
 }
-#else
-#define print_spaces()
 #endif
 
 void *heap_alloc(struct heap *heap, size_t actual_size) {
     size_t size = ((actual_size + sizeof(struct heap_header)) + 3) & ~3;
+
+#ifdef DEBUG_HEAP
     print_spaces();
     printk("alloc: size %d (adjusted to %d)\n", actual_size, size);
+#endif
 
     // search for a series of consecutive movable or available blocks big enough to fit the allocation
 
@@ -243,8 +248,10 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
         total_size += end_header->size;
     }
 
+#ifdef DEBUG_HEAP
     print_spaces();
     printk("alloc: moving 0x%x, 0x%x available\n", to_move, available_memory);
+#endif
 
     // split end_header
     size_t split_pos = size - (total_size - end_header->size);
@@ -255,8 +262,10 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
 
     // only split the end header if it's unallocated, if the allocation fails that makes it easier to clean up
     if (GET_KIND(end_header) == KIND_AVAILABLE) {
+#ifdef DEBUG_HEAP
         print_spaces();
         printk("alloc: splitting end_header at %d\n", split_pos);
+#endif
         split_header(end_header, split_pos);
     }
 
@@ -290,11 +299,11 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
 
             const size_t alloc_size = header->size - sizeof(struct heap_header);
 
-#ifdef DEBUG
+#if defined(DEBUG) && defined(DEBUG_HEAP)
             nesting ++;
 #endif
             void *dest_ptr = heap_alloc(heap, alloc_size);
-#ifdef DEBUG
+#if defined(DEBUG) && defined(DEBUG_HEAP)
             nesting --;
 #endif
 
@@ -317,8 +326,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
             }
 
             // interrupts must be disabled since the original data can't be modified after it's copied but before any references to it are updated
-            // TODO: figure out how to handle interrupt disabling/enabling in an architecture independent manner
-            //arch.disable_interrupts();
+            interrupt_status_t status = disable_interrupts();
 
             const void *src_ptr = (void *) ((char *) header + sizeof(struct heap_header));
             memcpy(dest_ptr, src_ptr, alloc_size);
@@ -335,7 +343,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
 
             heap_unlock(dest_ptr);
 
-            //arch.enable_interrupts();
+            restore_interrupt_status(status);
 
             if (header == end_header) {
                 break;
@@ -346,7 +354,6 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
     // set up the header and footer of the new allocation
     start_header->size = ((size_t) end_header + end_header->size) - (size_t) start_header;
     start_header->flags = KIND_IMMOVABLE;
-    start_header->num_references = 0;
     start_header->next = end_header->next;
     if (start_header->next != NULL) {
         start_header->next->prev = start_header;
@@ -394,6 +401,9 @@ void heap_free(struct heap *heap, void *ptr) {
     }
 }
 
+#ifdef DEBUG
+const char *kind_names[] = {"available", "immovable", "movable"};
+
 void heap_list_blocks(struct heap *heap) {
     struct heap_header *header = heap->heap_base;
 
@@ -414,20 +424,4 @@ void heap_list_blocks(struct heap *heap) {
         }
     }
 }
-
-void heap_set_update_absolute(void *ptr, void **absolute_ptr) {
-    struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
-
-    // TODO: this section is critical, should interrupts be disabled?
-    header->flags &= ~FLAG_CAPABILITY_RESOURCE;
-    header->update_ref.absolute_ptr = absolute_ptr;
-}
-
-void heap_set_update_capability(void *ptr, size_t address, size_t depth) {
-    struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
-
-    // TODO: this section is critical, should interrupts be disabled?
-    header->flags |= FLAG_CAPABILITY_RESOURCE;
-    header->update_ref.capability.address = address;
-    header->update_ref.capability.depth = depth;
-}
+#endif

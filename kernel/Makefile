@@ -2,10 +2,14 @@ CROSS ?= m68k-unknown-elf-
 CC ?= $(CROSS)cc
 LD ?= $(CROSS)ld
 
+ARCH_68000 != [ -n "`echo $(PLATFORM) | grep -e '.*-68000'`" ] && echo "68000" || echo ""
+ARCH = $(ARCH_68000)
+
 DEBUG_FLAG != [ "$(DEBUG)" = y ] && echo "-DDEBUG" || echo ""
 
-CFLAGS += -O2 -Isrc -Iprintf -nostdlib -fno-builtin -ffreestanding -fno-stack-protector -static -Wall -DPLATFORM=$(PLATFORM) $(DEBUG_FLAG)
+CFLAGS += -O2 -Isrc -Iprintf -nostdlib -fno-builtin -ffreestanding -fno-stack-protector -static -Wall -DPLATFORM="$(PLATFORM)" $(DEBUG_FLAG) -DARCH_$(ARCH)
 
+ARCH_PATH = src/arch/$(ARCH)
 PLATFORM_PATH = src/platform/$(PLATFORM)
 
 # architecture-specific cc flags
@@ -17,16 +21,13 @@ CFLAGS += $(68000_CFLAGS)
 MAC_LDFLAGS != [ "$(PLATFORM)" = mac-68000 ] && echo "-T$(PLATFORM_PATH)/kernel.ld" || echo ""
 LDFLAGS += $(MAC_LDFLAGS)
 
+ARCH_SOURCES != find $(ARCH_PATH) -name "*.c" -o -name "*.S"
 PLATFORM_SOURCES != find $(PLATFORM_PATH) -name "*.c" -o -name "*.S"
 COMMON_SOURCES != find src -maxdepth 1 -name "*.c"
 
-# architecture-specific source files
-68000_SOURCES != [ -n "`echo $(PLATFORM) | grep -e '.*-68000'`" ] && find src/arch/68000 -name "*.c" -o -name "*.S" || echo ""
-PLATFORM_SOURCES += $(68000_SOURCES)
-
 PRINTF_SOURCES != [ "$(DEBUG)" = y ] && echo "printf/printf.c" || echo ""
 
-SOURCE_FILES = $(COMMON_SOURCES) $(PLATFORM_SOURCES) $(PRINTF_SOURCES)
+SOURCE_FILES = $(COMMON_SOURCES) $(PLATFORM_SOURCES) $(ARCH_SOURCES) $(PRINTF_SOURCES)
 C_OBJECTS = $(SOURCE_FILES:.c=.o)
 OBJECTS = $(C_OBJECTS:.S=.o)
 

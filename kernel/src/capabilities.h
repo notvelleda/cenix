@@ -21,6 +21,22 @@ struct capability {
     size_t badge;
 };
 
+extern struct capability kernel_root_capability;
+
+// updates the address of a capability's resource, given its address in capability space
+void update_capability_resource(size_t address, size_t depth, void *new_resource_address);
+
+struct look_up_result {
+    struct capability *slot;
+    struct capability_node_header *container;
+    bool should_unlock;
+};
+
+bool look_up_capability(struct capability *root, size_t address, size_t depth, struct look_up_result *result);
+
+// TODO: find a better name for this
+void unlock_looked_up_capability(struct look_up_result *result);
+
 #define MAX_HANDLERS 4
 
 struct invocation_handlers {
@@ -28,38 +44,25 @@ struct invocation_handlers {
     size_t (*handlers[MAX_HANDLERS])(struct capability *slot, size_t argument, bool from_userland);
 };
 
-// invokes the provided handler number on the capability and returns the result
-inline size_t capability_invoke(struct capability *slot, size_t handler_number, size_t argument, bool from_userland) {
-    struct invocation_handlers *handlers = slot->handlers;
+// invokes the provided handler number on a capability and returns the result.
+// if the capability is not able to be located for invoking or if the given handler number is invalid, 0 will be returned
+// and no operation will be performed
+size_t invoke_capability(size_t address, size_t depth, size_t handler_number, size_t argument, bool from_userland);
 
-#ifdef DEBUG
-    if (handler_number >= handlers->num_handlers) {
-        printk("tried to invoke an out of bounds capability handler!\n");
-        return 0;
-    } else {
-#endif
-        if (handlers == NULL) {
-            printk("attempted to invoke an invalid capability!\n");
-            return 0;
-        } else {
-            return handlers->handlers[handler_number](slot, argument, from_userland);
-        }
-#ifdef DEBUG
-    }
-#endif
-}
-
-// updates the address of a capability's resource, given its address in capability space
-void update_capability_resource(size_t address, size_t depth, void *new_resource_address);
+#define UNTYPED_LOCK 0
+#define UNTYPED_UNLOCK 1
+#define UNTYPED_TRY_LOCK 2
+#define ADDRESS_SPACE_ALLOC 0
 
 #define TYPE_UNTYPED 0 // is this a good name for user-modifiable memory?
 #define TYPE_NODE 1
+#define TYPE_THREAD 2
 
 struct alloc_args {
     // the type of the object to create
     uint8_t type;
     // if this object can have various sizes, this value determines the size of the object
-    uint8_t size;
+    size_t size;
     // the address at which the capability to this object should be placed at
     size_t address;
     // how many bits of the address field are valid and should be used to search
@@ -70,3 +73,6 @@ struct alloc_args {
 
 // initializes the kernel's root capability
 void init_root_capability(struct heap *heap);
+
+// the value of size_bits for the kernel's root capability node
+#define ROOT_CAP_SLOT_BITS 4

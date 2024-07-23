@@ -17,8 +17,6 @@ struct heap_header {
             size_t depth;
         } capability;
     } update_ref;
-    // how many references exist to this header
-    size_t num_references;
 
     // the next header in the list (TODO: combine this with `size`)
     struct heap_header *next;
@@ -71,7 +69,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size);
 // if the returned value is true, this region of memory wasn't locked beforehand.
 // if the returned value is false, this region of memory was locked
 // TODO: will any memory regions end up being locked multiple times in practice? is this worth the extra few cycles?
-inline bool heap_lock(void *ptr) {
+static inline bool heap_lock(void *ptr) {
     struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
     if (GET_KIND(header) == KIND_MOVABLE) {
         SET_KIND(header, KIND_IMMOVABLE);
@@ -82,7 +80,7 @@ inline bool heap_lock(void *ptr) {
 }
 
 // unlocks an allocated region of memory, invalidating any existing pointers to it and allowing it to be moved anywhere else in memory if required
-inline void heap_unlock(void *ptr) {
+static inline void heap_unlock(void *ptr) {
     struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
     SET_KIND(header, KIND_MOVABLE);
 }
@@ -90,31 +88,30 @@ inline void heap_unlock(void *ptr) {
 // frees a region of memory, allowing it to be reused for other things
 void heap_free(struct heap *heap, void *ptr);
 
-// increments the reference count of the provided region of memory
-inline void heap_add_reference(void *ptr) {
-    struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
-    header->num_references ++;
-}
-
-// decrements the reference count of the provided region of memory, freeing it if the reference count is 0
-inline void heap_remove_reference(struct heap *heap, void *ptr) {
-    struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
-    header->num_references --;
-
-    if (header->num_references == 0) {
-        heap_free(heap, ptr);
-    }
-}
-
+#ifdef DEBUG
 // prints out a list of all the blocks in the heap
 void heap_list_blocks(struct heap *heap);
+#endif
 
 // sets the absolute address that should be updated if the given memory region is moved
 // this update address will replace any addresses or handles set previously
-void heap_set_update_absolute(void *ptr, void **absolute_ptr);
+static inline void heap_set_update_absolute(void *ptr, void **absolute_ptr) {
+    struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
+
+    // TODO: this section is critical, should interrupts be disabled?
+    header->flags &= ~FLAG_CAPABILITY_RESOURCE;
+    header->update_ref.absolute_ptr = absolute_ptr;
+}
 
 #include "capabilities.h"
 
 // sets the address in capability space of the capability that should be updated if the given memory region is moved
 // this capability address will replace any absolute addresses or capability addresses set previously
-void heap_set_update_capability(void *ptr, size_t address, size_t depth);
+static inline void heap_set_update_capability(void *ptr, size_t address, size_t depth) {
+    struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
+
+    // TODO: this section is critical, should interrupts be disabled?
+    header->flags |= FLAG_CAPABILITY_RESOURCE;
+    header->update_ref.capability.address = address;
+    header->update_ref.capability.depth = depth;
+}
