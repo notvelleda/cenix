@@ -6,7 +6,8 @@
 #include "arch.h"
 #include "threads.h"
 #include "platform/mac-68000/hw.h"
-#include "arch/68000/syscall.h"
+#include "arch/68000/syscalls.h"
+#include "scheduler.h"
 
 #ifdef DEBUG
 #include "font.h"
@@ -162,6 +163,8 @@ void after_sp_set(void) {
     uint32_t table_entry = *(TOOL_DISP_TABLE + (trap & 0x1ff));
     __asm__ __volatile__ ("jsr (%0)" :: "a" (table_entry));*/
 
+    init_threads();
+    init_scheduler();
     init_root_capability(&the_heap);
 
     struct alloc_args stack_alloc_args = {
@@ -173,7 +176,7 @@ void after_sp_set(void) {
     invoke_capability(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &stack_alloc_args, false);
 
     void *stack_base = (void *) invoke_capability(1, ROOT_CAP_SLOT_BITS, UNTYPED_LOCK, 0, false);
-    uint32_t stack_pointer = (uint32_t) stack_base + STACK_SIZE;
+    size_t stack_pointer = (size_t) stack_base + STACK_SIZE;
     printk("stack_base is 0x%x, stack_pointer is 0x%x\n", stack_base, stack_pointer);
 
     struct alloc_args thread_alloc_args = {
@@ -186,12 +189,9 @@ void after_sp_set(void) {
 
     struct registers registers;
 
-    uint32_t program_counter = (uint32_t) &test_thread;
-    printk("program_counter is 0x%x\n", program_counter);
-
     memset((char *) &registers, 0, sizeof(struct registers));
-    registers.program_counter = program_counter;
-    registers.stack_pointer = stack_pointer;
+    set_program_counter(&registers, (size_t) &test_thread);
+    set_stack_pointer(&registers, stack_pointer);
 
     struct read_write_register_args register_write_args = {
         (void *) &registers,
@@ -199,24 +199,22 @@ void after_sp_set(void) {
     };
 
     invoke_capability(2, ROOT_CAP_SLOT_BITS, THREAD_WRITE_REGISTERS, (size_t) &register_write_args, false);
+    invoke_capability(2, ROOT_CAP_SLOT_BITS, THREAD_RESUME, 0, false);
 
 #ifdef DEBUG
     heap_list_blocks(&the_heap);
 #endif
 
     // hop into user mode!
-    struct look_up_result result;
+    struct registers new_registers;
 
-    look_up_capability(&kernel_root_capability, 2, ROOT_CAP_SLOT_BITS, &result);
-
-    heap_lock(result.slot->resource);
-    struct thread_capability *thread = (struct thread_capability *) result.slot->resource;
-    struct registers *thread_registers = &thread->registers;
+    scheduler_state.pending_context_switch = true; // force a context switch
+    try_context_switch(&new_registers);
 
     // set user-mode stack pointer
-    __asm__ __volatile__ ("movel %0, %%usp" :: "a" (thread_registers->stack_pointer));
+    __asm__ __volatile__ ("movel %0, %%usp" :: "a" (new_registers.stack_pointer));
 
-    uint16_t status_register = thread_registers->status_register & 0x00ff;
+    uint16_t status_register = new_registers.status_register & 0x00ff;
 
     printk("bye-bye, supervisor mode!\n");
 
@@ -226,7 +224,7 @@ void after_sp_set(void) {
         "movew %1, -(%%sp)\n\t"
         "moveml (%2), %%d0-%%d7/%%a0-%%a6\n\t"
         "rte"
-        :: "r" (thread_registers->program_counter), "r" (status_register), "r" (&thread_registers->address)
+        :: "r" (new_registers.program_counter), "r" (status_register), "r" (&new_registers.address)
     );
 
     while (1);
@@ -297,13 +295,21 @@ void exception_handler(struct registers *registers) {
 }
 
 void trap_handler(struct registers *registers) {
-    registers->data[0] = (uint32_t) invoke_capability(
-        (size_t) registers->data[0],
-        (size_t) registers->data[1],
-        (size_t) registers->data[2],
-        (size_t) registers->address[0],
-        true
-    );
+    switch (registers->data[0]) {
+    case SYSCALL_YIELD:
+        yield_thread();
+        break;
+    case SYSCALL_INVOKE:
+        registers->data[0] = (uint32_t) invoke_capability(
+            (size_t) registers->data[1],
+            (size_t) registers->data[2],
+            (size_t) registers->data[3],
+            (size_t) registers->address[0],
+            true
+        );
+        break;
+    }
+    try_context_switch(registers);
 }
 
 void _putchar(char c) {

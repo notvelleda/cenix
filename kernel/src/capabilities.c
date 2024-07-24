@@ -213,6 +213,11 @@ void update_capability_resource(size_t address, size_t depth, void *new_resource
     }
 
     result.slot->resource = new_resource_address;
+
+    if (result.slot->handlers == &thread_handlers) {
+        on_thread_moved((struct thread_capability *) result.slot->resource);
+    }
+
     // TODO: update locations of any capabilities derived from this one
 
     unlock_looked_up_capability(&result);
