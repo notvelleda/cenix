@@ -5,6 +5,8 @@
 #include "capabilities.h"
 #include "arch.h"
 #include "threads.h"
+#include "platform/mac-68000/hw.h"
+#include "arch/68000/syscall.h"
 
 #ifdef DEBUG
 #include "font.h"
@@ -25,6 +27,8 @@
 #define SCREEN_HEIGHT 342
 #define CONSOLE_HEIGHT 336 // console height has to be a multiple of 8!
 
+#define TOOL_DISP_TABLE ((uint32_t *) 0x0c00)
+
 #ifdef DEBUG
 static int console_x = 0;
 static int console_y = 0;
@@ -40,6 +44,9 @@ static uint8_t read_addr(uint8_t value) {
     return value;
 }
 
+extern void trap_entry(void);
+extern void bad_interrupt_entry(void);
+
 void _start(void) {
     struct init_block init_block;
 
@@ -49,6 +56,29 @@ void _start(void) {
 
     printk("Hellorld!\n");
 
+    // populate interrupt vector table
+    void **vector_table = (void **) 0;
+
+    for (int i = 2; i < 64; i ++) {
+        vector_table[i] = (void *) &bad_interrupt_entry;
+    }
+    vector_table[32] = (void *) &trap_entry;
+
+    MAC_VIA_IER = 0x7f; // disable all VIA interrupts
+    MAC_VIA_IFR = 0xff; // clear VIA interrupt flag to dismiss any pending interrupts
+
+    // reset the SCC. ideally it would be enough to just disable interrupts, however if any interrupts are triggered before this
+    // we can't clear them, and since the SCC is a black box with horrible documentation it's easiest to just reset it, which will
+    // disable interrupts and clear any pending interrupts
+    read_addr(MAC_SCC_B_CTL_RD); // reset to register 0
+    asm volatile ("nop");
+    MAC_SCC_B_CTL_WR = 9; // select register 9
+    asm volatile ("nop");
+    MAC_SCC_B_CTL_WR = 0xc0; // set d7 and d6, causing the scc to reset
+
+    // hardware should be sane enough to enable interrupts now!
+    asm volatile ("andiw #0xf8ff, %sr");
+
     init_block.kernel_start = init_block.memory_start = (void *) 0;
     init_block.kernel_end = (void *) &_end;
     init_block.memory_end = MEM_TOP;
@@ -57,7 +87,7 @@ void _start(void) {
 
     // now that the heap is set up, allocate a region of memory for the stack so that nothing gets trampled when existing regions are locked
     void *stack_region = heap_alloc(&the_heap, STACK_SIZE);
-    void *new_stack_pointer = stack_region + STACK_SIZE - 1;
+    void *new_stack_pointer = stack_region + STACK_SIZE;
 
     __asm__ __volatile__ (
         "movl %0, %%sp\n\t"
@@ -128,6 +158,10 @@ void after_sp_set(void) {
     printk("freed memory\n");
     heap_list_blocks(&the_heap);*/
 
+    /*uint16_t trap = 0xa893;
+    uint32_t table_entry = *(TOOL_DISP_TABLE + (trap & 0x1ff));
+    __asm__ __volatile__ ("jsr (%0)" :: "a" (table_entry));*/
+
     init_root_capability(&the_heap);
 
     struct alloc_args stack_alloc_args = {
@@ -139,7 +173,7 @@ void after_sp_set(void) {
     invoke_capability(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &stack_alloc_args, false);
 
     void *stack_base = (void *) invoke_capability(1, ROOT_CAP_SLOT_BITS, UNTYPED_LOCK, 0, false);
-    uint32_t stack_pointer = (uint32_t) stack_base + STACK_SIZE - 1;
+    uint32_t stack_pointer = (uint32_t) stack_base + STACK_SIZE;
     printk("stack_base is 0x%x, stack_pointer is 0x%x\n", stack_base, stack_pointer);
 
     struct alloc_args thread_alloc_args = {
@@ -157,7 +191,7 @@ void after_sp_set(void) {
 
     memset((char *) &registers, 0, sizeof(struct registers));
     registers.program_counter = program_counter;
-    registers.address[7] = stack_pointer;
+    registers.stack_pointer = stack_pointer;
 
     struct read_write_register_args register_write_args = {
         (void *) &registers,
@@ -180,9 +214,9 @@ void after_sp_set(void) {
     struct registers *thread_registers = &thread->registers;
 
     // set user-mode stack pointer
-    __asm__ __volatile__ ("movel %0, %%usp" :: "a" (thread_registers->address[7]));
+    __asm__ __volatile__ ("movel %0, %%usp" :: "a" (thread_registers->stack_pointer));
 
-    uint16_t status_register = thread_registers->condition_code_register;
+    uint16_t status_register = thread_registers->status_register & 0x00ff;
 
     printk("bye-bye, supervisor mode!\n");
 
@@ -190,19 +224,86 @@ void after_sp_set(void) {
     __asm__ __volatile__ (
         "movel %0, -(%%sp)\n\t"
         "movew %1, -(%%sp)\n\t"
-        "moveml (%2)+, %%d0-%%d7/%%a0-%%a6\n\t"
+        "moveml (%2), %%d0-%%d7/%%a0-%%a6\n\t"
         "rte"
-        :: "r" (thread_registers->program_counter), "r" (status_register), "r" (thread_registers)
+        :: "r" (thread_registers->program_counter), "r" (status_register), "r" (&thread_registers->address)
     );
 
     while (1);
 }
 
 void test_thread(void) {
-    while (1) {
+    /*for (int i = 0; i < 4; i ++) {
         printk("hello, thread world!\n");
-        for (int i = 0; i < 524288; i ++);
-    }
+        for (int j = 0; j < 524288; j ++);
+    }*/
+    printk("entered thread!\n");
+
+    struct alloc_args alloc_args = {
+        TYPE_UNTYPED,
+        4,
+        3,
+        ROOT_CAP_SLOT_BITS
+    };
+    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
+
+    uint32_t *ptr = (uint32_t *) syscall_invoke(3, ROOT_CAP_SLOT_BITS, UNTYPED_LOCK, 0);
+    printk("ptr is 0x%x\n", ptr);
+
+    *ptr = 0xdeadbeef;
+
+    syscall_invoke(3, ROOT_CAP_SLOT_BITS, UNTYPED_UNLOCK, 0);
+
+    printk("thread halting...\n");
+    while (1);
+}
+
+static void log_registers(struct registers *registers) {
+    printk(
+        "a0: 0x%08x, a1: 0x%08x, a2: 0x%08x, a3: 0x%08x\n",
+        registers->address[0],
+        registers->address[1],
+        registers->address[2],
+        registers->address[3]
+    );
+    printk(
+        "a4: 0x%08x, a5: 0x%08x, a6: 0x%08x, a7: 0x%08x\n",
+        registers->address[4],
+        registers->address[5],
+        registers->address[6],
+        registers->stack_pointer
+    );
+    printk(
+        "d0: 0x%08x, d1: 0x%08x, d2: 0x%08x, d3: 0x%08x\n",
+        registers->data[0],
+        registers->data[1],
+        registers->data[2],
+        registers->data[3]
+    );
+    printk(
+        "d4: 0x%08x, d5: 0x%08x, d6: 0x%08x, d7: 0x%08x\n",
+        registers->data[4],
+        registers->data[5],
+        registers->data[6],
+        registers->data[7]
+    );
+    printk("status register: 0x%04x, program counter: 0x%08x\n", registers->status_register, registers->program_counter);
+}
+
+void exception_handler(struct registers *registers) {
+    printk("something happened lol\n");
+    log_registers(registers);
+    while (1);
+}
+
+void trap_handler(struct registers *registers) {
+    registers->data[0] = (uint32_t) invoke_capability(
+        (size_t) registers->data[0],
+        (size_t) registers->data[1],
+        (size_t) registers->data[2],
+        (size_t) registers->address[0],
+        true
+    );
 }
 
 void _putchar(char c) {

@@ -3,10 +3,11 @@
 #include <stdint.h>
 
 struct registers {
-    uint8_t condition_code_register;
-    uint32_t program_counter;
+    uint32_t stack_pointer;
     uint32_t data[8];
-    uint32_t address[8];
+    uint32_t address[7];
+    uint16_t status_register; // most significant byte of this is discarded
+    uint32_t program_counter;
 };
 
 typedef uint16_t interrupt_status_t; 
