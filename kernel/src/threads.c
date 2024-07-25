@@ -7,17 +7,17 @@
 #include "string.h"
 #include "scheduler.h"
 
-#define DEBUG_THREADS
+#undef DEBUG_THREADS
 
 #define NUM_BUCKETS 128
 
-struct thread_queue thread_hash_table[NUM_BUCKETS];
+static struct thread_queue thread_hash_table[NUM_BUCKETS];
 
 #define MAX_THREADS 1024
 
 #define PTR_BITS (sizeof(size_t) * 8)
 #define USED_THREAD_IDS_SIZE (MAX_THREADS / PTR_BITS)
-size_t used_thread_ids[USED_THREAD_IDS_SIZE];
+static size_t used_thread_ids[USED_THREAD_IDS_SIZE];
 
 // 32-bit fnv-1a hash, as described in http://isthe.com/chongo/tech/comp/fnv/
 static uint32_t hash(uint16_t value) {
@@ -39,6 +39,7 @@ void init_threads(void) {
     for (int i = 0; i < USED_THREAD_IDS_SIZE; i ++) {
         used_thread_ids[i] = 0;
     }
+    used_thread_ids[0] = 1; // id 0 is reserved for kernel resources
 }
 
 extern struct invocation_handlers untyped_handlers;
@@ -99,9 +100,40 @@ static size_t suspend(struct capability *slot, size_t argument, bool from_userla
     return 0;
 }
 
+static size_t set_root_node(struct capability *slot, size_t argument, bool from_userland) {
+    bool should_unlock = heap_lock(slot->resource);
+
+    struct thread_capability *thread = (struct thread_capability *) slot->resource;
+    struct set_root_node_args *args = (struct set_root_node_args *) argument;
+    struct look_up_result result;
+
+    if (!look_up_capability_relative(args->address, args->depth, from_userland, &result)) {
+        if (should_unlock) {
+            heap_unlock(slot->resource);
+        }
+
+        return 0;
+    }
+
+    size_t return_value = 0;
+
+    if (result.slot->handlers == &node_handlers) {
+        return_value = 1;
+        move_capability(result.slot, &thread->root_capability);
+    }
+
+    unlock_looked_up_capability(&result);
+
+    if (should_unlock) {
+        heap_unlock(slot->resource);
+    }
+
+    return return_value;
+}
+
 struct invocation_handlers thread_handlers = {
-    4,
-    {read_registers, write_registers, resume, suspend}
+    5,
+    {read_registers, write_registers, resume, suspend, set_root_node}
 };
 
 void alloc_thread(struct heap *heap, void **resource, struct invocation_handlers **handlers) {
@@ -127,7 +159,7 @@ void alloc_thread(struct heap *heap, void **resource, struct invocation_handlers
     // if a thread id couldn't be found, give up
     if (!has_thread_id) {
 #ifdef DEBUG_THREADS
-        printk("couldn't allocate id for new thread!\n");
+        printk("threads: couldn't allocate id for new thread!\n");
 #endif
         *resource = NULL;
         *handlers = NULL;
@@ -135,34 +167,45 @@ void alloc_thread(struct heap *heap, void **resource, struct invocation_handlers
     }
 
 #ifdef DEBUG_THREADS
-    printk("allocated id %d for new thread\n", thread_id);
+    printk("threads: allocated id %d for new thread\n", thread_id);
 #endif
 
     struct thread_capability *thread = heap_alloc(heap, sizeof(struct thread_capability));
 
+    if (thread == NULL) {
+#ifdef DEBUG_THREADS
+        printk("threads: heap_alloc for new thread failed!\n");
+#endif
+        used_thread_ids[thread_id / PTR_BITS] &= ~(1 << (thread_id % PTR_BITS)); // release thread id
+        *resource = NULL;
+        *handlers = NULL;
+        return;
+    }
+
     memset((char *) thread, 0, sizeof(struct thread_capability));
     thread->exec_mode = SUSPENDED;
     thread->thread_id = thread_id;
-    thread->id_hash = hash(thread_id);
     // queue entries don't need to be set to NULL here as long as NULL is 0
 
+    uint32_t id_hash = hash(thread_id);
+    thread->bucket_number = id_hash % NUM_BUCKETS;
+
 #ifdef DEBUG_THREADS
-    printk("hashed thread id is 0x%08x\n", thread->id_hash);
+    printk("threads: hashed thread id is 0x%08x, bucket number is %d\n", id_hash, thread->bucket_number);
 #endif
 
     // insert this thread into the thread hash table
-    size_t bucket_number = thread->id_hash % NUM_BUCKETS;
-    struct thread_queue *bucket = &thread_hash_table[bucket_number];
+    struct thread_queue *bucket = &thread_hash_table[thread->bucket_number];
 
     if (bucket->start == NULL) {
 #ifdef DEBUG_THREADS
-        printk("adding thread to new bucket %d\n", bucket_number);
+        printk("threads: adding thread to new bucket\n");
 #endif
         bucket->start = thread;
         bucket->end = thread;
     } else {
 #ifdef DEBUG_THREADS
-        printk("adding thread to end of existing bucket %d\n", bucket_number);
+        printk("threads: adding thread to end of existing bucket\n");
 #endif
 
         bool should_unlock = heap_lock(bucket->end);
@@ -198,13 +241,13 @@ void on_thread_moved(struct thread_capability *thread) {
 
     // update references to this thread in the thread hash table
     if (thread->table_entry.next == NULL) {
-        thread_hash_table[thread->id_hash % NUM_BUCKETS].end = thread;
+        thread_hash_table[thread->bucket_number].end = thread;
     } else {
         thread->table_entry.next->table_entry.prev = thread;
     }
 
     if (thread->table_entry.prev == NULL) {
-        thread_hash_table[thread->id_hash % NUM_BUCKETS].start = thread;
+        thread_hash_table[thread->bucket_number].start = thread;
     } else {
         thread->table_entry.prev->table_entry.next = thread;
     }
@@ -227,4 +270,9 @@ void on_thread_moved(struct thread_capability *thread) {
     if ((thread->scheduler_flags & THREAD_CURRENTLY_RUNNING) != 0) {
         scheduler_state.current_thread = thread;
     }
+}
+
+bool look_up_thread_by_id(uint16_t thread_id, uint8_t bucket_number, struct thread_capability **thread) {
+    *thread = NULL;
+    return false;
 }

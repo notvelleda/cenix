@@ -4,6 +4,14 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+struct heap {
+    struct heap_header *heap_base;
+    size_t total_memory;
+    size_t used_memory;
+};
+
+#include "capabilities.h"
+
 struct heap_header {
     // the size of the memory block this header is for, including the size of the header
     size_t size;
@@ -12,10 +20,7 @@ struct heap_header {
     // the address or handle that should be updated if the region this header controls is moved
     union {
         void **absolute_ptr;
-        struct {
-            size_t address;
-            size_t depth;
-        } capability;
+        struct absolute_capability_address capability;
     } update_ref;
 
     // the next header in the list (TODO: combine this with `size`)
@@ -46,12 +51,6 @@ struct init_block {
     void *memory_start;
     /// a pointer to the end of the contiguous block of memory (exclusive)
     void *memory_end;
-};
-
-struct heap {
-    struct heap_header *heap_base;
-    size_t total_memory;
-    size_t used_memory;
 };
 
 void heap_init(struct heap *heap, struct init_block *init_block);
@@ -98,7 +97,7 @@ void heap_list_blocks(struct heap *heap);
 static inline void heap_set_update_absolute(void *ptr, void **absolute_ptr) {
     struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
 
-    // TODO: this section is critical, should interrupts be disabled?
+    // TODO: this section is probably critical, should interrupts be disabled?
     header->flags &= ~FLAG_CAPABILITY_RESOURCE;
     header->update_ref.absolute_ptr = absolute_ptr;
 }
@@ -107,11 +106,10 @@ static inline void heap_set_update_absolute(void *ptr, void **absolute_ptr) {
 
 // sets the address in capability space of the capability that should be updated if the given memory region is moved
 // this capability address will replace any absolute addresses or capability addresses set previously
-static inline void heap_set_update_capability(void *ptr, size_t address, size_t depth) {
+static inline void heap_set_update_capability(void *ptr, struct absolute_capability_address *address) {
     struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
 
-    // TODO: this section is critical, should interrupts be disabled?
+    // TODO: this section is probably critical, should interrupts be disabled?
     header->flags |= FLAG_CAPABILITY_RESOURCE;
-    header->update_ref.capability.address = address;
-    header->update_ref.capability.depth = depth;
+    header->update_ref.capability = *address;
 }

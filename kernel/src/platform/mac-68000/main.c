@@ -168,10 +168,10 @@ void after_sp_set(void) {
     init_root_capability(&the_heap);
 
     struct alloc_args stack_alloc_args = {
-        TYPE_UNTYPED,
-        STACK_SIZE,
-        1,
-        ROOT_CAP_SLOT_BITS
+        .type = TYPE_UNTYPED,
+        .size = STACK_SIZE,
+        .address = 1,
+        .depth = ROOT_CAP_SLOT_BITS
     };
     invoke_capability(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &stack_alloc_args, false);
 
@@ -180,10 +180,10 @@ void after_sp_set(void) {
     printk("stack_base is 0x%x, stack_pointer is 0x%x\n", stack_base, stack_pointer);
 
     struct alloc_args thread_alloc_args = {
-        TYPE_THREAD,
-        0,
-        2,
-        ROOT_CAP_SLOT_BITS
+        .type = TYPE_THREAD,
+        .size = 0,
+        .address = 2,
+        .depth = ROOT_CAP_SLOT_BITS
     };
     invoke_capability(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &thread_alloc_args, false);
 
@@ -199,6 +199,28 @@ void after_sp_set(void) {
     };
 
     invoke_capability(2, ROOT_CAP_SLOT_BITS, THREAD_WRITE_REGISTERS, (size_t) &register_write_args, false);
+
+    struct alloc_args node_alloc_args = {
+        .type = TYPE_NODE,
+        .size = ROOT_CAP_SLOT_BITS,
+        .address = 3,
+        .depth = ROOT_CAP_SLOT_BITS
+    };
+    invoke_capability(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args, false);
+
+    struct copy_args alloc_copy_args = {
+        .source_address = 0,
+        .source_depth = ROOT_CAP_SLOT_BITS,
+        .dest_slot = 0,
+        .access_rights = -1,
+        .badge = 0,
+        .should_set_badge = 0
+    };
+    invoke_capability(3, ROOT_CAP_SLOT_BITS, NODE_COPY, (size_t) &alloc_copy_args, false);
+
+    struct set_root_node_args set_root_node_args = {3, ROOT_CAP_SLOT_BITS};
+    invoke_capability(2, ROOT_CAP_SLOT_BITS, THREAD_SET_ROOT_NODE, (size_t) &set_root_node_args, false);
+
     invoke_capability(2, ROOT_CAP_SLOT_BITS, THREAD_RESUME, 0, false);
 
 #ifdef DEBUG
@@ -230,30 +252,101 @@ void after_sp_set(void) {
     while (1);
 }
 
-void test_thread(void) {
-    /*for (int i = 0; i < 4; i ++) {
-        printk("hello, thread world!\n");
+void test_thread_3(void) {
+    while (1) {
+        printk("thread 3!\n");
+        syscall_yield();
         for (int j = 0; j < 524288; j ++);
-    }*/
-    printk("entered thread!\n");
+        syscall_yield();
+    }
+}
 
+void test_thread_2(void) {
     struct alloc_args alloc_args = {
-        TYPE_UNTYPED,
-        4,
-        3,
-        ROOT_CAP_SLOT_BITS
+        .type = TYPE_UNTYPED,
+        .size = STACK_SIZE,
+        .address = 1,
+        .depth = ROOT_CAP_SLOT_BITS
     };
     syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
 
-    uint32_t *ptr = (uint32_t *) syscall_invoke(3, ROOT_CAP_SLOT_BITS, UNTYPED_LOCK, 0);
-    printk("ptr is 0x%x\n", ptr);
+    void *stack_base = (void *) syscall_invoke(1, ROOT_CAP_SLOT_BITS, UNTYPED_LOCK, 0);
+    size_t stack_pointer = (size_t) stack_base + STACK_SIZE;
+    printk("thread 3 stack_base is 0x%x, stack_pointer is 0x%x\n", stack_base, stack_pointer);
 
-    *ptr = 0xdeadbeef;
+    struct alloc_args thread_alloc_args = {
+        .type = TYPE_THREAD,
+        .size = 0,
+        .address = 2,
+        .depth = ROOT_CAP_SLOT_BITS
+    };
+    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &thread_alloc_args);
 
-    syscall_invoke(3, ROOT_CAP_SLOT_BITS, UNTYPED_UNLOCK, 0);
+    struct registers registers;
 
-    printk("thread halting...\n");
-    while (1);
+    memset((char *) &registers, 0, sizeof(struct registers));
+    set_program_counter(&registers, (size_t) &test_thread_3);
+    set_stack_pointer(&registers, stack_pointer);
+
+    struct read_write_register_args register_write_args = {
+        .address = (void *) &registers,
+        .size = sizeof(struct registers)
+    };
+
+    syscall_invoke(2, ROOT_CAP_SLOT_BITS, THREAD_WRITE_REGISTERS, (size_t) &register_write_args);
+    syscall_invoke(2, ROOT_CAP_SLOT_BITS, THREAD_RESUME, 0);
+
+    while (1) {
+        printk("thread 2!\n");
+        syscall_yield();
+        for (int j = 0; j < 524288; j ++);
+        syscall_yield();
+    }
+}
+
+void test_thread(void) {
+    printk("entered thread!\n");
+
+    struct alloc_args alloc_args = {
+        .type = TYPE_UNTYPED,
+        .size = STACK_SIZE,
+        .address = 1,
+        .depth = ROOT_CAP_SLOT_BITS
+    };
+    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
+
+    void *stack_base = (void *) syscall_invoke(1, ROOT_CAP_SLOT_BITS, UNTYPED_LOCK, 0);
+    size_t stack_pointer = (size_t) stack_base + STACK_SIZE;
+    printk("thread 2 stack_base is 0x%x, stack_pointer is 0x%x\n", stack_base, stack_pointer);
+
+    struct alloc_args thread_alloc_args = {
+        .type = TYPE_THREAD,
+        .size = 0,
+        .address = 2,
+        .depth = ROOT_CAP_SLOT_BITS
+    };
+    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &thread_alloc_args);
+
+    struct registers registers;
+
+    memset((char *) &registers, 0, sizeof(struct registers));
+    set_program_counter(&registers, (size_t) &test_thread_2);
+    set_stack_pointer(&registers, stack_pointer);
+
+    struct read_write_register_args register_write_args = {
+        (void *) &registers,
+        sizeof(struct registers)
+    };
+
+    syscall_invoke(2, ROOT_CAP_SLOT_BITS, THREAD_WRITE_REGISTERS, (size_t) &register_write_args);
+    syscall_invoke(2, ROOT_CAP_SLOT_BITS, THREAD_RESUME, 0);
+
+    while (1) {
+        printk("thread 1!\n");
+        syscall_yield();
+        for (int j = 0; j < 524288; j ++);
+        syscall_yield();
+    }
 }
 
 static void log_registers(struct registers *registers) {

@@ -35,6 +35,8 @@ BINARY = kernel
 
 all: $(BINARY)
 
+.PHONY: clean
+
 $(BINARY): $(OBJECTS)
 	$(CC) $(LDFLAGS) $(OBJECTS) -o $(BINARY)
 

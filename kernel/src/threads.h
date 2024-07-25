@@ -42,8 +42,8 @@ struct thread_capability {
     struct thread_queue_entry cpu_update_entry;
     // a unique id number that's assigned to each thread. once a thread's capability has been freed, its id can be reassigned to a newly created thread
     uint16_t thread_id;
-    // the hashed version of thread_id, used to index a bucket in the thread hash table
-    uint32_t id_hash;
+    // the bucket in the thread hash table that this thread is placed in
+    uint8_t bucket_number;
     // linked list that forms each bucket of the thread hash table
     struct thread_queue_entry table_entry;
 };
@@ -52,6 +52,7 @@ extern struct invocation_handlers thread_handlers;
 
 void init_threads(void);
 void on_thread_moved(struct thread_capability *thread);
+bool look_up_thread_by_id(uint16_t thread_id, uint8_t bucket_number, struct thread_capability **thread);
 
 #include "heap.h"
 
@@ -61,8 +62,14 @@ void alloc_thread(struct heap *heap, void **resource, struct invocation_handlers
 #define THREAD_WRITE_REGISTERS 1
 #define THREAD_RESUME 2
 #define THREAD_SUSPEND 3
+#define THREAD_SET_ROOT_NODE 4
 
 struct read_write_register_args {
     void *address;
     size_t size;
+};
+
+struct set_root_node_args {
+    size_t address;
+    size_t depth;
 };
