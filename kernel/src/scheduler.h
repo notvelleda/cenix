@@ -27,4 +27,4 @@ void init_scheduler(void);
 void resume_thread(struct thread_capability *thread);
 void suspend_thread(struct thread_capability *thread);
 void yield_thread(void);
-void try_context_switch(struct registers *registers);
+void try_context_switch(struct thread_registers *registers);

@@ -6,6 +6,7 @@
 #include "heap.h"
 #include "string.h"
 #include "scheduler.h"
+#include "sys/kernel.h"
 
 #undef DEBUG_THREADS
 
@@ -51,7 +52,7 @@ static size_t read_registers(struct capability *slot, size_t argument, bool from
 
     struct thread_capability *thread = (struct thread_capability *) slot->resource;
 
-    memcpy(args->address, (const void *) &thread->registers, args->size > sizeof(struct registers) ? sizeof(struct registers) : args->size);
+    memcpy(args->address, (const void *) &thread->registers, args->size > sizeof(struct thread_registers) ? sizeof(struct thread_registers) : args->size);
 
     if (should_unlock) {
         heap_unlock(slot->resource);
@@ -67,7 +68,7 @@ static size_t write_registers(struct capability *slot, size_t argument, bool fro
 
     struct thread_capability *thread = (struct thread_capability *) slot->resource;
 
-    memcpy((void *) &thread->registers, args->address, args->size > sizeof(struct registers) ? sizeof(struct registers) : args->size);
+    memcpy((void *) &thread->registers, args->address, args->size > sizeof(struct thread_registers) ? sizeof(struct thread_registers) : args->size);
 
     if (should_unlock) {
         heap_unlock(slot->resource);

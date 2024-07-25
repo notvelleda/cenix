@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "debug.h"
+#include "sys/kernel.h"
 
 /// if this flag is set, the resource managed by this capability is allocated on and managed in the heap,
 /// and as such references to it should be properly updated by the heap manager
@@ -12,8 +13,6 @@
 
 /// if this flag is set, this capability is the root capability of a thread
 #define CAP_FLAG_IS_ROOT 2
-
-typedef uint8_t access_flags_t;
 
 struct capability {
     /// the invocation handlers for this capability
@@ -40,9 +39,9 @@ struct capability {
         struct capability *next;
         struct capability *prev;
     } derivation_list;
-    /// points to the start and end of the derivation list, respectively
-    struct capability *start_of_derivation_list;
-    struct capability *end_of_derivation_list;
+    /// points to the start and end of the list of capabilities that have been derived from this one, respectively
+    struct capability *derivation_list_start;
+    struct capability *derivation_list_end;
     /// points to the capability that this capability was derived from
     struct capability *derived_from;
 };
@@ -90,63 +89,27 @@ bool look_up_capability_absolute(struct absolute_capability_address *address, st
 // TODO: find a better name for this
 void unlock_looked_up_capability(struct look_up_result *result);
 
+/// the maximum number of invocation handlers that a capability can have
 #define MAX_HANDLERS 5
 
 struct invocation_handlers {
+    /// how many invocation handlers in this struct are valid
     size_t num_handlers;
+    /// the list of invocation handlers, stored as function pointers to handler functions
     size_t (*handlers[MAX_HANDLERS])(struct capability *slot, size_t argument, bool from_userland);
 };
 
+/// invocation handlers for capability nodes
 extern struct invocation_handlers node_handlers;
+
+/// invocation handlers for untyped capabilities
 extern struct invocation_handlers untyped_handlers;
+
+/// invocation handlers for address space capabilities
 extern struct invocation_handlers address_space_handlers;
 
-/// \brief invokes the provided handler number on a capability and returns the result
-///
-/// if the capability is not able to be located for invoking or if the given handler number is invalid, 0 will be returned
-/// and no operation will be performed
+/// in-kernel equivalent of syscall_invoke()
 size_t invoke_capability(size_t address, size_t depth, size_t handler_number, size_t argument, bool from_userland);
-
-#define NODE_COPY 0
-
-struct copy_args {
-    /// the address of the capability to copy
-    size_t source_address;
-    /// how many bits of the source_address field are valid
-    size_t source_depth;
-    /// the index of the slot in this node to copy the capability into
-    size_t dest_slot;
-    /// the access rights of the new capability.
-    /// if any bits set here aren't set in the source capability's access rights field, they won't be set in the copied capability
-    access_flags_t access_rights;
-    /// the badge of the new capability
-    size_t badge;
-    /// if this is set to a non-zero value, the new capability will have its badge set. if not, its badge will remain unchanged.
-    /// badges can only be set on original capabilities (capabilities that have not been derived from other capabilities).
-    /// if an attempt is made to set the badge on a non-original capability, the copy invocation will fail
-    uint8_t should_set_badge;
-};
-
-#define UNTYPED_LOCK 0
-#define UNTYPED_UNLOCK 1
-#define UNTYPED_TRY_LOCK 2
-
-#define ADDRESS_SPACE_ALLOC 0
-
-#define TYPE_UNTYPED 0 // is this a good name for user-modifiable memory?
-#define TYPE_NODE 1
-#define TYPE_THREAD 2
-
-struct alloc_args {
-    /// the type of the object to create
-    uint8_t type;
-    /// if this object can have various sizes, this value determines the size of the object
-    size_t size;
-    /// the address at which the capability to this object should be placed at
-    size_t address;
-    /// how many bits of the address field are valid and should be used to search
-    size_t depth;
-};
 
 #include "heap.h"
 

@@ -6,8 +6,8 @@
 #include "arch.h"
 #include "threads.h"
 #include "platform/mac-68000/hw.h"
-#include "arch/68000/syscalls.h"
 #include "scheduler.h"
+#include "sys/kernel.h"
 
 #ifdef DEBUG
 #include "font.h"
@@ -187,15 +187,15 @@ void after_sp_set(void) {
     };
     invoke_capability(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &thread_alloc_args, false);
 
-    struct registers registers;
+    struct thread_registers registers;
 
-    memset((char *) &registers, 0, sizeof(struct registers));
+    memset((char *) &registers, 0, sizeof(struct thread_registers));
     set_program_counter(&registers, (size_t) &test_thread);
     set_stack_pointer(&registers, stack_pointer);
 
     struct read_write_register_args register_write_args = {
         (void *) &registers,
-        sizeof(struct registers)
+        sizeof(struct thread_registers)
     };
 
     invoke_capability(2, ROOT_CAP_SLOT_BITS, THREAD_WRITE_REGISTERS, (size_t) &register_write_args, false);
@@ -208,7 +208,7 @@ void after_sp_set(void) {
     };
     invoke_capability(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args, false);
 
-    struct copy_args alloc_copy_args = {
+    struct node_copy_args alloc_copy_args = {
         .source_address = 0,
         .source_depth = ROOT_CAP_SLOT_BITS,
         .dest_slot = 0,
@@ -228,7 +228,7 @@ void after_sp_set(void) {
 #endif
 
     // hop into user mode!
-    struct registers new_registers;
+    struct thread_registers new_registers;
 
     scheduler_state.pending_context_switch = true; // force a context switch
     try_context_switch(&new_registers);
@@ -282,15 +282,15 @@ void test_thread_2(void) {
     };
     syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &thread_alloc_args);
 
-    struct registers registers;
+    struct thread_registers registers;
 
-    memset((char *) &registers, 0, sizeof(struct registers));
+    memset((char *) &registers, 0, sizeof(struct thread_registers));
     set_program_counter(&registers, (size_t) &test_thread_3);
     set_stack_pointer(&registers, stack_pointer);
 
     struct read_write_register_args register_write_args = {
         .address = (void *) &registers,
-        .size = sizeof(struct registers)
+        .size = sizeof(struct thread_registers)
     };
 
     syscall_invoke(2, ROOT_CAP_SLOT_BITS, THREAD_WRITE_REGISTERS, (size_t) &register_write_args);
@@ -327,15 +327,15 @@ void test_thread(void) {
     };
     syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &thread_alloc_args);
 
-    struct registers registers;
+    struct thread_registers registers;
 
-    memset((char *) &registers, 0, sizeof(struct registers));
+    memset((char *) &registers, 0, sizeof(struct thread_registers));
     set_program_counter(&registers, (size_t) &test_thread_2);
     set_stack_pointer(&registers, stack_pointer);
 
     struct read_write_register_args register_write_args = {
-        (void *) &registers,
-        sizeof(struct registers)
+        .address = (void *) &registers,
+        .size = sizeof(struct thread_registers)
     };
 
     syscall_invoke(2, ROOT_CAP_SLOT_BITS, THREAD_WRITE_REGISTERS, (size_t) &register_write_args);
@@ -349,7 +349,7 @@ void test_thread(void) {
     }
 }
 
-static void log_registers(struct registers *registers) {
+static void log_registers(struct thread_registers *registers) {
     printk(
         "a0: 0x%08x, a1: 0x%08x, a2: 0x%08x, a3: 0x%08x\n",
         registers->address[0],
@@ -381,13 +381,13 @@ static void log_registers(struct registers *registers) {
     printk("status register: 0x%04x, program counter: 0x%08x\n", registers->status_register, registers->program_counter);
 }
 
-void exception_handler(struct registers *registers) {
+void exception_handler(struct thread_registers *registers) {
     printk("something happened lol\n");
     log_registers(registers);
     while (1);
 }
 
-void trap_handler(struct registers *registers) {
+void trap_handler(struct thread_registers *registers) {
     switch (registers->data[0]) {
     case SYSCALL_YIELD:
         yield_thread();

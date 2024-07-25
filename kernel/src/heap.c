@@ -34,7 +34,7 @@ static bool split_header(struct heap_header *header, size_t at) {
 
 void heap_init(struct heap *heap, struct init_block *init_block) {
     printk(
-        "heap: initializing heap at 0x%08x - 0x%08x (kernel at 0x%08x - 0x%08x)\n",
+        "heap_init: initializing heap at 0x%08x - 0x%08x (kernel at 0x%08x - 0x%08x)\n",
         init_block->memory_start,
         init_block->memory_end,
         init_block->kernel_start,
@@ -65,7 +65,7 @@ void heap_init(struct heap *heap, struct init_block *init_block) {
     heap_lock_existing_region(heap, init_block->kernel_start, init_block->kernel_end);
 
     printk(
-        "heap: total memory: %d KiB, used memory: %d KiB, free memory: %d KiB\n",
+        "heap_init: total memory: %d KiB, used memory: %d KiB, free memory: %d KiB\n",
         heap->total_memory / 1024,
         heap->used_memory / 1024,
         (heap->total_memory - heap->used_memory) / 1024
@@ -81,7 +81,7 @@ void heap_add_memory_block(struct heap *heap, void *start, void *end) {
 }
 
 void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
-    printk("heap: locking region from 0x%08x - 0x%08x\n", start, end);
+    printk("heap_lock_existing_region: locking region from 0x%08x - 0x%08x\n", start, end);
 
     start -= sizeof(struct heap_header);
 
@@ -92,7 +92,7 @@ void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
         if (block_end <= start || block_start >= end) {
             continue;
         } else if (GET_KIND(header) != KIND_AVAILABLE) {
-            printk("heap: header at 0x%x isn't available and intersects with existing region\n", header);
+            printk("heap_lock_existing_region: header at 0x%x isn't available and intersects with existing region\n", header);
             continue;
         }
         // TODO: should movable overlapping regions be moved? will that ever come up?
@@ -119,7 +119,7 @@ void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
 
                     continue;
                 } else {
-                    printk("heap: header at 0x%x isn't available and intersects with existing region\n", next);
+                    printk("heap_lock_existing_region: header at 0x%x isn't available and intersects with existing region\n", next);
                 }
 
                 continue;
@@ -148,7 +148,7 @@ void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
                     header = prev;
                     continue;
                 } else {
-                    printk("heap: header at 0x%x isn't available and intersects with existing region\n", prev);
+                    printk("heap_lock_existing_region: header at 0x%x isn't available and intersects with existing region\n", prev);
                 }
             } else {
                 split_header(header, at);
@@ -190,7 +190,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
 
 #ifdef DEBUG_HEAP
     print_spaces();
-    printk("alloc: size %d (adjusted to %d)\n", actual_size, size);
+    printk("heap_alloc: size %d (adjusted to %d)\n", actual_size, size);
 #endif
 
     // search for a series of consecutive movable or available blocks big enough to fit the allocation
@@ -250,7 +250,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
 
 #ifdef DEBUG_HEAP
     print_spaces();
-    printk("alloc: moving 0x%x, 0x%x available\n", to_move, available_memory);
+    printk("heap_alloc: moving 0x%x, 0x%x available\n", to_move, available_memory);
 #endif
 
     // split end_header
@@ -264,7 +264,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
     if (GET_KIND(end_header) == KIND_AVAILABLE) {
 #ifdef DEBUG_HEAP
         print_spaces();
-        printk("alloc: splitting end_header at %d\n", split_pos);
+        printk("heap_alloc: splitting end_header at %d\n", split_pos);
 #endif
         split_header(end_header, split_pos);
     }
@@ -337,7 +337,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
 #ifdef DEBUG_HEAP
                 print_spaces();
                 printk(
-                    "updating capability resource at 0x%x:0x%x (%d bits) to 0x%x\n",
+                    "heap_alloc: updating capability resource at 0x%x:0x%x (%d bits) to 0x%x\n",
                     header->update_ref.capability.thread_id,
                     header->update_ref.capability.address,
                     header->update_ref.capability.depth,
@@ -349,7 +349,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
             } else if (header->update_ref.absolute_ptr != NULL) {
 #ifdef DEBUG_HEAP
                 print_spaces();
-                printk("updating absolute pointer at 0x%x to 0x%x\n", header->update_ref.absolute_ptr, header);
+                printk("heap_alloc: updating absolute pointer at 0x%x to 0x%x\n", header->update_ref.absolute_ptr, header);
 #endif
                 *header->update_ref.absolute_ptr = (void *) dest_ptr;
                 heap_set_update_absolute(dest_ptr, header->update_ref.absolute_ptr);
@@ -387,7 +387,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
 
 #ifdef DEBUG_HEAP
     print_spaces();
-    printk("alloc: returning pointer 0x%x\n", pointer);
+    printk("heap_alloc: returning pointer 0x%x\n", pointer);
 #endif
 
     return pointer;

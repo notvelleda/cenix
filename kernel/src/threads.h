@@ -31,7 +31,7 @@ struct thread_capability {
     /// estimate of how much CPU time this thread has used recently in 17.14 fixed point
     uint32_t recent_cpu_time;
     /// the saved registers of this thread
-    struct registers registers;
+    struct thread_registers registers;
     /// flags used by the scheduler
     uint8_t scheduler_flags;
     /// the priority of this thread (which priority queue it's in)
@@ -59,19 +59,3 @@ bool look_up_thread_by_id(uint16_t thread_id, uint8_t bucket_number, struct thre
 #include "heap.h"
 
 void alloc_thread(struct heap *heap, void **resource, struct invocation_handlers **handlers);
-
-#define THREAD_READ_REGISTERS 0
-#define THREAD_WRITE_REGISTERS 1
-#define THREAD_RESUME 2
-#define THREAD_SUSPEND 3
-#define THREAD_SET_ROOT_NODE 4
-
-struct read_write_register_args {
-    void *address;
-    size_t size;
-};
-
-struct set_root_node_args {
-    size_t address;
-    size_t depth;
-};

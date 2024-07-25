@@ -78,7 +78,7 @@ static void idle_thread(void) {
     while (1);
 }
 
-void try_context_switch(struct registers *registers) {
+void try_context_switch(struct thread_registers *registers) {
     if (!scheduler_state.pending_context_switch) {
         return;
     }

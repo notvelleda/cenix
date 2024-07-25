@@ -40,14 +40,14 @@ static void update_capability_lists(struct capability *capability) {
     }
 
     if (capability->derivation_list.prev == NULL && capability->derived_from != NULL) {
-        capability->derived_from->start_of_derivation_list = capability;
+        capability->derived_from->derivation_list_start = capability;
     }
 
     if (capability->derivation_list.next == NULL && capability->derived_from != NULL) {
-        capability->derived_from->end_of_derivation_list = capability;
+        capability->derived_from->derivation_list_end = capability;
     }
 
-    for (struct capability *c = capability->start_of_derivation_list; c != NULL; c = c->derivation_list.next) {
+    for (struct capability *c = capability->derivation_list_start; c != NULL; c = c->derivation_list.next) {
         c->derived_from = capability;
     }
 }
@@ -64,8 +64,8 @@ struct capability_node_header {
     size_t slot_bits;
 };
 
-static size_t copy(struct capability *slot, size_t argument, bool from_userland) {
-    struct copy_args *args = (struct copy_args *) argument;
+static size_t node_copy(struct capability *slot, size_t argument, bool from_userland) {
+    struct node_copy_args *args = (struct node_copy_args *) argument;
 
     // resource lock/unlock is omitted here since no allocations take place
     struct capability_node_header *header = (struct capability_node_header *) slot->resource;
@@ -96,9 +96,10 @@ static size_t copy(struct capability *slot, size_t argument, bool from_userland)
 
     memcpy(dest, result.slot, sizeof(struct capability));
 #ifdef DEBUG_CAPABILITIES
-    printk("capabilities: source: 0x%x, dest: 0x%x\n", result.slot, dest);
+    printk("node_copy: source: 0x%x, dest: 0x%x\n", result.slot, dest);
 #endif
 
+    // add the newly copied capability to its resource list
     struct capability *end = result.slot->resource_list.end;
 
     end->resource_list.next = dest;
@@ -111,13 +112,40 @@ static size_t copy(struct capability *slot, size_t argument, bool from_userland)
 
 #ifdef DEBUG_CAPABILITIES
     struct capability *c = end->resource_list.start;
-    printk("capabilities: start: 0x%x, end: 0x%x\n", c->resource_list.start, c->resource_list.end);
+    printk("node_copy: resource start: 0x%x, end: 0x%x\n", c->resource_list.start, c->resource_list.end);
     for (; c != NULL; c = c->resource_list.next) {
         printk(" - 0x%x\n", c);
     }
 #endif
 
-    // TODO: add to derivation list
+    // add the newly copied capability to the derivation list of the capability it was copied from
+    if (result.slot->derivation_list_end == NULL) {
+        // the list is empty, so initialize it with only the new capability
+        result.slot->derivation_list_start = dest;
+        result.slot->derivation_list_end = dest;
+        dest->derivation_list.prev = NULL;
+        dest->derivation_list.next = NULL;
+    } else {
+        struct capability *derivation_end = result.slot->derivation_list_end;
+
+        derivation_end->derivation_list.next = dest;
+        dest->derivation_list.prev = derivation_end;
+        dest->derivation_list.next = NULL;
+
+        result.slot->derivation_list_end = dest;
+    }
+
+    dest->derived_from = result.slot;
+    dest->derivation_list_start = NULL;
+    dest->derivation_list_end = NULL;
+
+#ifdef DEBUG_CAPABILITIES
+    c = result.slot->derivation_list_start;
+    printk("node_copy: derivation start: 0x%x, end: 0x%x\n", c, result.slot->derivation_list_end);
+    for (; c != NULL; c = c->derivation_list.next) {
+        printk(" - 0x%x\n", c);
+    }
+#endif
 
     if (args->should_set_badge) {
         dest->badge = args->badge;
@@ -130,7 +158,7 @@ static size_t copy(struct capability *slot, size_t argument, bool from_userland)
 
 struct invocation_handlers node_handlers = {
     1,
-    {copy}
+    {node_copy}
 };
 
 /// allocates memory for a capability node and initializes it.
@@ -316,19 +344,19 @@ static void on_node_moved(struct capability_node_header *header) {
 
 // TODO: wrap these in a mutex
 
-static size_t lock(struct capability *slot, size_t argument, bool from_userland) {
+static size_t untyped_lock(struct capability *slot, size_t argument, bool from_userland) {
     if (!heap_lock(slot->resource)) {
-        printk("capabilities: attempted to lock a memory region twice!\n");
+        printk("untyped_lock: attempted to lock a memory region twice!\n");
     }
     return (size_t) slot->resource;
 }
 
-static size_t unlock(struct capability *slot, size_t argument, bool from_userland) {
+static size_t untyped_unlock(struct capability *slot, size_t argument, bool from_userland) {
     heap_unlock(slot->resource);
     return 0;
 }
 
-static size_t try_lock(struct capability *slot, size_t argument, bool from_userland) {
+static size_t untyped_try_lock(struct capability *slot, size_t argument, bool from_userland) {
     if (heap_lock(slot->resource)) {
         return (size_t) slot->resource;
     } else {
@@ -338,7 +366,7 @@ static size_t try_lock(struct capability *slot, size_t argument, bool from_userl
 
 struct invocation_handlers untyped_handlers = {
     3,
-    {lock, unlock, try_lock}
+    {untyped_lock, untyped_unlock, untyped_try_lock}
 };
 
 /* ==== address space ==== */
@@ -411,7 +439,7 @@ void update_capability_resource(struct absolute_capability_address *address, voi
     struct look_up_result result;
 
     if (!look_up_capability_absolute(address, &result)) {
-        printk("capabilities: couldn't locate capability at 0x%x:0x%x (%d bits) for resource move\n", address->thread_id, address->address, address->depth);
+        printk("update_capability_resource: couldn't locate capability at 0x%x:0x%x (%d bits)\n", address->thread_id, address->address, address->depth);
         return;
     }
 
@@ -432,14 +460,14 @@ size_t invoke_capability(size_t address, size_t depth, size_t handler_number, si
     struct look_up_result result;
 
     if (!look_up_capability_relative(address, depth, from_userland, &result)) {
-        printk("capabilities: couldn't locate capability at 0x%x (%d bits) for invocation\n", address, depth);
+        printk("invoke_capability: couldn't locate capability at 0x%x (%d bits) for invocation\n", address, depth);
         return 0;
     }
 
     struct invocation_handlers *handlers = result.slot->handlers;
 
     if (handlers == NULL || handler_number >= handlers->num_handlers) {
-        printk("capabilities: invocation %d on capability 0x%x (%d bits) is invalid\n", handler_number, address, depth);
+        printk("invoke_capability: invocation %d on capability 0x%x (%d bits) is invalid\n", handler_number, address, depth);
         unlock_looked_up_capability(&result);
         return 0;
     }
