@@ -133,9 +133,9 @@ struct invocation_handlers node_handlers = {
     {copy}
 };
 
-// allocates memory for a capability node and initializes it.
-// the size of this capability node is determined by slot_bits, where 2 raised to the power of slot_bits is the number of slots in this node
-// if successful, a pointer to the allocated memory is returned
+/// allocates memory for a capability node and initializes it.
+/// the size of this capability node is determined by slot_bits, where 2 raised to the power of slot_bits is the number of slots in this node
+/// if successful, a pointer to the allocated memory is returned
 static void *allocate_node(struct heap *heap, size_t slot_bits) {
     size_t total_slots = 1 << slot_bits;
 
@@ -248,7 +248,7 @@ bool look_up_capability_absolute(struct absolute_capability_address *address, st
     return return_value;
 }
 
-// populates a capability slot at the given address and search depth with the given heap-managed resource and invocation handlers
+/// populates a capability slot at the given address and search depth with the given heap-managed resource and invocation handlers
 static bool populate_capability_slot(struct heap *heap, size_t address, size_t depth, bool from_userland, void *resource, struct invocation_handlers *handlers) {
     struct look_up_result result;
     if (!look_up_capability_relative(address, depth, from_userland, &result)) {
