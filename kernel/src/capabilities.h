@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "debug.h"
 #include "sys/kernel.h"
+#include "linked_list.h"
 
 /// if this flag is set, the resource managed by this capability is allocated on and managed in the heap,
 /// and as such references to it should be properly updated by the heap manager
@@ -44,25 +45,14 @@ struct capability {
     access_flags_t access_rights;
     /// used to keep track of all the capabilities that depend on this resource,
     /// so that all of their pointers to the resource can be updated when it's moved
-    struct {
-        struct capability *start;
-        struct capability *end;
-        struct capability *next;
-        struct capability *prev;
-    } resource_list;
+    LIST_NO_CONTAINER(struct capability) resource_list;
     /// used to keep track of all the capabilities that share a derivation source with this one,
     /// so that they can be revoked later on if required
-    struct {
-        struct capability *next;
-        struct capability *prev;
-    } derivation_list;
-    /// points to the start and end of the list of capabilities that have been derived from this one, respectively
-    struct capability *derivation_list_start;
-    struct capability *derivation_list_end;
+    LIST_NO_CONTAINER(struct capability) derivation_list;
     /// points to the capability that this capability was derived from
     struct capability *derived_from;
-    /// the id of the thread that this capability belongs to
-    uint16_t thread_id;
+    /// points to the start of this capability's derivation list, if applicable
+    struct capability *derivation;
     /// the absolute address of this capability
     struct absolute_capability_address address;
     /// if this capability is managed by a heap, this points to the heap that manages it

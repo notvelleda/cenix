@@ -2,16 +2,7 @@
 
 #include "capabilities.h"
 #include "arch.h"
-
-struct thread_queue {
-    struct thread_capability *start;
-    struct thread_capability *end;
-};
-
-struct thread_queue_entry {
-    struct thread_capability *next;
-    struct thread_capability *prev;
-};
+#include "linked_list.h"
 
 #define THREAD_CURRENTLY_RUNNING 1
 #define THREAD_NEEDS_CPU_UPDATE 2
@@ -37,17 +28,17 @@ struct thread_capability {
     /// the priority of this thread (which priority queue it's in)
     uint8_t priority;
     /// a reference to the start and end of the runqueue that this thread is in
-    struct thread_queue *runqueue;
+    LIST_CONTAINER(struct thread_capability) *runqueue;
     /// contains the previous and next links in the runqueue
-    struct thread_queue_entry runqueue_entry;
+    LIST_LINK(struct thread_capability) runqueue_entry;
     /// contains the previous and next links in the cpu update list
-    struct thread_queue_entry cpu_update_entry;
+    LIST_LINK(struct thread_capability) cpu_update_entry;
     /// a unique id number that's assigned to each thread. once a thread's capability has been freed, its id can be reassigned to a newly created thread
     uint16_t thread_id;
     /// the bucket in the thread hash table that this thread is placed in
     uint8_t bucket_number;
     /// linked list that forms each bucket of the thread hash table
-    struct thread_queue_entry table_entry;
+    LIST_LINK(struct thread_capability) table_entry;
 };
 
 extern struct invocation_handlers thread_handlers;

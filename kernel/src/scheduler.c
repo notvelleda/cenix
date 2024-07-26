@@ -4,6 +4,7 @@
 #include "arch.h"
 #include "debug.h"
 #include "heap.h"
+#include "linked_list.h"
 
 #undef DEBUG_SCHEDULER
 
@@ -12,30 +13,11 @@ struct scheduler_state scheduler_state;
 void init_scheduler(void) {
     scheduler_state.current_thread = NULL;
     for (int i = 0; i < NUM_PRIORITIES; i ++) {
-        scheduler_state.priority_queues[i].start = NULL;
-        scheduler_state.priority_queues[i].end = NULL;
+        LIST_INIT(scheduler_state.priority_queues[i]);
     }
-    scheduler_state.needs_cpu_time_update.start = NULL;
-    scheduler_state.needs_cpu_time_update.end = NULL;
+    LIST_INIT(scheduler_state.needs_cpu_time_update);
     scheduler_state.timer_hz = 0;
     scheduler_state.ticks_until_cpu_time_update = 0;
-}
-
-void thread_queue_add(struct thread_queue *queue, struct thread_capability *thread) {
-    if (queue->start == NULL) {
-        queue->start = thread;
-        queue->end = thread;
-    } else {
-        bool should_unlock = heap_lock(queue->end);
-
-        queue->end->runqueue_entry.next = thread;
-        thread->runqueue_entry.prev = queue->end;
-        queue->end = thread;
-
-        if (should_unlock) {
-            heap_unlock(queue->end);
-        }
-    }
 }
 
 void queue_thread(struct thread_capability *thread) {
@@ -44,7 +26,7 @@ void queue_thread(struct thread_capability *thread) {
     }
 
     // TODO: calculate priority
-    thread_queue_add(&scheduler_state.priority_queues[63], thread);
+    LIST_APPEND(scheduler_state.priority_queues[63], runqueue_entry, thread);
 }
 
 void resume_thread(struct thread_capability *thread) {
@@ -91,46 +73,33 @@ void try_context_switch(struct thread_registers *registers) {
 
     // find the next thread that should be executed
     struct thread_capability *next_thread = NULL;
-    bool should_unlock_next = false;
 
     for (int i = NUM_PRIORITIES - 1; i >= 0; i --) {
-        struct thread_queue *queue = &scheduler_state.priority_queues[i];
+        LIST_CONTAINER(struct thread_capability) *queue = &scheduler_state.priority_queues[i];
 
         while (queue->start != NULL) {
             // pop the thread off of the queue
-            should_unlock_next = heap_lock(queue->start);
-            next_thread = queue->start;
-            queue->start = next_thread->runqueue_entry.next;
-
+            LIST_POP_FROM_START(*queue, runqueue_entry, next_thread);
             next_thread->runqueue = NULL;
-            next_thread->runqueue_entry.prev = NULL;
-            next_thread->runqueue_entry.next = NULL;
 
-            if (next_thread->exec_mode != RUNNING) {
-                // if this thread shouldn't be executed, keep searching until one that should is found
-                if (should_unlock_next) {
-                    heap_unlock(next_thread);
-                    should_unlock_next = false;
-                }
-
-                next_thread = NULL;
-                continue;
+            if (next_thread->exec_mode == RUNNING) {
+                // found a valid thread, break out of the loops!
+                goto found_thread;
             }
 
-            goto found_thread;
+            next_thread = NULL;
         }
     }
 
 found_thread:
 #ifdef DEBUG_SCHEDULER
-    printk("scheduler: next_thread is 0x%x, should unlock %s\n", next_thread, should_unlock_next ? "true" : "false");
+    printk("scheduler: next_thread is 0x%x\n", next_thread);
 #endif
 
     bool should_idle = true; // whether the idle thread should be entered
 
     // save state of current thread and queue it up for execution if it needs more cpu time
     if (scheduler_state.current_thread != NULL) {
-        bool should_unlock = heap_lock(scheduler_state.current_thread);
         struct thread_capability *thread = scheduler_state.current_thread;
 
         if (thread->exec_mode == RUNNING) {
@@ -154,10 +123,6 @@ found_thread:
             thread->scheduler_flags &= ~THREAD_CURRENTLY_RUNNING;
             scheduler_state.current_thread = NULL;
         }
-
-        if (should_unlock) {
-            heap_unlock(thread);
-        }
     }
 
     // load state of next thread
@@ -168,10 +133,6 @@ found_thread:
         *registers = next_thread->registers;
         scheduler_state.current_thread = next_thread;
         next_thread->scheduler_flags |= THREAD_CURRENTLY_RUNNING;
-
-        if (should_unlock_next) {
-            heap_unlock(next_thread);
-        }
     } else if (should_idle) {
 #ifdef DEBUG_SCHEDULER
         printk("scheduler: entering idle thread\n");

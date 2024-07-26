@@ -7,12 +7,13 @@
 #include "string.h"
 #include "scheduler.h"
 #include "sys/kernel.h"
+#include "linked_list.h"
 
 #undef DEBUG_THREADS
 
 #define NUM_BUCKETS 128
 
-static struct thread_queue thread_hash_table[NUM_BUCKETS];
+static LIST_CONTAINER(struct thread_capability) thread_hash_table[NUM_BUCKETS];
 
 #define MAX_THREADS 1024
 
@@ -33,8 +34,7 @@ static uint32_t hash(uint16_t value) {
 
 void init_threads(void) {
     for (int i = 0; i < NUM_BUCKETS; i ++) {
-        thread_hash_table[i].start = NULL;
-        thread_hash_table[i].end = NULL;
+        LIST_INIT(thread_hash_table[i]);
     }
 
     for (int i = 0; i < USED_THREAD_IDS_SIZE; i ++) {
@@ -212,29 +212,7 @@ void alloc_thread(struct heap *heap, void **resource, struct invocation_handlers
 #endif
 
     // insert this thread into the thread hash table
-    struct thread_queue *bucket = &thread_hash_table[thread->bucket_number];
-
-    if (bucket->start == NULL) {
-#ifdef DEBUG_THREADS
-        printk("threads: adding thread to new bucket\n");
-#endif
-        bucket->start = thread;
-        bucket->end = thread;
-    } else {
-#ifdef DEBUG_THREADS
-        printk("threads: adding thread to end of existing bucket\n");
-#endif
-
-        bool should_unlock = heap_lock(bucket->end);
-
-        bucket->end->table_entry.next = thread;
-        thread->table_entry.prev = bucket->end;
-        bucket->end = thread;
-
-        if (should_unlock) {
-            heap_unlock(bucket->end);
-        }
-    }
+    LIST_APPEND(thread_hash_table[thread->bucket_number], table_entry, thread);
 
     *resource = (void *) thread;
     *handlers = &thread_handlers;
@@ -243,45 +221,15 @@ void alloc_thread(struct heap *heap, void **resource, struct invocation_handlers
 void on_thread_moved(struct thread_capability *thread) {
     if (thread->runqueue != NULL) {
         // update references to this thread in its current runqueue
-        if (thread->runqueue_entry.next == NULL) {
-            thread->runqueue->end = thread;
-        } else {
-            thread->runqueue_entry.next->runqueue_entry.prev = thread;
-        }
-
-        if (thread->runqueue_entry.prev == NULL) {
-            thread->runqueue->start = thread;
-        } else {
-            thread->runqueue_entry.prev->runqueue_entry.next = thread;
-        }
+        LIST_UPDATE_ADDRESS(*thread->runqueue, runqueue_entry, thread);
     }
 
     // update references to this thread in the thread hash table
-    if (thread->table_entry.next == NULL) {
-        thread_hash_table[thread->bucket_number].end = thread;
-    } else {
-        thread->table_entry.next->table_entry.prev = thread;
-    }
-
-    if (thread->table_entry.prev == NULL) {
-        thread_hash_table[thread->bucket_number].start = thread;
-    } else {
-        thread->table_entry.prev->table_entry.next = thread;
-    }
+    LIST_UPDATE_ADDRESS(thread_hash_table[thread->bucket_number], table_entry, thread);
 
     if ((thread->scheduler_flags & THREAD_NEEDS_CPU_UPDATE) != 0) {
         // update references to this thread in the needs cpu update queue
-        if (thread->cpu_update_entry.next == NULL) {
-            scheduler_state.needs_cpu_time_update.end = thread;
-        } else {
-            thread->cpu_update_entry.next->cpu_update_entry.prev = thread;
-        }
-
-        if (thread->cpu_update_entry.prev == NULL) {
-            scheduler_state.needs_cpu_time_update.start = thread;
-        } else {
-            thread->cpu_update_entry.prev->cpu_update_entry.next = thread;
-        }
+        LIST_UPDATE_ADDRESS(scheduler_state.needs_cpu_time_update, cpu_update_entry, thread);
     }
 
     if ((thread->scheduler_flags & THREAD_CURRENTLY_RUNNING) != 0) {
