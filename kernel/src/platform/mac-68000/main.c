@@ -163,6 +163,9 @@ void after_sp_set(void) {
     uint32_t table_entry = *(TOOL_DISP_TABLE + (trap & 0x1ff));
     __asm__ __volatile__ ("jsr (%0)" :: "a" (table_entry));*/
 
+    printk("sizeof(struct capability) is %d\n", sizeof(struct capability));
+    printk("sizeof(struct heap_header) is %d\n", sizeof(struct heap_header));
+
     init_threads();
     init_scheduler();
     init_root_capability(&the_heap);
@@ -217,6 +220,20 @@ void after_sp_set(void) {
         .should_set_badge = 0
     };
     invoke_capability(3, ROOT_CAP_SLOT_BITS, NODE_COPY, (size_t) &alloc_copy_args, false);
+
+#if 0
+    // test to make sure this gets added to the same derivation list as the first copy
+    alloc_copy_args.dest_slot = (1 << ROOT_CAP_SLOT_BITS) - 1;
+    invoke_capability(3, ROOT_CAP_SLOT_BITS, NODE_COPY, (size_t) &alloc_copy_args, false);
+
+    // test to make sure this gets deleted properly
+    invoke_capability(3, ROOT_CAP_SLOT_BITS, NODE_DELETE, alloc_copy_args.dest_slot, false);
+
+    struct look_up_result result;
+    look_up_capability_relative(0, ROOT_CAP_SLOT_BITS, false, &result);
+    print_capability_lists(result.slot);
+    unlock_looked_up_capability(&result);
+#endif
 
     struct set_root_node_args set_root_node_args = {3, ROOT_CAP_SLOT_BITS};
     invoke_capability(2, ROOT_CAP_SLOT_BITS, THREAD_SET_ROOT_NODE, (size_t) &set_root_node_args, false);

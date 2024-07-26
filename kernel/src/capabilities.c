@@ -39,16 +39,31 @@ static void update_capability_lists(struct capability *capability) {
         capability->derivation_list.next->derivation_list.prev = capability;
     }
 
+    bool is_start = false;
+    bool is_end = false;
+
     if (capability->derivation_list.prev == NULL && capability->derived_from != NULL) {
         capability->derived_from->derivation_list_start = capability;
+        is_start = true;
     }
 
     if (capability->derivation_list.next == NULL && capability->derived_from != NULL) {
         capability->derived_from->derivation_list_end = capability;
+        is_end = true;
     }
 
     for (struct capability *c = capability->derivation_list_start; c != NULL; c = c->derivation_list.next) {
         c->derived_from = capability;
+
+        if ((c->flags & (CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED)) == 0) {
+            if (is_start) {
+                c->derivation_list_start = capability;
+            }
+
+            if (is_end) {
+                c->derivation_list_end = capability;
+            }
+        }
     }
 }
 
@@ -58,13 +73,229 @@ void move_capability(struct capability *from, struct capability *to) {
     from->handlers = NULL;
 }
 
+static void merge_derivation_lists(struct capability *to_merge) {
+    if ((to_merge->flags & CAP_FLAG_BADGED) != 0) {
+        // merge the derivation list of this capability with the derivation list of its parent
+
+        return;
+    } else {
+        if (to_merge->derivation_list.prev != NULL && to_merge->derivation_list.next != NULL) {
+            // this capability is in the middle of its derivation list, so nothing special needs to happen, just connect the previous and next links
+            to_merge->derivation_list.prev->derivation_list.next = to_merge->derivation_list.next;
+            to_merge->derivation_list.next->derivation_list.prev = to_merge->derivation_list.prev;
+        } else {
+            // this is either the start or end of the list, so all the capabilities in the list that don't have their own derivation lists need to be updated
+
+            if (to_merge->derivation_list.prev == NULL) {
+                struct capability *start = to_merge->derivation_list.next;
+                start->derivation_list.prev = NULL;
+
+                for (struct capability *c = start; c != NULL; c = c->derivation_list.next) {
+                    if ((c->flags & (CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED)) == 0) {
+                        c->derivation_list_start = start;
+                    }
+                }
+
+                if (to_merge->derived_from != NULL) {
+                    to_merge->derived_from->derivation_list_start = start;
+                }
+            }
+
+            if (to_merge->derivation_list.next == NULL) {
+                struct capability *end = to_merge->derivation_list.prev;
+                end->derivation_list.next = NULL;
+
+                for (struct capability *c = end; c != NULL; c = c->derivation_list.prev) {
+                    if ((c->flags & (CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED)) == 0) {
+                        c->derivation_list_end = end;
+                    }
+                }
+
+                if (to_merge->derived_from != NULL) {
+                    to_merge->derived_from->derivation_list_end = end;
+                }
+            }
+        }
+    }
+}
+
+static void delete_capability(struct capability *to_delete) {
+    bool will_free = false;
+
+    if (to_delete->resource_list.prev == NULL) {
+        // this is the first element in the list, handle it accordingly
+
+        if (to_delete->resource_list.next == NULL) {
+            // there are no more capabilities using this resource, it can be freed
+            if ((to_delete->flags & CAP_FLAG_IS_HEAP_MANAGED) != 0) {
+                will_free = true;
+            }
+        } else {
+            // move ownership of the resource to the first capability in the resource list
+            struct capability *new_owner = to_delete->resource_list.next;
+
+            for (struct capability *c = new_owner; c != NULL; c = c->resource_list.next) {
+                c->resource_list.start = new_owner;
+            }
+
+            new_owner->resource_list.prev = NULL;
+
+            if ((to_delete->flags & CAP_FLAG_IS_HEAP_MANAGED) != 0) {
+                heap_set_update_capability(to_delete->resource, &new_owner->address);
+            }
+        }
+    } else if (to_delete->resource_list.next != NULL) {
+        // this capability is in the middle of its resource list, so nothing special needs to happen, just connect the previous and next links
+        to_delete->resource_list.prev->resource_list.next = to_delete->resource_list.next;
+        to_delete->resource_list.next->resource_list.prev = to_delete->resource_list.prev;
+    } else {
+        // this capability is at the end of its resource list, update all the end values accordingly
+        for (struct capability *c = to_delete->resource_list.prev; c != NULL; c = c->resource_list.prev) {
+            c->resource_list.end = to_delete->resource_list.prev;
+        }
+
+        to_delete->resource_list.prev->resource_list.next = NULL;
+    }
+
+    // call the deconstructor for this capability
+    if (to_delete->handlers->deconstructor != NULL) {
+        to_delete->handlers->deconstructor(to_delete, will_free);
+    }
+
+    // if this capability's resource should be freed, free it after the deconstructor is called
+    if (will_free) {
+        heap_free(to_delete->heap, to_delete->resource);
+    }
+
+    to_delete->handlers = NULL;
+}
+
+#ifdef DEBUG
+void print_capability_lists(struct capability *capability) {
+    struct capability *c = capability->resource_list.start;
+    printk("resource start: 0x%x, end: 0x%x\n", c, capability->resource_list.end);
+    for (; c != NULL; c = c->resource_list.next) {
+        printk(" - 0x%x\n", c);
+    }
+    c = capability->derivation_list_start;
+    printk("derivation start: 0x%x, end: 0x%x\n", c, capability->derivation_list_end);
+    for (; c != NULL; c = c->derivation_list.next) {
+        printk(" - 0x%x\n", c);
+    }
+}
+#endif
+
 /* ==== capability node ==== */
+
+/// \brief how many capability nodes can be nested in a given thread's capability space
+///
+/// this limitation exists to help prevent stack overflows when moving a node into a new thread
+/// or when deleting a node
+#define MAX_NESTED_NODES 4
 
 struct capability_node_header {
     size_t slot_bits;
+    uint8_t nested_nodes;
 };
 
-static size_t node_copy(struct capability *slot, size_t argument, bool from_userland) {
+static size_t node_copy(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+    struct node_copy_args *args = (struct node_copy_args *) argument;
+
+    // resource lock/unlock is omitted here since no allocations take place
+    struct capability_node_header *header = (struct capability_node_header *) slot->resource;
+
+    // make sure slot id is valid
+    if (args->dest_slot >= 1 << header->slot_bits) {
+        return 0;
+    }
+
+    struct capability *dest = (struct capability *) ((char *) header + sizeof(struct capability_node_header) + args->dest_slot * sizeof(struct capability));
+
+    // make sure destination slot is empty and is eligible for copying.
+    // copying of capability nodes isn't allowed because i just don't know how to deal with it currently and it may just overcomplicate things
+    if (dest->handlers != NULL || dest->handlers == &node_handlers) {
+        return 0;
+    }
+
+    struct look_up_result result;
+    if (!look_up_capability_relative(args->source_address, args->source_depth, from_userland, &result)) {
+        return 0;
+    }
+
+    // if badge setting is requested, make sure the source capability is original
+    if (args->should_set_badge && (result.slot->flags & CAP_FLAG_ORIGINAL) == 0) {
+        unlock_looked_up_capability(&result);
+        return 0;
+    }
+
+    memcpy(dest, result.slot, sizeof(struct capability));
+#ifdef DEBUG_CAPABILITIES
+    printk("node_copy: source: 0x%x, dest: 0x%x\n", result.slot, dest);
+#endif
+
+    dest->flags &= ~(CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED);
+
+    dest->address.address = address | (args->dest_slot << depth);
+    dest->address.depth = depth + header->slot_bits;
+
+    // add the newly copied capability to its resource list
+    struct capability *end = result.slot->resource_list.end;
+
+    end->resource_list.next = dest;
+    dest->resource_list.prev = end;
+    dest->resource_list.next = NULL;
+
+    for (struct capability *c = end->resource_list.start; c != NULL; c = c->resource_list.next) {
+        c->resource_list.end = dest;
+    }
+
+    // add the newly copied capability to the derivation list of the capability it was copied from
+    if (result.slot->derivation_list_end == NULL) {
+        // the list is empty, so initialize it with only the new capability
+        result.slot->derivation_list_start = dest;
+        result.slot->derivation_list_end = dest;
+        dest->derivation_list.prev = NULL;
+        dest->derivation_list.next = NULL;
+
+        if ((result.slot->flags & CAP_FLAG_ORIGINAL) != 0) {
+            dest->derived_from = result.slot;
+        }
+    } else {
+        struct capability *derivation_end = result.slot->derivation_list_end;
+
+        derivation_end->derivation_list.next = dest;
+        dest->derivation_list.prev = derivation_end;
+        dest->derivation_list.next = NULL;
+        dest->derived_from = derivation_end->derived_from;
+
+        result.slot->derivation_list_end = dest;
+    }
+
+    if (args->should_set_badge) {
+        // make a new derivation list for this capability only if it's received a badge.
+        // this ensures that the derivation tree can be at most two levels deep, to prevent stack overflows when the tree has to be searched
+        dest->derived_from = result.slot;
+        dest->derivation_list_start = NULL;
+        dest->derivation_list_end = NULL;
+
+        dest->badge = args->badge;
+        dest->flags |= CAP_FLAG_BADGED;
+    } else {
+        // copy the derivation list start and end from the source capability in case it's changed
+        dest->derivation_list_start = result.slot->derivation_list_start;
+        dest->derivation_list_end = result.slot->derivation_list_end;
+    }
+
+#ifdef DEBUG_CAPABILITIES
+    print_capability_lists(dest);
+#endif
+
+    unlock_looked_up_capability(&result);
+
+    return 1;
+}
+
+static size_t node_move(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
     struct node_copy_args *args = (struct node_copy_args *) argument;
 
     // resource lock/unlock is omitted here since no allocations take place
@@ -88,67 +319,15 @@ static size_t node_copy(struct capability *slot, size_t argument, bool from_user
         return 0;
     }
 
-    // if badge setting is requested, make sure the source capability is original
-    if (args->should_set_badge && result.slot->derived_from != NULL) {
-        unlock_looked_up_capability(&result);
-        return 0;
-    }
+    move_capability(result.slot, dest);
 
-    memcpy(dest, result.slot, sizeof(struct capability));
-#ifdef DEBUG_CAPABILITIES
-    printk("node_copy: source: 0x%x, dest: 0x%x\n", result.slot, dest);
-#endif
+    // update the address of the capability to its new slot
+    dest->address.address = address | (args->dest_slot << depth);
+    dest->address.depth = depth + header->slot_bits;
 
-    // add the newly copied capability to its resource list
-    struct capability *end = result.slot->resource_list.end;
-
-    end->resource_list.next = dest;
-    dest->resource_list.prev = end;
-    dest->resource_list.next = NULL;
-
-    for (struct capability *c = end->resource_list.start; c != NULL; c = c->resource_list.next) {
-        c->resource_list.end = dest;
-    }
-
-#ifdef DEBUG_CAPABILITIES
-    struct capability *c = end->resource_list.start;
-    printk("node_copy: resource start: 0x%x, end: 0x%x\n", c->resource_list.start, c->resource_list.end);
-    for (; c != NULL; c = c->resource_list.next) {
-        printk(" - 0x%x\n", c);
-    }
-#endif
-
-    // add the newly copied capability to the derivation list of the capability it was copied from
-    if (result.slot->derivation_list_end == NULL) {
-        // the list is empty, so initialize it with only the new capability
-        result.slot->derivation_list_start = dest;
-        result.slot->derivation_list_end = dest;
-        dest->derivation_list.prev = NULL;
-        dest->derivation_list.next = NULL;
-    } else {
-        struct capability *derivation_end = result.slot->derivation_list_end;
-
-        derivation_end->derivation_list.next = dest;
-        dest->derivation_list.prev = derivation_end;
-        dest->derivation_list.next = NULL;
-
-        result.slot->derivation_list_end = dest;
-    }
-
-    dest->derived_from = result.slot;
-    dest->derivation_list_start = NULL;
-    dest->derivation_list_end = NULL;
-
-#ifdef DEBUG_CAPABILITIES
-    c = result.slot->derivation_list_start;
-    printk("node_copy: derivation start: 0x%x, end: 0x%x\n", c, result.slot->derivation_list_end);
-    for (; c != NULL; c = c->derivation_list.next) {
-        printk(" - 0x%x\n", c);
-    }
-#endif
-
-    if (args->should_set_badge) {
-        dest->badge = args->badge;
+    if ((dest->flags & CAP_FLAG_IS_HEAP_MANAGED) != 0 && dest->resource_list.prev == NULL) {
+        // only update the owner id of the node if it's the owner of the resource
+        heap_set_update_capability(dest->resource, &dest->address);
     }
 
     unlock_looked_up_capability(&result);
@@ -156,9 +335,72 @@ static size_t node_copy(struct capability *slot, size_t argument, bool from_user
     return 1;
 }
 
+static size_t node_delete(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+    // resource lock/unlock is omitted here since no allocations take place
+    struct capability_node_header *header = (struct capability_node_header *) slot->resource;
+
+    // make sure slot id is valid
+    if (argument >= 1 << header->slot_bits) {
+        return 0;
+    }
+
+    struct capability *to_delete = (struct capability *) ((char *) header + sizeof(struct capability_node_header) + argument * sizeof(struct capability));
+
+    // make sure there's actually a capability here
+    if (to_delete->handlers == NULL) {
+        return 0;
+    }
+
+    merge_derivation_lists(to_delete);
+    delete_capability(to_delete);
+
+    return 1;
+}
+
+static size_t node_revoke(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+    // resource lock/unlock is omitted here since no allocations take place
+    struct capability_node_header *header = (struct capability_node_header *) slot->resource;
+
+    // make sure slot id is valid
+    if (argument >= 1 << header->slot_bits) {
+        return 0;
+    }
+
+    struct capability *to_revoke = (struct capability *) ((char *) header + sizeof(struct capability_node_header) + argument * sizeof(struct capability));
+
+    // make sure there's actually a capability here and that this capability is eligible for revocation
+    if (
+        to_revoke->handlers == NULL
+        || to_revoke->handlers == &node_handlers
+        || (to_revoke->flags & (CAP_FLAG_BADGED | CAP_FLAG_ORIGINAL)) == 0
+    ) {
+        return 0;
+    }
+
+    // delete all the capabilities that have been derived from this one.
+    // derivation lists don't have to be merged here since they'll all be deleted anyways
+    for (struct capability *c = to_revoke->derivation_list_start; c != NULL; c = c->derivation_list.next) {
+        if ((c->flags & (CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED)) != 0) {
+            // this capability has a second derivation tree level, walk it and delete those capabilities too
+            for (struct capability *d = c->derivation_list_start; d != NULL; d = d->derivation_list.next) {
+                delete_capability(d);
+            }
+        }
+
+        delete_capability(c);
+    }
+
+    // reset the derivation list
+    to_revoke->derivation_list_start = NULL;
+    to_revoke->derivation_list_end = NULL;
+
+    return 1;
+}
+
 struct invocation_handlers node_handlers = {
-    1,
-    {node_copy}
+    4,
+    {node_copy, node_move, node_delete, node_revoke}
+    // TODO: node destructor
 };
 
 /// allocates memory for a capability node and initializes it.
@@ -176,6 +418,7 @@ static void *allocate_node(struct heap *heap, size_t slot_bits) {
     }
 
     new->slot_bits = slot_bits;
+    new->nested_nodes = 0; // to be filled out in populate_capability_slot() if this isn't the kernel root node
 
     struct capability *slots = (struct capability *) ((char *) new + slots_start);
     for (int i = 0; i < total_slots; i ++) {
@@ -292,36 +535,50 @@ static bool populate_capability_slot(struct heap *heap, size_t address, size_t d
         return false;
     }
 
+    if (handlers == &node_handlers && result.container != NULL) {
+        struct capability_node_header *container = (struct capability_node_header *) result.container;
+
+        // make sure this new node isn't too many layers of nesting deep
+        if (container->nested_nodes == MAX_NESTED_NODES) {
+            heap_free(heap, resource);
+            unlock_looked_up_capability(&result);
+            return false;
+        }
+
+        // update the nested nodes count of this new node
+        struct capability_node_header *header = (struct capability_node_header *) resource;
+        header->nested_nodes = container->nested_nodes + 1;
+    }
+
     memset(result.slot, 0, sizeof(struct capability));
     result.slot->handlers = handlers;
     result.slot->resource = resource;
-    result.slot->flags = CAP_FLAG_IS_HEAP_MANAGED;
+    result.slot->flags = CAP_FLAG_IS_HEAP_MANAGED | CAP_FLAG_ORIGINAL;
     result.slot->access_rights = -1; // all rights given
     result.slot->resource_list.start = result.slot;
     result.slot->resource_list.end = result.slot;
     // everything else here assumes NULL is 0
 
-    struct absolute_capability_address absolute_address;
-
     if (from_userland && scheduler_state.current_thread != NULL) {
-        bool should_unlock = heap_lock(scheduler_state.current_thread);
+        //bool should_unlock = heap_lock(scheduler_state.current_thread);
 
         // get thread id and bucket number from current thread
-        absolute_address.thread_id = scheduler_state.current_thread->thread_id;
-        absolute_address.bucket_number = scheduler_state.current_thread->bucket_number;
+        result.slot->address.thread_id = scheduler_state.current_thread->thread_id;
+        result.slot->address.bucket_number = scheduler_state.current_thread->bucket_number;
 
-        if (should_unlock) {
+        /*if (should_unlock) {
             heap_unlock(scheduler_state.current_thread);
-        }
+        }*/
     } else {
         // probably in the kernel, use the reserved thread id of 0 to indicate that
-        absolute_address.thread_id = 0;
+        result.slot->address.thread_id = 0;
     }
 
-    absolute_address.address = address;
-    absolute_address.depth = depth;
+    result.slot->address.address = address;
+    result.slot->address.depth = depth;
+    result.slot->heap = heap;
 
-    heap_set_update_capability(resource, &absolute_address);
+    heap_set_update_capability(resource, &result.slot->address);
     heap_unlock(resource);
 
     unlock_looked_up_capability(&result);
@@ -344,19 +601,19 @@ static void on_node_moved(struct capability_node_header *header) {
 
 // TODO: wrap these in a mutex
 
-static size_t untyped_lock(struct capability *slot, size_t argument, bool from_userland) {
+static size_t untyped_lock(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
     if (!heap_lock(slot->resource)) {
         printk("untyped_lock: attempted to lock a memory region twice!\n");
     }
     return (size_t) slot->resource;
 }
 
-static size_t untyped_unlock(struct capability *slot, size_t argument, bool from_userland) {
+static size_t untyped_unlock(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
     heap_unlock(slot->resource);
     return 0;
 }
 
-static size_t untyped_try_lock(struct capability *slot, size_t argument, bool from_userland) {
+static size_t untyped_try_lock(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
     if (heap_lock(slot->resource)) {
         return (size_t) slot->resource;
     } else {
@@ -376,7 +633,7 @@ struct address_space_capability {
     // TODO: support address spaces other than the one belonging to the kernel
 };
 
-static size_t alloc(struct capability *slot, size_t argument, bool from_userland) {
+static size_t alloc(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
     struct alloc_args *args = (struct alloc_args *) argument;
 
     // make sure there's permission to create this kind of object
@@ -472,7 +729,11 @@ size_t invoke_capability(size_t address, size_t depth, size_t handler_number, si
         return 0;
     }
 
-    size_t return_value = handlers->handlers[handler_number](result.slot, argument, from_userland);
+#ifdef DEBUG_CAPABILITIES
+    printk("invoke_capability: invoking %d on 0x%d (%d bits) with argument 0x%x\n", handler_number, address, depth, argument);
+#endif
+
+    size_t return_value = handlers->handlers[handler_number](address, depth, result.slot, argument, from_userland);
     unlock_looked_up_capability(&result);
     return return_value;
 }

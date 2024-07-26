@@ -42,6 +42,26 @@ struct node_copy_args {
     uint8_t should_set_badge;
 };
 
+/// the handler number for the `node_move` invocation
+#define NODE_MOVE 1
+
+/// arguments passed to the `node_move` invocation on a capability node
+struct node_move_args {
+    /// the address of the capability to move
+    size_t source_address;
+    /// how many bits of the source_address field are valid and should be used to search
+    /// through the calling thread's address space
+    size_t source_depth;
+    /// the index of the slot in this node to move the capability into
+    size_t dest_slot;
+};
+
+/// the handler number for the `node_delete` invocation
+#define NODE_DELETE 2
+
+/// the handler number for the `node_revoke` invocation
+#define NODE_REVOKE 3
+
 /// the handler number for the `untyped_lock` invocation
 #define UNTYPED_LOCK 0
 

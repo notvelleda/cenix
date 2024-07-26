@@ -14,6 +14,23 @@
 /// if this flag is set, this capability is the root capability of a thread
 #define CAP_FLAG_IS_ROOT 2
 
+/// if this flag is set, this capability has had its badge set and was derived from a non-badged capability
+#define CAP_FLAG_BADGED 4
+
+/// if this flag is set, this capability is the original in a derivation tree
+#define CAP_FLAG_ORIGINAL 8
+
+struct absolute_capability_address {
+    /// the id of the thread that this capability belongs to
+    uint16_t thread_id;
+    /// the id of the bucket that the thread is in
+    uint8_t bucket_number;
+    /// the address of the capability in the thread's capability space
+    size_t address;
+    /// how far to search into the thread's capability space
+    size_t depth;
+};
+
 struct capability {
     /// the invocation handlers for this capability
     struct invocation_handlers *handlers;
@@ -44,17 +61,12 @@ struct capability {
     struct capability *derivation_list_end;
     /// points to the capability that this capability was derived from
     struct capability *derived_from;
-};
-
-struct absolute_capability_address {
     /// the id of the thread that this capability belongs to
     uint16_t thread_id;
-    /// the id of the bucket that the thread is in
-    uint8_t bucket_number;
-    /// the address of the capability in the thread's capability space
-    size_t address;
-    /// how far to search into the thread's capability space
-    size_t depth;
+    /// the absolute address of this capability
+    struct absolute_capability_address address;
+    /// if this capability is managed by a heap, this points to the heap that manages it
+    struct heap *heap;
 };
 
 extern struct capability kernel_root_capability;
@@ -96,7 +108,12 @@ struct invocation_handlers {
     /// how many invocation handlers in this struct are valid
     size_t num_handlers;
     /// the list of invocation handlers, stored as function pointers to handler functions
-    size_t (*handlers[MAX_HANDLERS])(struct capability *slot, size_t argument, bool from_userland);
+    size_t (*handlers[MAX_HANDLERS])(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland);
+    /// \brief called when a capability is about to be deleted
+    ///
+    /// this allows for resources to be cleaned up if required and for references to this capability to be removed.
+    /// if the resource that this capability corresponds to will be freed, the `will_free` argument will be set to `true` accordingly
+    void (*deconstructor)(struct capability *slot, bool will_free);
 };
 
 /// invocation handlers for capability nodes
@@ -118,3 +135,7 @@ void init_root_capability(struct heap *heap);
 
 /// the value of size_bits for the kernel's root capability node
 #define ROOT_CAP_SLOT_BITS 4
+
+#ifdef DEBUG
+void print_capability_lists(struct capability *capability);
+#endif

@@ -45,7 +45,7 @@ void init_threads(void) {
 
 extern struct invocation_handlers untyped_handlers;
 
-static size_t read_registers(struct capability *slot, size_t argument, bool from_userland) {
+static size_t read_registers(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
     struct read_write_register_args *args = (struct read_write_register_args *) argument;
 
     bool should_unlock = heap_lock(slot->resource);
@@ -61,7 +61,7 @@ static size_t read_registers(struct capability *slot, size_t argument, bool from
     return 0;
 }
 
-static size_t write_registers(struct capability *slot, size_t argument, bool from_userland) {
+static size_t write_registers(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
     struct read_write_register_args *args = (struct read_write_register_args *) argument;
 
     bool should_unlock = heap_lock(slot->resource);
@@ -77,7 +77,7 @@ static size_t write_registers(struct capability *slot, size_t argument, bool fro
     return 0;
 }
 
-static size_t resume(struct capability *slot, size_t argument, bool from_userland) {
+static size_t resume(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
     bool should_unlock = heap_lock(slot->resource);
 
     resume_thread((struct thread_capability *) slot->resource);
@@ -89,7 +89,7 @@ static size_t resume(struct capability *slot, size_t argument, bool from_userlan
     return 0;
 }
 
-static size_t suspend(struct capability *slot, size_t argument, bool from_userland) {
+static size_t suspend(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
     bool should_unlock = heap_lock(slot->resource);
 
     suspend_thread((struct thread_capability *) slot->resource);
@@ -101,17 +101,17 @@ static size_t suspend(struct capability *slot, size_t argument, bool from_userla
     return 0;
 }
 
-static size_t set_root_node(struct capability *slot, size_t argument, bool from_userland) {
-    bool should_unlock = heap_lock(slot->resource);
+static size_t set_root_node(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+    //bool should_unlock = heap_lock(slot->resource);
 
     struct thread_capability *thread = (struct thread_capability *) slot->resource;
     struct set_root_node_args *args = (struct set_root_node_args *) argument;
     struct look_up_result result;
 
     if (!look_up_capability_relative(args->address, args->depth, from_userland, &result)) {
-        if (should_unlock) {
+        /*if (should_unlock) {
             heap_unlock(slot->resource);
-        }
+        }*/
 
         return 0;
     }
@@ -120,14 +120,29 @@ static size_t set_root_node(struct capability *slot, size_t argument, bool from_
 
     if (result.slot->handlers == &node_handlers) {
         return_value = 1;
-        move_capability(result.slot, &thread->root_capability);
+
+        struct capability *root_slot = &thread->root_capability;
+        move_capability(result.slot, root_slot);
+
+        // update the address of the new root capability
+        root_slot->address.address = 0;
+        root_slot->address.depth = 0;
+        root_slot->address.thread_id = thread->thread_id;
+        root_slot->address.bucket_number = thread->bucket_number;
+
+        if (root_slot->resource_list.prev == NULL) {
+            // only update the owner id of the node if it's the owner of the resource
+            heap_set_update_capability(root_slot->resource, &root_slot->address);
+        }
+
+        // TODO: recursively search through the slots of the root node and change the thread id and bucket number in the same way
     }
 
     unlock_looked_up_capability(&result);
 
-    if (should_unlock) {
+    /*if (should_unlock) {
         heap_unlock(slot->resource);
-    }
+    }*/
 
     return return_value;
 }
@@ -135,6 +150,7 @@ static size_t set_root_node(struct capability *slot, size_t argument, bool from_
 struct invocation_handlers thread_handlers = {
     5,
     {read_registers, write_registers, resume, suspend, set_root_node}
+    // TODO: thread destructor
 };
 
 void alloc_thread(struct heap *heap, void **resource, struct invocation_handlers **handlers) {
