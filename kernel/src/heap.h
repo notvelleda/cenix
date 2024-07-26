@@ -78,7 +78,6 @@ void *heap_alloc(struct heap *heap, size_t actual_size);
 
 /// \brief locks an allocated region of memory in place, allowing for any pointers to it to remain valid
 ///
-/// locks an allocated region of memory in place, allowing for any pointers to it to remain valid.
 /// if the returned value is true, this region of memory wasn't locked beforehand.
 /// if the returned value is false, this region of memory was locked
 /// TODO: will any memory regions end up being locked multiple times in practice? is this worth the extra few cycles?

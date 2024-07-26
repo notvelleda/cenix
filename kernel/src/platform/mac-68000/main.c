@@ -221,7 +221,7 @@ void after_sp_set(void) {
     };
     invoke_capability(3, ROOT_CAP_SLOT_BITS, NODE_COPY, (size_t) &alloc_copy_args, false);
 
-#if 1
+#if 0
     // test to make sure this gets added to the same derivation list as the first copy
     printk("copying again...\n");
     alloc_copy_args.dest_slot = (1 << ROOT_CAP_SLOT_BITS) - 1;

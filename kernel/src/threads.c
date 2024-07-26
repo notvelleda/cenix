@@ -118,24 +118,12 @@ static size_t set_root_node(size_t address, size_t depth, struct capability *slo
 
     size_t return_value = 0;
 
-    if (result.slot->handlers == &node_handlers) {
+    if (result.slot->handlers == &node_handlers && get_nested_nodes_depth(result.slot) < MAX_NESTED_NODES) {
         return_value = 1;
 
         struct capability *root_slot = &thread->root_capability;
         move_capability(result.slot, root_slot);
-
-        // update the address of the new root capability
-        root_slot->address.address = 0;
-        root_slot->address.depth = 0;
-        root_slot->address.thread_id = thread->thread_id;
-        root_slot->address.bucket_number = thread->bucket_number;
-
-        if (root_slot->resource_list.prev == NULL) {
-            // only update the owner id of the node if it's the owner of the resource
-            heap_set_update_capability(root_slot->resource, &root_slot->address);
-        }
-
-        // TODO: recursively search through the slots of the root node and change the thread id and bucket number in the same way
+        update_capability_addresses(root_slot, 0, 0, thread->thread_id, thread->bucket_number, 0);
     }
 
     unlock_looked_up_capability(&result);
@@ -147,10 +135,28 @@ static size_t set_root_node(size_t address, size_t depth, struct capability *slo
     return return_value;
 }
 
+static void thread_destructor(struct capability *slot) {
+    struct thread_capability *thread = (struct thread_capability *) slot->resource;
+
+    delete_capability(&thread->root_capability);
+
+    if (thread->runqueue != NULL) {
+        LIST_REMOVE(*thread->runqueue, runqueue_entry, thread);
+    }
+
+    if ((thread->scheduler_flags & THREAD_NEEDS_CPU_UPDATE) != 0) {
+        LIST_REMOVE(scheduler_state.needs_cpu_time_update, cpu_update_entry, thread);
+    }
+
+    LIST_REMOVE(thread_hash_table[thread->bucket_number], table_entry, thread);
+
+    used_thread_ids[thread->thread_id / PTR_BITS] &= ~(1 << (thread->thread_id % PTR_BITS)); // release thread id
+}
+
 struct invocation_handlers thread_handlers = {
     5,
-    {read_registers, write_registers, resume, suspend, set_root_node}
-    // TODO: thread destructor
+    {read_registers, write_registers, resume, suspend, set_root_node},
+    thread_destructor
 };
 
 void alloc_thread(struct heap *heap, void **resource, struct invocation_handlers **handlers) {

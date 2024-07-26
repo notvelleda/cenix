@@ -64,8 +64,14 @@ extern struct capability kernel_root_capability;
 /// moves a capability between two slots, removing it from the slot it came from
 void move_capability(struct capability *from, struct capability *to);
 
+/// deletes a capability, freeing up its resources if there are no more capabilities sharing it
+void delete_capability(struct capability *to_delete);
+
 /// updates the address of a capability's resource, given its address in capability space
 void update_capability_resource(struct absolute_capability_address *address, void *new_resource_address);
+
+/// recursively updates addresses and thread ids starting at a given capability
+void update_capability_addresses(struct capability *slot, size_t address, size_t depth, uint16_t thread_id, uint8_t bucket_number, uint8_t nesting);
 
 struct look_up_result {
     struct capability *slot;
@@ -99,12 +105,29 @@ struct invocation_handlers {
     size_t num_handlers;
     /// the list of invocation handlers, stored as function pointers to handler functions
     size_t (*handlers[MAX_HANDLERS])(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland);
-    /// \brief called when a capability is about to be deleted
+    /// \brief called when the resource associated with a capability is about to be freed
     ///
-    /// this allows for resources to be cleaned up if required and for references to this capability to be removed.
-    /// if the resource that this capability corresponds to will be freed, the `will_free` argument will be set to `true` accordingly
-    void (*deconstructor)(struct capability *slot, bool will_free);
+    /// this allows for resources to be cleaned up if required and for references to this capability's resource to be removed.
+    void (*destructor)(struct capability *slot);
 };
+
+/// \brief how many capability nodes can be nested in a given thread's capability space
+///
+/// this limitation exists to help prevent stack overflows when moving a node into a new thread
+/// or when deleting a node
+#define MAX_NESTED_NODES 4
+
+/// the header for a capability node
+struct capability_node_header {
+    /// \brief the size of this node, stored as the amount of bits that size takes up
+    ///
+    /// this value can be converted to the number of slots in this capability node by shifting 1 left by it (`1 << slot_bits`)
+    size_t slot_bits;
+    uint8_t nested_nodes;
+};
+
+/// gets how deep the tree of nodes is starting from the given capability node
+uint8_t get_nested_nodes_depth(struct capability *node);
 
 /// invocation handlers for capability nodes
 extern struct invocation_handlers node_handlers;

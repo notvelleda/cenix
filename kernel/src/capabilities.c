@@ -4,7 +4,7 @@
 #include "scheduler.h"
 #include "linked_list.h"
 
-#define DEBUG_CAPABILITIES
+#undef DEBUG_CAPABILITIES
 
 struct capability kernel_root_capability;
 
@@ -12,7 +12,18 @@ static void update_capability_lists(struct capability *capability) {
     LIST_UPDATE_ADDRESS_NO_CONTAINER(struct capability, resource_list, capability);
     LIST_UPDATE_ADDRESS_NO_CONTAINER(struct capability, derivation_list, capability);
 
-    // TODO: update derived_from and derivation
+    // if this capability has other capabilities derived from it, update their `derived_from` references to point to the new address
+    if ((capability->flags & (CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED)) != 0 && capability->derivation != NULL) {
+        LIST_ITER_NO_CONTAINER(struct capability, derivation_list, capability->derivation, link) {
+            link->derived_from = capability;
+        }
+    }
+
+    // if this is the first item in the derivation list that this capability is in and the capability it was derived from still exists,
+    // update its parent capability to point to this one
+    if (capability->derivation_list.prev == NULL && capability->derived_from != NULL) {
+        capability->derived_from->derivation = capability;
+    }
 }
 
 void move_capability(struct capability *from, struct capability *to) {
@@ -22,7 +33,33 @@ void move_capability(struct capability *from, struct capability *to) {
 }
 
 static void merge_derivation_lists(struct capability *to_merge) {
-    // TODO: if this capability was badged and has a child derivation list, insert it into the derivation list of its parent
+    // if this capability was badged and has a child derivation list, insert it into the derivation list of its parent if it still exists
+    if ((to_merge->flags & CAP_FLAG_BADGED) != 0 && to_merge->derived_from != NULL && to_merge->derivation != NULL) {
+        // update the derived_from pointers for every item in the list
+        LIST_ITER_NO_CONTAINER(struct capability, derivation_list, to_merge->derivation, link) {
+            link->derived_from = to_merge->derived_from;
+        }
+
+        if (to_merge->derivation_list.start == to_merge->derivation_list.end) {
+            // there's only one item in the list (presumably this one) so the list doesn't need to be merged
+            to_merge->derived_from->derivation = to_merge->derivation;
+        } else {
+            // there's multiple items in the list, insert the child list right before the last item in the parent list
+            struct capability *derivation = to_merge->derivation;
+
+            struct capability *prev = to_merge->derivation_list.end->derivation_list.prev;
+            prev->derivation_list.next = derivation->derivation_list.start;
+            derivation->derivation_list.start->derivation_list.prev = prev;
+
+            to_merge->derivation_list.end->derivation_list.prev = derivation->derivation_list.end;
+            derivation->derivation_list.end->derivation_list.next = derivation->derivation_list.end;
+
+            LIST_ITER_NO_CONTAINER(struct capability, derivation_list, to_merge->derivation, link) {
+                link->derivation_list.start = to_merge->derivation_list.start;
+                link->derivation_list.end = to_merge->derivation_list.end;
+            }
+        }
+    }
 
     // if this is the first item in the derivation list and the capability that this was derived from still exists,
     // update the original capability's derivation pointer to the next element in the list
@@ -33,14 +70,14 @@ static void merge_derivation_lists(struct capability *to_merge) {
     LIST_DELETE_NO_CONTAINER(struct capability, derivation_list, to_merge);
 }
 
-static void delete_capability(struct capability *to_delete) {
-    bool will_free = false;
+void delete_capability(struct capability *to_delete) {
+    bool destroy_resource = false;
 
     // check if this resource is heap managed and the capability to be deleted is at the start of the resource list
-    if (to_delete->resource_list.prev == NULL && (to_delete->flags & CAP_FLAG_IS_HEAP_MANAGED) != 0) {
+    if (to_delete->resource_list.prev == NULL) {
         if (to_delete->resource_list.next == NULL) {
             // this is the last capability in the list, free up its resource
-            will_free = true;
+            destroy_resource = true;
         } else {
             // move ownership of this resource to the next item in the list
             heap_set_update_capability(to_delete->resource, &to_delete->resource_list.next->address);
@@ -49,13 +86,11 @@ static void delete_capability(struct capability *to_delete) {
 
     LIST_DELETE_NO_CONTAINER(struct capability, resource_list, to_delete);
 
-    // call the deconstructor for this capability
-    if (to_delete->handlers->deconstructor != NULL) {
-        to_delete->handlers->deconstructor(to_delete, will_free);
-    }
+    if (destroy_resource) {
+        if (to_delete->handlers->destructor != NULL) {
+            to_delete->handlers->destructor(to_delete);
+        }
 
-    // if this capability's resource should be freed, free it after the deconstructor is called
-    if (will_free) {
         heap_free(to_delete->heap, to_delete->resource);
     }
 
@@ -77,18 +112,33 @@ void print_capability_lists(struct capability *capability) {
 }
 #endif
 
+void update_capability_addresses(struct capability *slot, size_t address, size_t depth, uint16_t thread_id, uint8_t bucket_number, uint8_t nesting) {
+    // update the address of this capability
+    slot->address.address = address;
+    slot->address.depth = depth;
+    slot->address.thread_id = thread_id;
+    slot->address.bucket_number = bucket_number;
+
+    if (slot->resource_list.prev == NULL) {
+        // only update the owner id of the node if it's the owner of the resource
+        heap_set_update_capability(slot->resource, &slot->address);
+    }
+
+    if (slot->handlers == &node_handlers) {
+        struct capability_node_header *header = (struct capability_node_header *) slot->resource;
+
+        header->nested_nodes = nesting;
+
+        struct capability *slot_in_node = (struct capability *) ((char *) header + sizeof(struct capability_node_header));
+        for (int i = 0; i < (1 << header->slot_bits); i ++, slot_in_node ++) {
+            if (slot_in_node->handlers != NULL) {
+                update_capability_addresses(slot_in_node, (i << depth) | address, depth + header->slot_bits, thread_id, bucket_number, nesting + 1);
+            }
+        }
+    }
+}
+
 /* ==== capability node ==== */
-
-/// \brief how many capability nodes can be nested in a given thread's capability space
-///
-/// this limitation exists to help prevent stack overflows when moving a node into a new thread
-/// or when deleting a node
-#define MAX_NESTED_NODES 4
-
-struct capability_node_header {
-    size_t slot_bits;
-    uint8_t nested_nodes;
-};
 
 static size_t node_copy(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
     struct node_copy_args *args = (struct node_copy_args *) argument;
@@ -256,15 +306,17 @@ static size_t node_revoke(size_t address, size_t depth, struct capability *slot,
 
     // delete all the capabilities that have been derived from this one.
     // derivation lists don't have to be merged here since they'll all be deleted anyways
-    LIST_ITER_NO_CONTAINER(struct capability, derivation_list, to_revoke->derivation, c) {
-        if ((c->flags & (CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED)) != 0) {
-            // this capability has a second derivation tree level, walk it and delete those capabilities too
-            LIST_ITER_NO_CONTAINER(struct capability, derivation_list, c, d) {
-                delete_capability(d);
+    if (to_revoke->derivation != NULL) {
+        LIST_ITER_NO_CONTAINER(struct capability, derivation_list, to_revoke->derivation, c) {
+            if ((c->flags & (CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED)) != 0 && c->derivation != NULL) {
+                // this capability has a second derivation tree level, walk it and delete those capabilities too
+                LIST_ITER_NO_CONTAINER(struct capability, derivation_list, c->derivation, d) {
+                    delete_capability(d);
+                }
             }
-        }
 
-        delete_capability(c);
+            delete_capability(c);
+        }
     }
 
     to_revoke->derivation = NULL;
@@ -272,10 +324,22 @@ static size_t node_revoke(size_t address, size_t depth, struct capability *slot,
     return 1;
 }
 
+static void node_destructor(struct capability *node) {
+    struct capability_node_header *header = (struct capability_node_header *) node->resource;
+
+    struct capability *slot = (struct capability *) ((char *) node + sizeof(struct capability_node_header));
+    for (int i = 0; i < (1 << header->slot_bits); i ++, slot ++) {
+        if (slot->handlers != NULL) {
+            merge_derivation_lists(slot);
+            delete_capability(slot);
+        }
+    }
+}
+
 struct invocation_handlers node_handlers = {
     4,
-    {node_copy, node_move, node_delete, node_revoke}
-    // TODO: node destructor
+    {node_copy, node_move, node_delete, node_revoke},
+    node_destructor
 };
 
 /// allocates memory for a capability node and initializes it.
@@ -293,7 +357,7 @@ static void *allocate_node(struct heap *heap, size_t slot_bits) {
     }
 
     new->slot_bits = slot_bits;
-    new->nested_nodes = 0; // to be filled out in populate_capability_slot() if this isn't the kernel root node
+    new->nested_nodes = 1; // to be filled out in populate_capability_slot() if this isn't the kernel root node
 
     struct capability *slots = (struct capability *) ((char *) new + slots_start);
     for (int i = 0; i < total_slots; i ++) {
@@ -413,7 +477,7 @@ static bool populate_capability_slot(struct heap *heap, size_t address, size_t d
         struct capability_node_header *container = (struct capability_node_header *) result.container;
 
         // make sure this new node isn't too many layers of nesting deep
-        if (container->nested_nodes == MAX_NESTED_NODES) {
+        if (container->nested_nodes >= MAX_NESTED_NODES) {
             heap_free(heap, resource);
             unlock_looked_up_capability(&result);
             return false;
@@ -455,13 +519,40 @@ static bool populate_capability_slot(struct heap *heap, size_t address, size_t d
 static void on_node_moved(struct capability_node_header *header) {
     struct capability *slot = (struct capability *) ((char *) header + sizeof(struct capability_node_header));
 
-    for (int i = 0; i < header->slot_bits; i ++) {
+    for (int i = 0; i < header->slot_bits; i ++, slot ++) {
         if (slot->handlers != NULL) {
             update_capability_lists(slot);
         }
-
-        slot ++;
     }
+}
+
+static uint8_t nesting_depth_search(struct capability *node) {
+    struct capability_node_header *header = (struct capability_node_header *) node->resource;
+    uint8_t nesting_value = header->nested_nodes;
+
+    struct capability *slot = (struct capability *) ((char *) header + sizeof(struct capability_node_header));
+    for (int i = 0; i < (1 << header->slot_bits); i ++, slot ++) {
+        if (slot->handlers != &node_handlers) {
+            continue;
+        }
+
+        uint8_t new_nesting = nesting_depth_search(slot);
+
+        if (new_nesting > nesting_value) {
+            nesting_value = new_nesting;
+        }
+    }
+
+    return nesting_value;
+}
+
+uint8_t get_nested_nodes_depth(struct capability *node) {
+    if (node->handlers != &node_handlers) {
+        return 0;
+    }
+
+    struct capability_node_header *header = (struct capability_node_header *) node->resource;
+    return nesting_depth_search(node) - header->nested_nodes;
 }
 
 /* ==== untyped memory ==== */
@@ -567,15 +658,15 @@ void update_capability_resource(struct absolute_capability_address *address, voi
         return;
     }
 
-    result.slot->resource = new_resource_address;
+    LIST_ITER_NO_CONTAINER(struct capability, resource_list, result.slot, item) {
+        item->resource = new_resource_address;
+    }
 
     if (result.slot->handlers == &node_handlers) {
         on_node_moved((struct capability_node_header *) result.slot->resource);
     } else if (result.slot->handlers == &thread_handlers) {
         on_thread_moved((struct thread_capability *) result.slot->resource);
     }
-
-    // TODO: update locations of any capabilities derived from this one
 
     unlock_looked_up_capability(&result);
 }
