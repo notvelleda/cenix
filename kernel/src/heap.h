@@ -82,7 +82,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size);
 /// if the returned value is false, this region of memory was locked
 /// TODO: will any memory regions end up being locked multiple times in practice? is this worth the extra few cycles?
 static inline bool heap_lock(void *ptr) {
-    struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
+    struct heap_header *header = (struct heap_header *) ((uint8_t *) ptr - sizeof(struct heap_header));
     if (GET_KIND(header) == KIND_MOVABLE) {
         SET_KIND(header, KIND_IMMOVABLE);
         return true;
@@ -93,7 +93,7 @@ static inline bool heap_lock(void *ptr) {
 
 /// unlocks an allocated region of memory, invalidating any existing pointers to it and allowing it to be moved anywhere else in memory if required
 static inline void heap_unlock(void *ptr) {
-    struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
+    struct heap_header *header = (struct heap_header *) ((uint8_t *) ptr - sizeof(struct heap_header));
     SET_KIND(header, KIND_MOVABLE);
 }
 
@@ -108,7 +108,7 @@ void heap_list_blocks(struct heap *heap);
 /// sets the absolute address that should be updated if the given memory region is moved.
 /// this update address will replace any addresses or handles set previously
 static inline void heap_set_update_absolute(void *ptr, void **absolute_ptr) {
-    struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
+    struct heap_header *header = (struct heap_header *) ((uint8_t *) ptr - sizeof(struct heap_header));
 
     // TODO: this section is probably critical, should interrupts be disabled?
     header->flags &= ~FLAG_CAPABILITY_RESOURCE;
@@ -119,8 +119,8 @@ static inline void heap_set_update_absolute(void *ptr, void **absolute_ptr) {
 
 /// sets the address in capability space of the capability that should be updated if the given memory region is moved.
 /// this capability address will replace any absolute addresses or capability addresses set previously
-static inline void heap_set_update_capability(void *ptr, struct absolute_capability_address *address) {
-    struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
+static inline void heap_set_update_capability(void *ptr, const struct absolute_capability_address *address) {
+    struct heap_header *header = (struct heap_header *) ((uint8_t *) ptr - sizeof(struct heap_header));
 
     // TODO: this section is probably critical, should interrupts be disabled?
     header->flags |= FLAG_CAPABILITY_RESOURCE;

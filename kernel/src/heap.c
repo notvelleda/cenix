@@ -16,7 +16,7 @@ static bool split_header(struct heap_header *header, size_t at) {
     }
 
     // the header of the newly split block
-    struct heap_header *new_header = (struct heap_header *) ((char *) header + at);
+    struct heap_header *new_header = (struct heap_header *) ((uint8_t *) header + at);
     new_header->size = header->size - at;
     new_header->flags = KIND_AVAILABLE;
     new_header->next = header->next;
@@ -45,7 +45,7 @@ void heap_init(struct heap *heap, struct init_block *init_block) {
     heap->used_memory = 0;
 
     void *header_start = init_block->memory_start;
-    void *header_end = header_start + sizeof(struct heap_header);
+    const void *header_end = (uint8_t *) header_start + sizeof(struct heap_header);
 
     // if the location of the initial heap header in memory overlaps with the kernel, move the start of the heap above the kernel
     // this can be handled by heap_lock_existing region, but then that would cause the start of the kernel to be overwritten
@@ -83,11 +83,11 @@ void heap_add_memory_block(struct heap *heap, void *start, void *end) {
 void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
     printk("heap_lock_existing_region: locking region from 0x%08x - 0x%08x\n", start, end);
 
-    start -= sizeof(struct heap_header);
+    start = (uint8_t *) start - sizeof(struct heap_header);
 
     for (struct heap_header *header = heap->heap_base; header != NULL; header = header->next) {
-        void *block_start = (void *) header;
-        void *block_end = block_start + header->size;
+        void *block_start = header;
+        const void *block_end = (uint8_t *) block_start + header->size;
 
         if (block_end <= start || block_start >= end) {
             continue;
@@ -97,7 +97,7 @@ void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
         }
         // TODO: should movable overlapping regions be moved? will that ever come up?
 
-        if (start > block_start && start < block_end) {
+        if (start > block_start) {
             size_t at = (size_t) start - (size_t) block_start;
 
             if (at >= header->size - sizeof(struct heap_header)) {
@@ -113,7 +113,7 @@ void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
                     struct heap_header tmp = *next;
                     tmp.size += offset;
 
-                    next = (struct heap_header *) ((char *) header + at);
+                    next = (struct heap_header *) ((uint8_t *) header + at);
                     *next = tmp;
                     header->next = next;
 
@@ -128,7 +128,7 @@ void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
             }
         }
 
-        if (end > block_start && end < block_end) {
+        if (end < block_end) {
             size_t at = (size_t) end - (size_t) block_start;
 
             if (at <= sizeof(struct heap_header) && header->prev != NULL) {
@@ -140,7 +140,7 @@ void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
                     struct heap_header tmp = *header;
                     tmp.size += at;
 
-                    header = (struct heap_header *) ((char *) header - at);
+                    header = (struct heap_header *) ((uint8_t *) header - at);
                     *header = tmp;
                     prev->next = header;
 
@@ -157,7 +157,7 @@ void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
 
         heap->used_memory += header->size;
 
-        if (block_start + sizeof(struct heap_header) <= start + sizeof(struct heap_header) || end < block_start) {
+        if ((uint8_t *) block_start + sizeof(struct heap_header) <= (uint8_t *) start + sizeof(struct heap_header)) {
             SET_KIND(header, KIND_IMMOVABLE);
             continue;
         }
@@ -328,7 +328,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
             // interrupts must be disabled since the original data can't be modified after it's copied but before any references to it are updated
             interrupt_status_t status = disable_interrupts();
 
-            const void *src_ptr = (void *) ((char *) header + sizeof(struct heap_header));
+            const void *src_ptr = (uint8_t *) header + sizeof(struct heap_header);
             memcpy(dest_ptr, src_ptr, alloc_size);
 
             SET_OLD_KIND(header, KIND_AVAILABLE);
@@ -351,7 +351,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
                 print_spaces();
                 printk("heap_alloc: updating absolute pointer at 0x%x to 0x%x\n", header->update_ref.absolute_ptr, header);
 #endif
-                *header->update_ref.absolute_ptr = (void *) dest_ptr;
+                *header->update_ref.absolute_ptr = dest_ptr;
                 heap_set_update_absolute(dest_ptr, header->update_ref.absolute_ptr);
             }
 
@@ -379,11 +379,11 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
 
     // try to split the newly created header to shave off any excess space
     if (split_header(start_header, size)) {
-        struct heap_header *new_header = (struct heap_header *) ((char *) start_header + size);
+        const struct heap_header *new_header = (struct heap_header *) ((uint8_t *) start_header + size);
         heap->used_memory -= new_header->size;
     }
 
-    void *pointer = (void *) ((char *) start_header + sizeof(struct heap_header));
+    void *pointer = (uint8_t *) start_header + sizeof(struct heap_header);
 
 #ifdef DEBUG_HEAP
     print_spaces();
@@ -394,7 +394,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
 }
 
 void heap_free(struct heap *heap, void *ptr) {
-    struct heap_header *header = (struct heap_header *) ((char *) ptr - sizeof(struct heap_header));
+    struct heap_header *header = (struct heap_header *) ((uint8_t *) ptr - sizeof(struct heap_header));
 
     header->flags = KIND_AVAILABLE;
     heap->used_memory -= header->size;

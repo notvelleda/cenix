@@ -61,9 +61,9 @@ void _start(void) {
     void **vector_table = (void **) 0;
 
     for (int i = 2; i < 64; i ++) {
-        vector_table[i] = (void *) &bad_interrupt_entry;
+        vector_table[i] = &bad_interrupt_entry;
     }
-    vector_table[32] = (void *) &trap_entry;
+    vector_table[32] = &trap_entry;
 
     MAC_VIA_IER = 0x7f; // disable all VIA interrupts
     MAC_VIA_IFR = 0xff; // clear VIA interrupt flag to dismiss any pending interrupts
@@ -80,15 +80,15 @@ void _start(void) {
     // hardware should be sane enough to enable interrupts now!
     asm volatile ("andiw #0xf8ff, %sr");
 
-    init_block.kernel_start = init_block.memory_start = (void *) 0;
-    init_block.kernel_end = (void *) &_end;
+    init_block.kernel_start = init_block.memory_start = 0;
+    init_block.kernel_end = &_end;
     init_block.memory_end = MEM_TOP;
 
     heap_init(&the_heap, &init_block);
 
     // now that the heap is set up, allocate a region of memory for the stack so that nothing gets trampled when existing regions are locked
     void *stack_region = heap_alloc(&the_heap, STACK_SIZE);
-    void *new_stack_pointer = stack_region + STACK_SIZE;
+    void *new_stack_pointer = (uint8_t *) stack_region + STACK_SIZE;
 
     __asm__ __volatile__ (
         "movl %0, %%sp\n\t"
@@ -98,17 +98,17 @@ void _start(void) {
 }
 
 void after_sp_set(void) {
-    heap_lock_existing_region(&the_heap, SCRN_BASE, SCRN_BASE + SCRN_LEN);
-    heap_lock_existing_region(&the_heap, SOUND_BASE, SOUND_BASE + SOUND_LEN);
+    heap_lock_existing_region(&the_heap, SCRN_BASE, (uint8_t *) SCRN_BASE + SCRN_LEN);
+    heap_lock_existing_region(&the_heap, SOUND_BASE, (uint8_t *) SOUND_BASE + SOUND_LEN);
 
     size_t offset = 0xfd00 - 0xa100;
 
     switch ((size_t) SOUND_BASE & 0xffff) {
     case 0xfd00:
-        heap_lock_existing_region(&the_heap, SOUND_BASE - offset, SOUND_BASE - offset + SOUND_LEN);
+        heap_lock_existing_region(&the_heap, (uint8_t *) SOUND_BASE - offset, (uint8_t *) SOUND_BASE - offset + SOUND_LEN);
         break;
     case 0xa100:
-        heap_lock_existing_region(&the_heap, SOUND_BASE + offset, SOUND_BASE + offset + SOUND_LEN);
+        heap_lock_existing_region(&the_heap, (uint8_t *) SOUND_BASE + offset, (uint8_t *) SOUND_BASE + offset + SOUND_LEN);
         break;
     default:
         printk("unexpected SoundBase of 0x%08x, alternate sound buffer will not be available\n", SOUND_BASE);
@@ -192,12 +192,12 @@ void after_sp_set(void) {
 
     struct thread_registers registers;
 
-    memset((char *) &registers, 0, sizeof(struct thread_registers));
+    memset((uint8_t *) &registers, 0, sizeof(struct thread_registers));
     set_program_counter(&registers, (size_t) &test_thread);
     set_stack_pointer(&registers, stack_pointer);
 
     struct read_write_register_args register_write_args = {
-        (void *) &registers,
+        &registers,
         sizeof(struct thread_registers)
     };
 
@@ -309,12 +309,12 @@ void test_thread_2(void) {
 
     struct thread_registers registers;
 
-    memset((char *) &registers, 0, sizeof(struct thread_registers));
+    memset((uint8_t *) &registers, 0, sizeof(struct thread_registers));
     set_program_counter(&registers, (size_t) &test_thread_3);
     set_stack_pointer(&registers, stack_pointer);
 
     struct read_write_register_args register_write_args = {
-        .address = (void *) &registers,
+        .address = &registers,
         .size = sizeof(struct thread_registers)
     };
 
@@ -354,12 +354,12 @@ void test_thread(void) {
 
     struct thread_registers registers;
 
-    memset((char *) &registers, 0, sizeof(struct thread_registers));
+    memset((uint8_t *) &registers, 0, sizeof(struct thread_registers));
     set_program_counter(&registers, (size_t) &test_thread_2);
     set_stack_pointer(&registers, stack_pointer);
 
     struct read_write_register_args register_write_args = {
-        .address = (void *) &registers,
+        .address = &registers,
         .size = sizeof(struct thread_registers)
     };
 
@@ -374,7 +374,7 @@ void test_thread(void) {
     }
 }
 
-static void log_registers(struct thread_registers *registers) {
+static void log_registers(const struct thread_registers *registers) {
     printk(
         "a0: 0x%08x, a1: 0x%08x, a2: 0x%08x, a3: 0x%08x\n",
         registers->address[0],
@@ -432,66 +432,52 @@ void trap_handler(struct thread_registers *registers) {
 
 void _putchar(char c) {
 #ifdef DEBUG
-    char *index_byte = (char *) SCRN_BASE + (console_x >> 3) + (console_y << 6);
-    short index_sub = 7 - (console_x & 0x7);
-    char col, row;
-    short font_index;
-
-    font_index = (c - 0x20) * 5;
     if (c == '\n') {
         console_x = 0;
         console_y += 8;
 
         if (console_y >= CONSOLE_HEIGHT) {
-            memmove(SCRN_BASE, SCRN_BASE + 512, SCRN_LEN_CONSOLE - 512);
-            memset(SCRN_BASE + SCRN_LEN_CONSOLE - 512, 0xff, 512);
+            memmove((uint8_t *) SCRN_BASE, (uint8_t *) SCRN_BASE + 512, SCRN_LEN_CONSOLE - 512);
+            memset((uint8_t *) SCRN_BASE + SCRN_LEN_CONSOLE - 512, 0xff, 512);
             console_y = CONSOLE_HEIGHT - 8;
         }
 
-        index_byte = (char *) SCRN_BASE + (console_x >> 3) + (console_y << 6);
-        index_sub = 7 - (console_x & 0x7);
-    } else {
-        if (c == ' ') {
-            console_x += 6;
-            index_byte = (char *) SCRN_BASE + (console_x >> 3) + (console_y << 6);
-            index_sub = 7 - (console_x & 0x7);
-            console_x -= 6;
-        } else {
-            for (col = 0; col < 5; col ++) {
-                for (row = 0; row < 7; row ++) {
-                    char pixel = (font[font_index] >> row) & 0x1;
-                    if (pixel) {
-                        *(index_byte + (row << 6)) &= ~(1 << index_sub);
-                    }
-                    // don't bother clearing pixels, prolly doesnt matter
-                }
+        return;
+    }
 
-                if (-- index_sub < 0) {
-                    index_sub = 7;
-                    index_byte ++;
+    char *index_byte = (char *) SCRN_BASE + (console_x >> 3) + (console_y << 6);
+    short index_sub = 7 - (console_x & 0x7);
+
+    if (c != ' ') {
+        short font_index = (c - 0x20) * 5;
+
+        for (char col = 0; col < 5; col ++) {
+            for (char row = 0; row < 7; row ++) {
+                char pixel = (font[font_index] >> row) & 0x1;
+                if (pixel) {
+                    *(index_byte + (row << 6)) &= ~(1 << index_sub);
                 }
-                font_index ++;
+                // don't bother clearing pixels, prolly doesnt matter
             }
 
             if (-- index_sub < 0) {
                 index_sub = 7;
                 index_byte ++;
             }
+            font_index ++;
         }
+    }
 
-        console_x += 6;
-        if (console_x >= SCREEN_WIDTH - 6) {
-            console_x = 0;
-            console_y += 8;
+    console_x += 6;
 
-            if (console_y >= CONSOLE_HEIGHT) {
-                memmove(SCRN_BASE, SCRN_BASE + 512, SCRN_LEN_CONSOLE - 512);
-                memset(SCRN_BASE + SCRN_LEN_CONSOLE - 512, 0xff, 512);
-                console_y = CONSOLE_HEIGHT - 8;
-            }
+    if (console_x >= SCREEN_WIDTH - 6) {
+        console_x = 0;
+        console_y += 8;
 
-            index_byte = (char *) SCRN_BASE + (console_x >> 3) + (console_y << 6);
-            index_sub = 7 - (console_x & 0x7);
+        if (console_y >= CONSOLE_HEIGHT) {
+            memmove((uint8_t *) SCRN_BASE, (uint8_t *) SCRN_BASE + 512, SCRN_LEN_CONSOLE - 512);
+            memset((uint8_t *) SCRN_BASE + SCRN_LEN_CONSOLE - 512, 0xff, 512);
+            console_y = CONSOLE_HEIGHT - 8;
         }
     }
 #endif

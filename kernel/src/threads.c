@@ -23,7 +23,7 @@ static size_t used_thread_ids[USED_THREAD_IDS_SIZE];
 
 // 32-bit fnv-1a hash, as described in http://isthe.com/chongo/tech/comp/fnv/
 static uint32_t hash(uint16_t value) {
-    uint8_t *data = (uint8_t *) &value;
+    const uint8_t *data = (uint8_t *) &value;
     uint32_t result = 0x811c9dc5;
     result ^= data[0];
     result *= 0x01000193;
@@ -62,13 +62,13 @@ static size_t read_registers(size_t address, size_t depth, struct capability *sl
 }
 
 static size_t write_registers(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
-    struct read_write_register_args *args = (struct read_write_register_args *) argument;
+    const struct read_write_register_args *args = (struct read_write_register_args *) argument;
 
     bool should_unlock = heap_lock(slot->resource);
 
     struct thread_capability *thread = (struct thread_capability *) slot->resource;
 
-    memcpy((void *) &thread->registers, args->address, args->size > sizeof(struct thread_registers) ? sizeof(struct thread_registers) : args->size);
+    memcpy(&thread->registers, args->address, args->size > sizeof(struct thread_registers) ? sizeof(struct thread_registers) : args->size);
 
     if (should_unlock) {
         heap_unlock(slot->resource);
@@ -105,7 +105,7 @@ static size_t set_root_node(size_t address, size_t depth, struct capability *slo
     //bool should_unlock = heap_lock(slot->resource);
 
     struct thread_capability *thread = (struct thread_capability *) slot->resource;
-    struct set_root_node_args *args = (struct set_root_node_args *) argument;
+    const struct set_root_node_args *args = (struct set_root_node_args *) argument;
     struct look_up_result result;
 
     if (!look_up_capability_relative(args->address, args->depth, from_userland, &result)) {
@@ -205,7 +205,7 @@ void alloc_thread(struct heap *heap, void **resource, struct invocation_handlers
         return;
     }
 
-    memset((char *) thread, 0, sizeof(struct thread_capability));
+    memset((uint8_t *) thread, 0, sizeof(struct thread_capability));
     thread->exec_mode = SUSPENDED;
     thread->thread_id = thread_id;
     // queue entries don't need to be set to NULL here as long as NULL is 0
@@ -220,7 +220,7 @@ void alloc_thread(struct heap *heap, void **resource, struct invocation_handlers
     // insert this thread into the thread hash table
     LIST_APPEND(thread_hash_table[thread->bucket_number], table_entry, thread);
 
-    *resource = (void *) thread;
+    *resource = thread;
     *handlers = &thread_handlers;
 }
 

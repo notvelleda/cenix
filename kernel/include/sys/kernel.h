@@ -109,7 +109,7 @@ struct alloc_args {
 /// arguments pased to the `thread_read_registers` and `thread_write_registers` invocations on a thread capability
 struct read_write_register_args {
     /// the address to read registers from or write registers to
-    void *address;
+    struct thread_registers *address;
     /// how many bytes of the registers object should be copied
     size_t size;
 };

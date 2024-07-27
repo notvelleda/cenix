@@ -129,7 +129,7 @@ void update_capability_addresses(struct capability *slot, size_t address, size_t
 
         header->nested_nodes = nesting;
 
-        struct capability *slot_in_node = (struct capability *) ((char *) header + sizeof(struct capability_node_header));
+        struct capability *slot_in_node = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header));
         for (int i = 0; i < (1 << header->slot_bits); i ++, slot_in_node ++) {
             if (slot_in_node->handlers != NULL) {
                 update_capability_addresses(slot_in_node, (i << depth) | address, depth + header->slot_bits, thread_id, bucket_number, nesting + 1);
@@ -141,26 +141,32 @@ void update_capability_addresses(struct capability *slot, size_t address, size_t
 /* ==== capability node ==== */
 
 static size_t node_copy(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
-    struct node_copy_args *args = (struct node_copy_args *) argument;
+    const struct node_copy_args *args = (struct node_copy_args *) argument;
 
     // resource lock/unlock is omitted here since no allocations take place
-    struct capability_node_header *header = (struct capability_node_header *) slot->resource;
+    const struct capability_node_header *header = (struct capability_node_header *) slot->resource;
 
     // make sure slot id is valid
     if (args->dest_slot >= 1 << header->slot_bits) {
         return 0;
     }
 
-    struct capability *dest = (struct capability *) ((char *) header + sizeof(struct capability_node_header) + args->dest_slot * sizeof(struct capability));
+    struct capability *dest = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + args->dest_slot * sizeof(struct capability));
 
-    // make sure destination slot is empty and is eligible for copying.
-    // copying of capability nodes isn't allowed because i just don't know how to deal with it currently and it may just overcomplicate things
-    if (dest->handlers != NULL || dest->handlers == &node_handlers) {
+    // make sure destination slot is empty
+    if (dest->handlers != NULL) {
         return 0;
     }
 
     struct look_up_result result;
     if (!look_up_capability_relative(args->source_address, args->source_depth, from_userland, &result)) {
+        return 0;
+    }
+
+    // make sure the source capability is eligible for copying.
+    // copying of capability nodes isn't allowed because i just don't know how to deal with it currently and it may just overcomplicate things
+    if (result.slot->handlers == &node_handlers) {
+        unlock_looked_up_capability(&result);
         return 0;
     }
 
@@ -224,17 +230,17 @@ static size_t node_copy(size_t address, size_t depth, struct capability *slot, s
 }
 
 static size_t node_move(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
-    struct node_copy_args *args = (struct node_copy_args *) argument;
+    const struct node_copy_args *args = (struct node_copy_args *) argument;
 
     // resource lock/unlock is omitted here since no allocations take place
-    struct capability_node_header *header = (struct capability_node_header *) slot->resource;
+    const struct capability_node_header *header = (struct capability_node_header *) slot->resource;
 
     // make sure slot id is valid
     if (args->dest_slot >= 1 << header->slot_bits) {
         return 0;
     }
 
-    struct capability *dest = (struct capability *) ((char *) header + sizeof(struct capability_node_header) + args->dest_slot * sizeof(struct capability));
+    struct capability *dest = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + args->dest_slot * sizeof(struct capability));
 
     // make sure destination slot is empty
     if (dest->handlers != NULL) {
@@ -271,7 +277,7 @@ static size_t node_delete(size_t address, size_t depth, struct capability *slot,
         return 0;
     }
 
-    struct capability *to_delete = (struct capability *) ((char *) header + sizeof(struct capability_node_header) + argument * sizeof(struct capability));
+    struct capability *to_delete = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + argument * sizeof(struct capability));
 
     // make sure there's actually a capability here
     if (to_delete->handlers == NULL) {
@@ -293,7 +299,7 @@ static size_t node_revoke(size_t address, size_t depth, struct capability *slot,
         return 0;
     }
 
-    struct capability *to_revoke = (struct capability *) ((char *) header + sizeof(struct capability_node_header) + argument * sizeof(struct capability));
+    struct capability *to_revoke = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + argument * sizeof(struct capability));
 
     // make sure there's actually a capability here and that this capability is eligible for revocation
     if (
@@ -325,9 +331,9 @@ static size_t node_revoke(size_t address, size_t depth, struct capability *slot,
 }
 
 static void node_destructor(struct capability *node) {
-    struct capability_node_header *header = (struct capability_node_header *) node->resource;
+    const struct capability_node_header *header = (struct capability_node_header *) node->resource;
 
-    struct capability *slot = (struct capability *) ((char *) node + sizeof(struct capability_node_header));
+    struct capability *slot = (struct capability *) ((uint8_t *) node + sizeof(struct capability_node_header));
     for (int i = 0; i < (1 << header->slot_bits); i ++, slot ++) {
         if (slot->handlers != NULL) {
             merge_derivation_lists(slot);
@@ -359,12 +365,12 @@ static void *allocate_node(struct heap *heap, size_t slot_bits) {
     new->slot_bits = slot_bits;
     new->nested_nodes = 1; // to be filled out in populate_capability_slot() if this isn't the kernel root node
 
-    struct capability *slots = (struct capability *) ((char *) new + slots_start);
+    struct capability *slots = (struct capability *) ((uint8_t *) new + slots_start);
     for (int i = 0; i < total_slots; i ++) {
         (slots ++)->handlers = NULL;
     }
 
-    return (void *) new;
+    return new;
 }
 
 bool look_up_capability(struct capability *root, size_t address, size_t depth, struct look_up_result *result) {
@@ -379,7 +385,7 @@ bool look_up_capability(struct capability *root, size_t address, size_t depth, s
 
     while (1) {
         size_t index_in_node = address & ((1 << header->slot_bits) - 1);
-        struct capability *slot = (struct capability *) ((char *) header + sizeof(struct capability_node_header) + index_in_node * sizeof(struct capability));
+        struct capability *slot = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + index_in_node * sizeof(struct capability));
 
         if (depth == header->slot_bits) {
             // finished the search!
@@ -392,7 +398,7 @@ bool look_up_capability(struct capability *root, size_t address, size_t depth, s
         // sanity check. if the depth value doesn't match how many bits are in the node or if the slot doesn't contain a node, give up
         if (depth < header->slot_bits || slot->handlers != &node_handlers) {
             if (should_unlock) {
-                heap_unlock((void *) header);
+                heap_unlock(header);
             }
             return false;
         }
@@ -404,7 +410,7 @@ bool look_up_capability(struct capability *root, size_t address, size_t depth, s
         struct capability_node_header *next = (struct capability_node_header *) slot->resource;
 
         if (should_unlock) {
-            heap_unlock((void *) header);
+            heap_unlock(header);
         }
 
         should_unlock = next_should_unlock;
@@ -414,7 +420,7 @@ bool look_up_capability(struct capability *root, size_t address, size_t depth, s
 
 void unlock_looked_up_capability(struct look_up_result *result) {
     if (result->should_unlock) {
-        heap_unlock((void *) result->container);
+        heap_unlock(result->container);
     }
 }
 
@@ -437,7 +443,7 @@ bool look_up_capability_relative(size_t address, size_t depth, bool from_userlan
     return return_value;
 }
 
-bool look_up_capability_absolute(struct absolute_capability_address *address, struct look_up_result *result) {
+bool look_up_capability_absolute(const struct absolute_capability_address *address, struct look_up_result *result) {
     if (address->thread_id == 0) {
         return look_up_capability(&kernel_root_capability, address->address, address->depth, result);
     }
@@ -474,7 +480,7 @@ static bool populate_capability_slot(struct heap *heap, size_t address, size_t d
     }
 
     if (handlers == &node_handlers && result.container != NULL) {
-        struct capability_node_header *container = (struct capability_node_header *) result.container;
+        const struct capability_node_header *container = (struct capability_node_header *) result.container;
 
         // make sure this new node isn't too many layers of nesting deep
         if (container->nested_nodes >= MAX_NESTED_NODES) {
@@ -517,7 +523,7 @@ static bool populate_capability_slot(struct heap *heap, size_t address, size_t d
 }
 
 static void on_node_moved(struct capability_node_header *header) {
-    struct capability *slot = (struct capability *) ((char *) header + sizeof(struct capability_node_header));
+    struct capability *slot = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header));
 
     for (int i = 0; i < header->slot_bits; i ++, slot ++) {
         if (slot->handlers != NULL) {
@@ -526,11 +532,11 @@ static void on_node_moved(struct capability_node_header *header) {
     }
 }
 
-static uint8_t nesting_depth_search(struct capability *node) {
-    struct capability_node_header *header = (struct capability_node_header *) node->resource;
+static uint8_t nesting_depth_search(const struct capability *node) {
+    const struct capability_node_header *header = (struct capability_node_header *) node->resource;
     uint8_t nesting_value = header->nested_nodes;
 
-    struct capability *slot = (struct capability *) ((char *) header + sizeof(struct capability_node_header));
+    const struct capability *slot = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header));
     for (int i = 0; i < (1 << header->slot_bits); i ++, slot ++) {
         if (slot->handlers != &node_handlers) {
             continue;
@@ -546,12 +552,12 @@ static uint8_t nesting_depth_search(struct capability *node) {
     return nesting_value;
 }
 
-uint8_t get_nested_nodes_depth(struct capability *node) {
+uint8_t get_nested_nodes_depth(const struct capability *node) {
     if (node->handlers != &node_handlers) {
         return 0;
     }
 
-    struct capability_node_header *header = (struct capability_node_header *) node->resource;
+    const struct capability_node_header *header = (struct capability_node_header *) node->resource;
     return nesting_depth_search(node) - header->nested_nodes;
 }
 
@@ -592,7 +598,7 @@ struct address_space_capability {
 };
 
 static size_t alloc(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
-    struct alloc_args *args = (struct alloc_args *) argument;
+    const struct alloc_args *args = (struct alloc_args *) argument;
 
     // make sure there's permission to create this kind of object
     if ((slot->access_rights & (1 << args->type)) == 0) {
@@ -606,7 +612,7 @@ static size_t alloc(size_t address, size_t depth, struct capability *slot, size_
     struct heap *heap = heap_resource->heap_pointer;
 
     if (should_unlock) {
-        heap_unlock((void *) heap_resource);
+        heap_unlock(heap_resource);
     }
 
     // allocate resource
@@ -647,10 +653,10 @@ void init_root_capability(struct heap *heap) {
 
     struct address_space_capability *address_space_resource = heap_alloc(heap, sizeof(struct address_space_capability));
     address_space_resource->heap_pointer = heap;
-    populate_capability_slot(heap, 0, ROOT_CAP_SLOT_BITS, false, (void *) address_space_resource, &address_space_handlers);
+    populate_capability_slot(heap, 0, ROOT_CAP_SLOT_BITS, false, address_space_resource, &address_space_handlers);
 }
 
-void update_capability_resource(struct absolute_capability_address *address, void *new_resource_address) {
+void update_capability_resource(const struct absolute_capability_address *address, void *new_resource_address) {
     struct look_up_result result;
 
     if (!look_up_capability_absolute(address, &result)) {

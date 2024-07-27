@@ -68,7 +68,7 @@ void move_capability(struct capability *from, struct capability *to);
 void delete_capability(struct capability *to_delete);
 
 /// updates the address of a capability's resource, given its address in capability space
-void update_capability_resource(struct absolute_capability_address *address, void *new_resource_address);
+void update_capability_resource(const struct absolute_capability_address *address, void *new_resource_address);
 
 /// recursively updates addresses and thread ids starting at a given capability
 void update_capability_addresses(struct capability *slot, size_t address, size_t depth, uint16_t thread_id, uint8_t bucket_number, uint8_t nesting);
@@ -92,7 +92,7 @@ bool look_up_capability_relative(size_t address, size_t depth, bool from_userlan
 /// \brief looks up a capability relative to a given thread's root capability node
 ///
 /// on success, true is returned. on failure, false is returned
-bool look_up_capability_absolute(struct absolute_capability_address *address, struct look_up_result *result);
+bool look_up_capability_absolute(const struct absolute_capability_address *address, struct look_up_result *result);
 
 // TODO: find a better name for this
 void unlock_looked_up_capability(struct look_up_result *result);
@@ -127,7 +127,7 @@ struct capability_node_header {
 };
 
 /// gets how deep the tree of nodes is starting from the given capability node
-uint8_t get_nested_nodes_depth(struct capability *node);
+uint8_t get_nested_nodes_depth(const struct capability *node);
 
 /// invocation handlers for capability nodes
 extern struct invocation_handlers node_handlers;
