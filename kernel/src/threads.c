@@ -43,8 +43,6 @@ void init_threads(void) {
     used_thread_ids[0] = 1; // id 0 is reserved for kernel resources
 }
 
-extern struct invocation_handlers untyped_handlers;
-
 static size_t read_registers(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
     struct read_write_register_args *args = (struct read_write_register_args *) argument;
 
@@ -58,7 +56,7 @@ static size_t read_registers(size_t address, size_t depth, struct capability *sl
         heap_unlock(slot->resource);
     }
 
-    return 0;
+    return 1;
 }
 
 static size_t write_registers(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
@@ -74,31 +72,31 @@ static size_t write_registers(size_t address, size_t depth, struct capability *s
         heap_unlock(slot->resource);
     }
 
-    return 0;
+    return 1;
 }
 
 static size_t resume(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
     bool should_unlock = heap_lock(slot->resource);
 
-    resume_thread((struct thread_capability *) slot->resource);
+    resume_thread((struct thread_capability *) slot->resource, EXEC_MODE_SUSPENDED);
 
     if (should_unlock) {
         heap_unlock(slot->resource);
     }
 
-    return 0;
+    return 1;
 }
 
 static size_t suspend(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
     bool should_unlock = heap_lock(slot->resource);
 
-    suspend_thread((struct thread_capability *) slot->resource);
+    suspend_thread((struct thread_capability *) slot->resource, EXEC_MODE_SUSPENDED);
 
     if (should_unlock) {
         heap_unlock(slot->resource);
     }
 
-    return 0;
+    return 1;
 }
 
 static size_t set_root_node(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
@@ -123,7 +121,11 @@ static size_t set_root_node(size_t address, size_t depth, struct capability *slo
 
         struct capability *root_slot = &thread->root_capability;
         move_capability(result.slot, root_slot);
-        update_capability_addresses(root_slot, 0, 0, thread->thread_id, thread->bucket_number, 0);
+
+        struct absolute_capability_address new_address = {0, 0, 0, 0};
+        new_address.thread_id = thread->thread_id;
+        new_address.bucket_number = thread->bucket_number;
+        update_capability_addresses(root_slot, &new_address, 0);
     }
 
     unlock_looked_up_capability(&result);
@@ -144,22 +146,56 @@ static void thread_destructor(struct capability *slot) {
         LIST_REMOVE(*thread->runqueue, runqueue_entry, thread);
     }
 
-    if ((thread->scheduler_flags & THREAD_NEEDS_CPU_UPDATE) != 0) {
+    if ((thread->flags & THREAD_NEEDS_CPU_UPDATE) != 0) {
         LIST_REMOVE(scheduler_state.needs_cpu_time_update, cpu_update_entry, thread);
     }
 
     LIST_REMOVE(thread_hash_table[thread->bucket_number], table_entry, thread);
 
+    if (thread->blocked_on != NULL) {
+        if ((thread->flags & THREAD_BLOCKED_ON_SEND) != 0) {
+            LIST_REMOVE(thread->blocked_on->blocked_sending, blocked_queue, thread);
+        } else {
+            LIST_REMOVE(thread->blocked_on->blocked_receiving, blocked_queue, thread);
+        }
+    }
+
     used_thread_ids[thread->thread_id / PTR_BITS] &= ~(1 << (thread->thread_id % PTR_BITS)); // release thread id
 }
 
+void on_thread_moved(void *resource) {
+    struct thread_capability *thread = (struct thread_capability *) resource;
+
+    if (thread->runqueue != NULL) {
+        // update references to this thread in its current runqueue
+        LIST_UPDATE_ADDRESS(*thread->runqueue, runqueue_entry, thread);
+    }
+
+    // update references to this thread in the thread hash table
+    LIST_UPDATE_ADDRESS(thread_hash_table[thread->bucket_number], table_entry, thread);
+
+    if ((thread->flags & THREAD_NEEDS_CPU_UPDATE) != 0) {
+        // update references to this thread in the needs cpu update queue
+        LIST_UPDATE_ADDRESS(scheduler_state.needs_cpu_time_update, cpu_update_entry, thread);
+    }
+
+    if ((thread->flags & THREAD_CURRENTLY_RUNNING) != 0) {
+        scheduler_state.current_thread = thread;
+    }
+
+    if (thread->root_capability.handlers != NULL) {
+        update_capability_references(&thread->root_capability);
+    }
+}
+
 struct invocation_handlers thread_handlers = {
-    5,
-    {read_registers, write_registers, resume, suspend, set_root_node},
-    thread_destructor
+    .num_handlers = 5,
+    .handlers = {read_registers, write_registers, resume, suspend, set_root_node},
+    .on_moved = on_thread_moved,
+    .destructor = thread_destructor
 };
 
-void alloc_thread(struct heap *heap, void **resource, struct invocation_handlers **handlers) {
+struct thread_capability *alloc_thread(struct heap *heap) {
     uint16_t thread_id = 0;
     bool has_thread_id = false;
 
@@ -184,9 +220,7 @@ void alloc_thread(struct heap *heap, void **resource, struct invocation_handlers
 #ifdef DEBUG_THREADS
         printk("threads: couldn't allocate id for new thread!\n");
 #endif
-        *resource = NULL;
-        *handlers = NULL;
-        return;
+        return NULL;
     }
 
 #ifdef DEBUG_THREADS
@@ -200,13 +234,11 @@ void alloc_thread(struct heap *heap, void **resource, struct invocation_handlers
         printk("threads: heap_alloc for new thread failed!\n");
 #endif
         used_thread_ids[thread_id / PTR_BITS] &= ~(1 << (thread_id % PTR_BITS)); // release thread id
-        *resource = NULL;
-        *handlers = NULL;
-        return;
+        return NULL;
     }
 
     memset((uint8_t *) thread, 0, sizeof(struct thread_capability));
-    thread->exec_mode = SUSPENDED;
+    thread->exec_mode = EXEC_MODE_SUSPENDED;
     thread->thread_id = thread_id;
     // queue entries don't need to be set to NULL here as long as NULL is 0
 
@@ -220,30 +252,17 @@ void alloc_thread(struct heap *heap, void **resource, struct invocation_handlers
     // insert this thread into the thread hash table
     LIST_APPEND(thread_hash_table[thread->bucket_number], table_entry, thread);
 
-    *resource = thread;
-    *handlers = &thread_handlers;
-}
-
-void on_thread_moved(struct thread_capability *thread) {
-    if (thread->runqueue != NULL) {
-        // update references to this thread in its current runqueue
-        LIST_UPDATE_ADDRESS(*thread->runqueue, runqueue_entry, thread);
-    }
-
-    // update references to this thread in the thread hash table
-    LIST_UPDATE_ADDRESS(thread_hash_table[thread->bucket_number], table_entry, thread);
-
-    if ((thread->scheduler_flags & THREAD_NEEDS_CPU_UPDATE) != 0) {
-        // update references to this thread in the needs cpu update queue
-        LIST_UPDATE_ADDRESS(scheduler_state.needs_cpu_time_update, cpu_update_entry, thread);
-    }
-
-    if ((thread->scheduler_flags & THREAD_CURRENTLY_RUNNING) != 0) {
-        scheduler_state.current_thread = thread;
-    }
+    return thread;
 }
 
 bool look_up_thread_by_id(uint16_t thread_id, uint8_t bucket_number, struct thread_capability **thread) {
+    LIST_ITER(struct thread_capability, thread_hash_table[bucket_number], table_entry, t) {
+        if (t->thread_id == thread_id) {
+            *thread = t;
+            return heap_lock(t);
+        }
+    }
+
     *thread = NULL;
     return false;
 }

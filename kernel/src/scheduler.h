@@ -7,6 +7,7 @@
 
 #define NUM_PRIORITIES 64
 
+/// the state of the scheduler
 struct scheduler_state {
     /// the thread that's currently being executed
     struct thread_capability *current_thread;
@@ -24,8 +25,21 @@ struct scheduler_state {
 
 extern struct scheduler_state scheduler_state;
 
+/// initializes the scheduler
 void init_scheduler(void);
-void resume_thread(struct thread_capability *thread);
-void suspend_thread(struct thread_capability *thread);
+
+/// \brief resumes a thread, allowing it to resume execution, if the given execution mode matches its current execution mode
+///
+/// if the execution modes don't match, nothing will happen
+void resume_thread(struct thread_capability *thread, uint8_t reason);
+
+/// \brief suspends a thread, setting its execution mode to the one provided
+///
+/// if the thread is already suspended, nothing will happen
+void suspend_thread(struct thread_capability *thread, uint8_t new_exec_mode);
+
+/// yields the rest of the time slice for the current thread, allowing other threads to execute
 void yield_thread(void);
+
+/// if a context switch has been requested (i.e. by suspending a thread), this function will perform it
 void try_context_switch(struct thread_registers *registers);

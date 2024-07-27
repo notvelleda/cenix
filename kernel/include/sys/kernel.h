@@ -77,6 +77,7 @@ struct node_move_args {
 #define TYPE_UNTYPED 0 // is this a good name for user-modifiable memory?
 #define TYPE_NODE 1
 #define TYPE_THREAD 2
+#define TYPE_ENDPOINT 3
 
 /// arguments passed to the `address_space_alloc` invocation on an address space capability
 struct alloc_args {
@@ -121,4 +122,37 @@ struct set_root_node_args {
     /// how many bits of the address field are valid and should be used to search
     /// through the calling thread's address space
     size_t depth;
+};
+
+/// the handler number for the `endpoint_send` invocation
+#define ENDPOINT_SEND 0
+
+/// the handler number for the `endpoint_receive` invocation
+#define ENDPOINT_RECEIVE 1
+
+/// the size of the IPC message buffer
+#define IPC_BUFFER_SIZE 32
+
+/// how many capabilities can be transferred in a single IPC call
+#define IPC_CAPABILITY_SLOTS 4
+
+/// arguments passed to the `endpoint_send` and `endpoint_receive` invocations
+struct ipc_message {
+    /// raw data to be copied to the receiving thread or to be copied from the sending thread, depending on the invocation
+    uint8_t buffer[IPC_BUFFER_SIZE];
+    /// \brief a list of addresses of capability slots
+    ///
+    /// when sending a message, any of these fields with a depth of greater than 0 will be moved
+    /// to the corresponding slot address in the structure provided to a receive call
+    struct {
+        /// the address of the capability or available slot
+        size_t address;
+        /// how many bits of the address field are valid and should be used to search
+        /// through the calling thread's address space
+        size_t depth;
+    } capabilities[IPC_CAPABILITY_SLOTS];
+    /// when a capability is successfully transferred from the sending thread to the receiving thread, its corresponding bit will be set here
+    uint8_t transferred_capabilities;
+    /// the badge of the capability that sent this message. this field is ignored on `endpoint_send` invocations
+    size_t badge;
 };

@@ -159,6 +159,7 @@ void heap_lock_existing_region(struct heap *heap, void *start, void *end) {
 
         if ((uint8_t *) block_start + sizeof(struct heap_header) <= (uint8_t *) start + sizeof(struct heap_header)) {
             SET_KIND(header, KIND_IMMOVABLE);
+            header->update_ref.absolute_ptr = NULL;
             continue;
         }
 
@@ -202,6 +203,10 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
     size_t available_memory = heap->total_memory - heap->used_memory;
 
     if (size > available_memory) {
+#ifdef DEBUG_HEAP
+        print_spaces();
+        printk("heap_alloc: allocation size is greater than available memory (0x%x)\n", available_memory);
+#endif
         return NULL;
     }
 
@@ -329,6 +334,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
             interrupt_status_t status = disable_interrupts();
 
             const void *src_ptr = (uint8_t *) header + sizeof(struct heap_header);
+            //printk("moving 0x%x to 0x%x\n", src_ptr, dest_ptr);
             memcpy(dest_ptr, src_ptr, alloc_size);
 
             SET_OLD_KIND(header, KIND_AVAILABLE);
@@ -341,7 +347,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
                     header->update_ref.capability.thread_id,
                     header->update_ref.capability.address,
                     header->update_ref.capability.depth,
-                    header
+                    dest_ptr
                 );
 #endif
                 update_capability_resource(&header->update_ref.capability, dest_ptr);
@@ -372,6 +378,7 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
     if (start_header->next != NULL) {
         start_header->next->prev = start_header;
     }
+    start_header->update_ref.absolute_ptr = NULL;
 
     if (to_move == 0) {
         heap->used_memory += start_header->size;
@@ -430,13 +437,28 @@ void heap_list_blocks(struct heap *heap) {
 
     while (1) {
         printk(
-            "0x%08x - 0x%08x (size %d (0x%x)): %s\n",
+            "0x%08x - 0x%08x (size %d (0x%x)): %s",
             header,
             (size_t) header + header->size,
             header->size,
             header->size,
             kind_names[GET_KIND(header)]
         );
+
+        if (GET_KIND(header) == KIND_AVAILABLE) {
+            printk("\n");
+        } else if ((header->flags & FLAG_CAPABILITY_RESOURCE) != 0) {
+            printk(
+                ", 0x%x:0x%x (%d bits)\n",
+                header->update_ref.capability.thread_id,
+                header->update_ref.capability.address,
+                header->update_ref.capability.depth
+            );
+        } else if (header->update_ref.absolute_ptr != NULL) {
+            printk(", 0x%x\n", header->update_ref.absolute_ptr);
+        } else {
+            printk(", no updates\n");
+        }
 
         if (header->next != NULL) {
             header = header->next;

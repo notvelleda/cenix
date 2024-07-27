@@ -61,6 +61,9 @@ if ((container).start != NULL) { \
     } \
 }
 
+/// checks whether a linked list with a separate container can be popped from
+#define LIST_CAN_POP(container) ((container).start != NULL)
+
 /// removes an item from a linked list with a separate container
 #define LIST_REMOVE(container, field, item) \
 do { \
@@ -75,6 +78,10 @@ do { \
         (item)->field.next->field.prev = (item)->field.prev; \
     } \
 } while (0)
+
+/// iterates over a linked list with a separate container
+#define LIST_ITER(type, container, field, variable) \
+for (type *variable = (container).start; variable != NULL; variable = variable->field.next)
 
 /* ==== linked lists with the container in all the elements ==== */
 

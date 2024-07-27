@@ -248,7 +248,7 @@ void after_sp_set(void) {
 
     invoke_capability(2, ROOT_CAP_SLOT_BITS, THREAD_RESUME, 0, false);
 
-#if 0
+#if 1
     heap_list_blocks(&the_heap);
 #endif
 
@@ -287,7 +287,9 @@ void test_thread_3(void) {
 }
 
 void test_thread_2(void) {
-    struct alloc_args alloc_args = {
+    printk("thread 2 started\n");
+
+    /*struct alloc_args alloc_args = {
         .type = TYPE_UNTYPED,
         .size = STACK_SIZE,
         .address = 1,
@@ -326,11 +328,30 @@ void test_thread_2(void) {
         syscall_yield();
         for (int j = 0; j < 524288; j ++);
         syscall_yield();
+    }*/
+
+    struct ipc_message receive = {
+        .capabilities = {{0, 0}, {0, 0}, {0, 0}, {0, 0}}
+    };
+    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ENDPOINT_RECEIVE, (size_t) &receive);
+    printk("thread 2: received message \"%s\"\n", &receive.buffer);
+
+    struct ipc_message send = {
+        .buffer = {'U', 'w', 'U', 0},
+        .capabilities = {{0, 0}, {0, 0}, {0, 0}, {0, 0}}
+    };
+    printk("thread 2: sending message \"%s\"\n", &send.buffer);
+    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ENDPOINT_SEND, (size_t) &send);
+
+    while (1) {
+        syscall_yield();
     }
 }
 
 void test_thread(void) {
-    printk("entered thread!\n");
+    printk("thread 1 started\n");
+
+    //heap_list_blocks(&the_heap);
 
     struct alloc_args alloc_args = {
         .type = TYPE_UNTYPED,
@@ -362,14 +383,78 @@ void test_thread(void) {
         .address = &registers,
         .size = sizeof(struct thread_registers)
     };
-
     syscall_invoke(2, ROOT_CAP_SLOT_BITS, THREAD_WRITE_REGISTERS, (size_t) &register_write_args);
+
+    struct alloc_args endpoint_alloc_args = {
+        .type = TYPE_ENDPOINT,
+        .size = 0,
+        .address = 3,
+        .depth = ROOT_CAP_SLOT_BITS,
+    };
+    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
+
+    struct alloc_args node_alloc_args = {
+        .type = TYPE_NODE,
+        .size = ROOT_CAP_SLOT_BITS,
+        .address = 4,
+        .depth = ROOT_CAP_SLOT_BITS,
+    };
+    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args);
+
+    struct node_copy_args node_copy_args = {
+        .source_address = endpoint_alloc_args.address,
+        .source_depth = endpoint_alloc_args.depth,
+        .dest_slot = 0,
+        .access_rights = -1,
+        .badge = 0,
+        .should_set_badge = 0
+    };
+    syscall_invoke(node_alloc_args.address, node_alloc_args.depth, NODE_COPY, (size_t) &node_copy_args);
+
+    struct set_root_node_args set_root_node_args = {node_alloc_args.address, node_alloc_args.depth};
+    syscall_invoke(2, ROOT_CAP_SLOT_BITS, THREAD_SET_ROOT_NODE, (size_t) &set_root_node_args);
+
     syscall_invoke(2, ROOT_CAP_SLOT_BITS, THREAD_RESUME, 0);
 
-    while (1) {
+    struct ipc_message send = {
+        .buffer = {'H', 'e', 'l', 'l', 'o', 'r', 'l', 'd', '!', 0},
+        .capabilities = {{0, 0}, {0, 0}, {0, 0}, {0, 0}}
+    };
+    printk("thread 1: sending message \"%s\"\n", &send.buffer);
+    syscall_invoke(endpoint_alloc_args.address, endpoint_alloc_args.depth, ENDPOINT_SEND, (size_t) &send);
+
+    struct ipc_message receive = {
+        .capabilities = {{0, 0}, {0, 0}, {0, 0}, {0, 0}}
+    };
+    syscall_invoke(endpoint_alloc_args.address, endpoint_alloc_args.depth, ENDPOINT_RECEIVE, (size_t) &receive);
+    printk("thread 1: received message \"%s\"\n", &receive.buffer);
+
+    /*struct alloc_args test_alloc_args = {
+        .type = TYPE_UNTYPED,
+        .size = 4,
+        .address = 5,
+        .depth = ROOT_CAP_SLOT_BITS,
+    };
+    printk("args are at 0x%x\n", &test_alloc_args);
+    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &test_alloc_args);
+
+    char *ptr = (char *) syscall_invoke(5, ROOT_CAP_SLOT_BITS, UNTYPED_LOCK, 0);
+    ptr[0] = ':';
+    ptr[1] = '3';
+    ptr[2] = 'c';
+    ptr[3] = 0;
+
+    printk("thread 1: sending \"%s\" in capability\n", ptr);
+    syscall_invoke(5, ROOT_CAP_SLOT_BITS, UNTYPED_UNLOCK, 0);*/
+
+    /*while (1) {
         printk("thread 1!\n");
         syscall_yield();
         for (int j = 0; j < 524288; j ++);
+        syscall_yield();
+    }*/
+
+    while (1) {
         syscall_yield();
     }
 }

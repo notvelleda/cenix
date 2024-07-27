@@ -29,25 +29,28 @@ void queue_thread(struct thread_capability *thread) {
     LIST_APPEND(scheduler_state.priority_queues[63], runqueue_entry, thread);
 }
 
-void resume_thread(struct thread_capability *thread) {
-    if (thread->exec_mode != SUSPENDED) {
-        return;
-    }
+void resume_thread(struct thread_capability *thread, uint8_t reason) {
+    thread->exec_mode &= ~reason;
 
-    thread->exec_mode = RUNNING;
-    queue_thread(thread);
+    if (thread->exec_mode == EXEC_MODE_RUNNING) {
+        queue_thread(thread);
 
-    if (scheduler_state.current_thread == NULL) {
-        scheduler_state.pending_context_switch = true;
+        if (scheduler_state.current_thread == NULL) {
+            scheduler_state.pending_context_switch = true;
+        }
     }
 }
 
-void suspend_thread(struct thread_capability *thread) {
+void suspend_thread(struct thread_capability *thread, uint8_t new_exec_mode) {
     if (scheduler_state.current_thread == thread) {
         scheduler_state.pending_context_switch = true;
     }
 
-    // TODO
+    thread->exec_mode |= new_exec_mode;
+
+    if (thread->exec_mode != EXEC_MODE_RUNNING && thread->runqueue != NULL) {
+        LIST_REMOVE(*thread->runqueue, runqueue_entry, thread);
+    }
 }
 
 void yield_thread(void) {
@@ -77,17 +80,11 @@ void try_context_switch(struct thread_registers *registers) {
     for (int i = NUM_PRIORITIES - 1; i >= 0; i --) {
         LIST_CONTAINER(struct thread_capability) *queue = &scheduler_state.priority_queues[i];
 
-        while (queue->start != NULL) {
+        if (queue->start != NULL) {
             // pop the thread off of the queue
             LIST_POP_FROM_START(*queue, runqueue_entry, next_thread);
             next_thread->runqueue = NULL;
-
-            if (next_thread->exec_mode == RUNNING) {
-                // found a valid thread, break out of the loops!
-                goto found_thread;
-            }
-
-            next_thread = NULL;
+            goto found_thread;
         }
     }
 
@@ -102,14 +99,14 @@ found_thread:
     if (scheduler_state.current_thread != NULL) {
         struct thread_capability *thread = scheduler_state.current_thread;
 
-        if (thread->exec_mode == RUNNING) {
+        if (thread->exec_mode == EXEC_MODE_RUNNING) {
             // only save this thread's registers and queue it if it's being preempted by another thread
             if (next_thread != NULL) {
 #ifdef DEBUG_SCHEDULER
                 printk("scheduler: saving registers for 0x%x due to preemption\n", thread);
 #endif
                 thread->registers = *registers;
-                thread->scheduler_flags &= ~THREAD_CURRENTLY_RUNNING;
+                thread->flags &= ~THREAD_CURRENTLY_RUNNING;
                 queue_thread(thread);
             }
 
@@ -120,7 +117,7 @@ found_thread:
             printk("scheduler: saving registers for 0x%x due to pause\n", thread);
 #endif
             thread->registers = *registers;
-            thread->scheduler_flags &= ~THREAD_CURRENTLY_RUNNING;
+            thread->flags &= ~THREAD_CURRENTLY_RUNNING;
             scheduler_state.current_thread = NULL;
         }
     }
@@ -132,7 +129,7 @@ found_thread:
 #endif
         *registers = next_thread->registers;
         scheduler_state.current_thread = next_thread;
-        next_thread->scheduler_flags |= THREAD_CURRENTLY_RUNNING;
+        next_thread->flags |= THREAD_CURRENTLY_RUNNING;
     } else if (should_idle) {
 #ifdef DEBUG_SCHEDULER
         printk("scheduler: entering idle thread\n");
