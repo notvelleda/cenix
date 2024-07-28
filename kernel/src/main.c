@@ -16,15 +16,8 @@ extern uint8_t _binary_init_end;
 void main_init(struct heap *heap) {
     printk("Hellorld!\n");
 
-    printk(
-        "total memory: %d KiB, used memory: %d KiB, free memory: %d KiB\n",
-        heap->total_memory / 1024,
-        heap->used_memory / 1024,
-        (heap->total_memory - heap->used_memory) / 1024
-    );
-
-    printk("sizeof(struct capability) is %d\n", sizeof(struct capability));
-    printk("sizeof(struct heap_header) is %d\n", sizeof(struct heap_header));
+    /*printk("sizeof(struct capability) is %d\n", sizeof(struct capability));
+    printk("sizeof(struct heap_header) is %d\n", sizeof(struct heap_header));*/
 
     init_threads();
     init_scheduler();
@@ -96,4 +89,11 @@ void main_init(struct heap *heap) {
     // reset the current thread to NULL since it's not running yet
     scheduler_state.current_thread->flags &= ~THREAD_CURRENTLY_RUNNING;
     scheduler_state.current_thread = NULL;
+
+    printk(
+        "total memory: %d KiB, used memory: %d KiB, free memory: %d KiB\n",
+        heap->total_memory / 1024,
+        heap->used_memory / 1024,
+        (heap->total_memory - heap->used_memory) / 1024
+    );
 }

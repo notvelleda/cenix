@@ -18,7 +18,6 @@
 
 #define SCRN_BASE (*(void **) 0x0824)
 #define SCRN_LEN 0x5580
-#define SCRN_LEN_CONSOLE 0x5400
 
 #define SOUND_BASE (*(void **) 0x0266)
 #define SOUND_LEN 370
@@ -29,14 +28,13 @@
 
 #define SCREEN_WIDTH 512
 #define SCREEN_HEIGHT 342
-#define CONSOLE_HEIGHT 336 // console height has to be a multiple of 8!
+#define CONSOLE_HEIGHT ((SCREEN_HEIGHT / FONT_HEIGHT) * FONT_HEIGHT) // console height has to be a multiple of the font height!
+
+#define SCRN_LEN_CONSOLE ((SCREEN_WIDTH * CONSOLE_HEIGHT) / 8)
+
+#define SCREEN_ROW (*(uint16_t *) 0x0106)
 
 #define TOOL_DISP_TABLE ((uint32_t *) 0x0c00)
-
-#ifdef DEBUG
-static int console_x = 0;
-static int console_y = 0;
-#endif
 
 struct heap the_heap = {NULL, 0, 0};
 
@@ -50,10 +48,6 @@ void *new_stack_pointer;
 
 void _start(void) {
     struct init_block init_block;
-
-#ifdef DEBUG
-    memset(SCRN_BASE, 0xff, SCRN_LEN);
-#endif
 
     init_vector_table();
 
@@ -116,55 +110,68 @@ void after_sp_set(void) {
     enter_user_mode(new_stack_pointer);
 }
 
-void _putchar(char c) {
 #ifdef DEBUG
+const static uint8_t mask[12] = {
+    0xfc, 0x00, 0x00, /*0b11111100, 0b00000000, 0b00000000,*/
+    0x03, 0xf0, 0x00, /*0b00000011, 0b11110000, 0b00000000,*/
+    0x00, 0x0f, 0xc0, /*0b00000000, 0b00001111, 0b11000000,*/
+    0x00, 0x00, 0x3f  /*0b00000000, 0b00000000, 0b00111111 */
+};
+
+static int console_x = 0;
+static int console_y = 0;
+
+void _putchar(char c) {
     if (c == '\n') {
         console_x = 0;
-        console_y += 8;
+        console_y ++;
 
-        if (console_y >= CONSOLE_HEIGHT) {
+        if (console_y >= (CONSOLE_HEIGHT / FONT_HEIGHT)) {
             memmove((uint8_t *) SCRN_BASE, (uint8_t *) SCRN_BASE + 512, SCRN_LEN_CONSOLE - 512);
             memset((uint8_t *) SCRN_BASE + SCRN_LEN_CONSOLE - 512, 0xff, 512);
-            console_y = CONSOLE_HEIGHT - 8;
+            console_y = (CONSOLE_HEIGHT / FONT_HEIGHT) - 1;
         }
 
         return;
     }
 
-    char *index_byte = (char *) SCRN_BASE + (console_x >> 3) + (console_y << 6);
-    short index_sub = 7 - (console_x & 0x7);
+    uint16_t row_bytes = SCREEN_ROW;
+    int column_offset = console_x & 0x3;
+    uint8_t *dest = SCRN_BASE + console_y * FONT_HEIGHT * row_bytes + (console_x >> 2) * 3;
+    const uint8_t *char_data = &font[(c - 32) * FONT_HEIGHT];
 
-    if (c != ' ') {
-        short font_index = (c - 0x20) * 5;
+    for (int row = 0; row < FONT_HEIGHT; row ++, dest += row_bytes) {
+        uint8_t data = ~*(char_data ++);
 
-        for (char col = 0; col < 5; col ++) {
-            for (char row = 0; row < 7; row ++) {
-                char pixel = (font[font_index] >> row) & 0x1;
-                if (pixel) {
-                    *(index_byte + (row << 6)) &= ~(1 << index_sub);
-                }
-                // don't bother clearing pixels, prolly doesnt matter
-            }
-
-            if (-- index_sub < 0) {
-                index_sub = 7;
-                index_byte ++;
-            }
-            font_index ++;
+        switch (column_offset) {
+        case 0:
+            *(dest + 0) = (*(dest + 0) & ~mask[0]) | (data & mask[0]);
+            break;
+        case 1:
+            *(dest + 0) = (*(dest + 0) & ~mask[3]) | (data >> 6);
+            *(dest + 1) = (*(dest + 1) & ~mask[4]) | (data << 2);
+            break;
+        case 2:
+            *(dest + 1) = (*(dest + 1) & ~mask[7]) | (data >> 4);
+            *(dest + 2) = (*(dest + 2) & ~mask[8]) | (data << 4);
+            break;
+        case 3:
+            *(dest + 2) = (*(dest + 2) & ~mask[11]) | (data >> 2);
+            break;
         }
     }
 
-    console_x += 6;
+    console_x ++;
 
-    if (console_x >= SCREEN_WIDTH - 6) {
+    if (console_x >= SCREEN_WIDTH / FONT_WIDTH) {
         console_x = 0;
-        console_y += 8;
+        console_y ++;
 
-        if (console_y >= CONSOLE_HEIGHT) {
+        if (console_y >= (CONSOLE_HEIGHT / FONT_HEIGHT)) {
             memmove((uint8_t *) SCRN_BASE, (uint8_t *) SCRN_BASE + 512, SCRN_LEN_CONSOLE - 512);
             memset((uint8_t *) SCRN_BASE + SCRN_LEN_CONSOLE - 512, 0xff, 512);
-            console_y = CONSOLE_HEIGHT - 8;
+            console_y = (CONSOLE_HEIGHT / FONT_HEIGHT) - 1;
         }
     }
-#endif
 }
+#endif
