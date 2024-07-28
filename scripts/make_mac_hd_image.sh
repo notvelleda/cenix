@@ -4,10 +4,10 @@ set -e
 
 CROSS=m68k-unknown-elf-
 
-MAKE_FLAGS="CROSS=$CROSS CC=${CROSS}cc PLATFORM=mac-68000 DEBUG=y"
+MAKE_FLAGS="CROSS=$CROSS CC=${CROSS}cc PLATFORM=mac-68000"
 
-bmake -C init $MAKE_FLAGS
-bmake -C kernel $MAKE_FLAGS
+bmake -C init $MAKE_FLAGS DEBUG=y
+bmake -C kernel $MAKE_FLAGS DEBUG=y # disabling debug for the kernel saves like 18k
 
 cd tiny-mac-bootloader
 mkdir -p fs-contents

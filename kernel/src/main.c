@@ -79,10 +79,8 @@ void main_init(struct heap *heap) {
     address_space_resource->heap_pointer = heap;
     populate_capability_slot(heap, 0, ROOT_CAP_SLOT_BITS, address_space_resource, &address_space_handlers, CAP_FLAG_IS_HEAP_MANAGED);
 
-#ifdef DEBUG
     // add debug capability to thread's root node
     populate_capability_slot(heap, 1, ROOT_CAP_SLOT_BITS, NULL, &debug_handlers, 0);
-#endif
 
     // TODO: should init be given ownership of its thread object? how would that work?
 

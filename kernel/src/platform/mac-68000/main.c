@@ -3,6 +3,7 @@
 #include "arch/68000/user_mode_entry.h"
 #include "capabilities.h"
 #include "debug.h"
+#include "font.h"
 #include "heap.h"
 #include "main.h"
 #include "platform/mac-68000/hw.h"
@@ -11,10 +12,6 @@
 #include "string.h"
 #include "sys/kernel.h"
 #include "threads.h"
-
-#ifdef DEBUG
-#include "font.h"
-#endif
 
 #define SCRN_BASE (*(void **) 0x0824)
 #define SCRN_LEN 0x5580
@@ -110,7 +107,6 @@ void after_sp_set(void) {
     enter_user_mode(new_stack_pointer);
 }
 
-#ifdef DEBUG
 const static uint8_t mask[12] = {
     0xfc, 0x00, 0x00, /*0b11111100, 0b00000000, 0b00000000,*/
     0x03, 0xf0, 0x00, /*0b00000011, 0b11110000, 0b00000000,*/
@@ -174,4 +170,3 @@ void _putchar(char c) {
         }
     }
 }
-#endif
