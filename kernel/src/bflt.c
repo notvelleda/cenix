@@ -77,7 +77,7 @@ bool bflt_load(struct heap *heap, void *binary_start, void *binary_end, struct t
     printk("bflt_load: init has %d relocation(s) at offset %d\n", header->num_relocations, header->relocations_start);
 
     // apply all the relocations
-    uint32_t *relocations_start = (uint32_t *) ((uint8_t *) binary_start + header->relocations_start);
+    const uint32_t *relocations_start = (uint32_t *) ((uint8_t *) binary_start + header->relocations_start);
 
     for (unsigned long i = 0; i < header->num_relocations; i ++) {
         uint32_t offset = *(relocations_start ++);

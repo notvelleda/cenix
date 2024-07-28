@@ -1,14 +1,16 @@
-#include "string.h"
-#include "printf.h"
+#include "arch.h"
+#include "arch/68000/interrupts.h"
+#include "arch/68000/user_mode_entry.h"
+#include "capabilities.h"
 #include "debug.h"
 #include "heap.h"
-#include "capabilities.h"
-#include "arch.h"
-#include "threads.h"
-#include "platform/mac-68000/hw.h"
-#include "scheduler.h"
-#include "sys/kernel.h"
 #include "main.h"
+#include "platform/mac-68000/hw.h"
+#include "printf.h"
+#include "scheduler.h"
+#include "string.h"
+#include "sys/kernel.h"
+#include "threads.h"
 
 #ifdef DEBUG
 #include "font.h"
@@ -40,14 +42,9 @@ struct heap the_heap = {NULL, 0, 0};
 
 extern char _end;
 
-void test_thread(void);
-
 static uint8_t read_addr(uint8_t value) {
     return value;
 }
-
-extern void trap_entry(void);
-extern void bad_interrupt_entry(void);
 
 void *new_stack_pointer;
 
@@ -58,13 +55,7 @@ void _start(void) {
     memset(SCRN_BASE, 0xff, SCRN_LEN);
 #endif
 
-    // populate interrupt vector table
-    void **vector_table = (void **) 0;
-
-    for (int i = 2; i < 64; i ++) {
-        vector_table[i] = &bad_interrupt_entry;
-    }
-    vector_table[32] = &trap_entry;
+    init_vector_table();
 
     MAC_VIA_IER = 0x7f; // disable all VIA interrupts
     MAC_VIA_IFR = 0xff; // clear VIA interrupt flag to dismiss any pending interrupts
@@ -122,88 +113,7 @@ void after_sp_set(void) {
     __asm__ __volatile__ ("jsr (%0)" :: "a" (table_entry));*/
 
     main_init(&the_heap);
-
-    // TODO: move all this generic 68000 stuff into the arch layer
-
-    // hop into user mode!
-    struct thread_registers new_registers;
-
-    scheduler_state.pending_context_switch = true; // force a context switch
-    try_context_switch(&new_registers);
-
-    // set user-mode stack pointer
-    __asm__ __volatile__ ("movel %0, %%usp" :: "a" (new_registers.stack_pointer));
-
-    uint16_t status_register = new_registers.status_register & 0x00ff;
-
-    printk("bye-bye, supervisor mode!\n");
-
-    // jump into user mode!
-    __asm__ __volatile__ (
-        "movel %0, %%sp\n\t"
-        "movel %1, -(%%sp)\n\t"
-        "movew %2, -(%%sp)\n\t"
-        "moveml (%3)+, %%d0-%%d7/%%a0-%%a6\n\t"
-        "rte"
-        :: "r" (new_stack_pointer), "r" (new_registers.program_counter), "r" (status_register), "r" (&new_registers.data)
-    );
-
-    while (1);
-}
-
-static void log_registers(const struct thread_registers *registers) {
-    printk(
-        "a0: 0x%08x, a1: 0x%08x, a2: 0x%08x, a3: 0x%08x\n",
-        registers->address[0],
-        registers->address[1],
-        registers->address[2],
-        registers->address[3]
-    );
-    printk(
-        "a4: 0x%08x, a5: 0x%08x, a6: 0x%08x, a7: 0x%08x\n",
-        registers->address[4],
-        registers->address[5],
-        registers->address[6],
-        registers->stack_pointer
-    );
-    printk(
-        "d0: 0x%08x, d1: 0x%08x, d2: 0x%08x, d3: 0x%08x\n",
-        registers->data[0],
-        registers->data[1],
-        registers->data[2],
-        registers->data[3]
-    );
-    printk(
-        "d4: 0x%08x, d5: 0x%08x, d6: 0x%08x, d7: 0x%08x\n",
-        registers->data[4],
-        registers->data[5],
-        registers->data[6],
-        registers->data[7]
-    );
-    printk("status register: 0x%04x, program counter: 0x%08x\n", registers->status_register, registers->program_counter);
-}
-
-void exception_handler(struct thread_registers *registers) {
-    printk("something happened lol\n");
-    log_registers(registers);
-    while (1);
-}
-
-void trap_handler(struct thread_registers *registers) {
-    switch (registers->data[0]) {
-    case SYSCALL_YIELD:
-        yield_thread();
-        break;
-    case SYSCALL_INVOKE:
-        registers->data[0] = (uint32_t) invoke_capability(
-            (size_t) registers->data[1],
-            (size_t) registers->data[2],
-            (size_t) registers->data[3],
-            (size_t) registers->address[0]
-        );
-        break;
-    }
-    try_context_switch(registers);
+    enter_user_mode(new_stack_pointer);
 }
 
 void _putchar(char c) {
