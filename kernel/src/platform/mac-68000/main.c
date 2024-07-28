@@ -117,17 +117,25 @@ const static uint8_t mask[12] = {
 static int console_x = 0;
 static int console_y = 0;
 
+static void newline(void) {
+    uint16_t row_bytes = SCREEN_ROW;
+
+    console_x = 0;
+    console_y ++;
+
+    if (console_y >= (CONSOLE_HEIGHT / FONT_HEIGHT)) {
+        size_t move_distance = row_bytes * FONT_HEIGHT;
+
+        memmove((uint8_t *) SCRN_BASE, (uint8_t *) SCRN_BASE + move_distance, SCRN_LEN - move_distance);
+        memset((uint8_t *) SCRN_BASE + SCRN_LEN - move_distance, 0xff, move_distance);
+
+        console_y = (CONSOLE_HEIGHT / FONT_HEIGHT) - 1;
+    }
+}
+
 void _putchar(char c) {
     if (c == '\n') {
-        console_x = 0;
-        console_y ++;
-
-        if (console_y >= (CONSOLE_HEIGHT / FONT_HEIGHT)) {
-            memmove((uint8_t *) SCRN_BASE, (uint8_t *) SCRN_BASE + 512, SCRN_LEN_CONSOLE - 512);
-            memset((uint8_t *) SCRN_BASE + SCRN_LEN_CONSOLE - 512, 0xff, 512);
-            console_y = (CONSOLE_HEIGHT / FONT_HEIGHT) - 1;
-        }
-
+        newline();
         return;
     }
 
@@ -160,13 +168,6 @@ void _putchar(char c) {
     console_x ++;
 
     if (console_x >= SCREEN_WIDTH / FONT_WIDTH) {
-        console_x = 0;
-        console_y ++;
-
-        if (console_y >= (CONSOLE_HEIGHT / FONT_HEIGHT)) {
-            memmove((uint8_t *) SCRN_BASE, (uint8_t *) SCRN_BASE + 512, SCRN_LEN_CONSOLE - 512);
-            memset((uint8_t *) SCRN_BASE + SCRN_LEN_CONSOLE - 512, 0xff, 512);
-            console_y = (CONSOLE_HEIGHT / FONT_HEIGHT) - 1;
-        }
+        newline();
     }
 }
