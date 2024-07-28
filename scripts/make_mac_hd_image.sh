@@ -4,7 +4,10 @@ set -e
 
 CROSS=m68k-unknown-elf-
 
-make -C kernel CROSS=$CROSS CC=${CROSS}cc LD=${CROSS}ld PLATFORM=mac-68000 DEBUG=y
+MAKE_FLAGS="CROSS=$CROSS CC=${CROSS}cc PLATFORM=mac-68000 DEBUG=y"
+
+bmake -C init $MAKE_FLAGS
+bmake -C kernel $MAKE_FLAGS
 
 cd tiny-mac-bootloader
 mkdir -p fs-contents

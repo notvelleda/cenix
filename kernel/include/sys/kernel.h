@@ -130,6 +130,9 @@ struct set_root_node_args {
 /// the handler number for the `endpoint_receive` invocation
 #define ENDPOINT_RECEIVE 1
 
+/// the handler number for the `debug_print` invocation
+#define DEBUG_PRINT 0
+
 /// the size of the IPC message buffer
 #define IPC_BUFFER_SIZE 32
 
@@ -156,3 +159,15 @@ struct ipc_message {
     /// the badge of the capability that sent this message. this field is ignored on `endpoint_send` invocations
     size_t badge;
 };
+
+/// sets the program counter in a register context object to the specified value
+void set_program_counter(struct thread_registers *registers, size_t program_counter);
+
+/// sets the stack pointer in a register context object to the specified value
+void set_stack_pointer(struct thread_registers *registers, size_t stack_pointer);
+
+/// \brief sets the global offset table (GOT) pointer in a register context to the specified value
+///
+/// it's entirely architecture-dependent whether this function is implemented or not,
+/// and it may not be usable after the thread whose registers it'll update has started
+void set_got_pointer(struct thread_registers *registers, size_t got_pointer);

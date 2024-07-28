@@ -26,7 +26,8 @@ void queue_thread(struct thread_capability *thread) {
     }
 
     // TODO: calculate priority
-    LIST_APPEND(scheduler_state.priority_queues[63], runqueue_entry, thread);
+    thread->runqueue = &scheduler_state.priority_queues[63];
+    LIST_APPEND(*thread->runqueue, runqueue_entry, thread);
 }
 
 void resume_thread(struct thread_capability *thread, uint8_t reason) {
@@ -50,6 +51,7 @@ void suspend_thread(struct thread_capability *thread, uint8_t new_exec_mode) {
 
     if (thread->exec_mode != EXEC_MODE_RUNNING && thread->runqueue != NULL) {
         LIST_REMOVE(*thread->runqueue, runqueue_entry, thread);
+        thread->runqueue = NULL;
     }
 }
 

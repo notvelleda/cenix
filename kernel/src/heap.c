@@ -352,6 +352,9 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
 #endif
                 update_capability_resource(&header->update_ref.capability, dest_ptr);
                 heap_set_update_capability(dest_ptr, &header->update_ref.capability);
+            } else if ((header->flags & FLAG_UPDATE_FUNCTION) != 0) {
+                header->update_ref.function(dest_ptr);
+                heap_set_update_function(dest_ptr, header->update_ref.function);
             } else if (header->update_ref.absolute_ptr != NULL) {
 #ifdef DEBUG_HEAP
                 print_spaces();
@@ -454,6 +457,8 @@ void heap_list_blocks(struct heap *heap) {
                 header->update_ref.capability.address,
                 header->update_ref.capability.depth
             );
+        } else if ((header->flags & FLAG_UPDATE_FUNCTION) != 0) {
+            printk(", function 0x%x\n", header->update_ref.function);
         } else if (header->update_ref.absolute_ptr != NULL) {
             printk(", 0x%x\n", header->update_ref.absolute_ptr);
         } else {

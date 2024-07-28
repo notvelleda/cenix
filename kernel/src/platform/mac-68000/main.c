@@ -8,6 +8,7 @@
 #include "platform/mac-68000/hw.h"
 #include "scheduler.h"
 #include "sys/kernel.h"
+#include "main.h"
 
 #ifdef DEBUG
 #include "font.h"
@@ -48,14 +49,14 @@ static uint8_t read_addr(uint8_t value) {
 extern void trap_entry(void);
 extern void bad_interrupt_entry(void);
 
+void *new_stack_pointer;
+
 void _start(void) {
     struct init_block init_block;
 
 #ifdef DEBUG
     memset(SCRN_BASE, 0xff, SCRN_LEN);
 #endif
-
-    printk("Hellorld!\n");
 
     // populate interrupt vector table
     void **vector_table = (void **) 0;
@@ -88,11 +89,12 @@ void _start(void) {
 
     // now that the heap is set up, allocate a region of memory for the stack so that nothing gets trampled when existing regions are locked
     void *stack_region = heap_alloc(&the_heap, STACK_SIZE);
-    void *new_stack_pointer = (uint8_t *) stack_region + STACK_SIZE;
+    new_stack_pointer = (uint8_t *) stack_region + STACK_SIZE;
+    printk("moved stack to 0x%x (base 0x%x)\n", new_stack_pointer, stack_region);
 
     __asm__ __volatile__ (
-        "movl %0, %%sp\n\t"
-        "jsr after_sp_set"
+        "movel %0, %%sp\n\t"
+        "jmp after_sp_set"
         :: "r" (new_stack_pointer)
     );
 }
@@ -115,142 +117,13 @@ void after_sp_set(void) {
         break;
     }
 
-/*#ifdef DEBUG
-    heap_list_blocks(&the_heap);
-#endif*/
-
-    printk(
-        "total memory: %d KiB, used memory: %d KiB, free memory: %d KiB\n",
-        the_heap.total_memory / 1024,
-        the_heap.used_memory / 1024,
-        (the_heap.total_memory - the_heap.used_memory) / 1024
-    );
-
-    /*void *ptr1 = heap_alloc(&the_heap, 1024);
-    if (ptr1 == NULL) {
-        printk("allocation failed\n");
-        while (1);
-    }
-    heap_list_blocks(&the_heap);
-    void *ptr2 = heap_alloc(&the_heap, 1024);
-    if (ptr2 == NULL) {
-        printk("allocation failed\n");
-        while (1);
-    }
-    heap_list_blocks(&the_heap);
-    void *ptr3 = heap_alloc(&the_heap, 1024);
-    if (ptr3 == NULL) {
-        printk("allocation failed\n");
-        while (1);
-    }
-    heap_list_blocks(&the_heap);
-    heap_free(&the_heap, ptr2);
-    printk("freed memory\n");
-    heap_list_blocks(&the_heap);
-    void *ptr4 = heap_alloc(&the_heap, 1016);
-    heap_list_blocks(&the_heap);
-    heap_free(&the_heap, ptr1);
-    printk("freed memory\n");
-    heap_list_blocks(&the_heap);
-    heap_free(&the_heap, ptr4);
-    printk("freed memory\n");
-    heap_list_blocks(&the_heap);
-    heap_free(&the_heap, ptr3);
-    printk("freed memory\n");
-    heap_list_blocks(&the_heap);*/
-
     /*uint16_t trap = 0xa893;
     uint32_t table_entry = *(TOOL_DISP_TABLE + (trap & 0x1ff));
     __asm__ __volatile__ ("jsr (%0)" :: "a" (table_entry));*/
 
-    printk("sizeof(struct capability) is %d\n", sizeof(struct capability));
-    printk("sizeof(struct heap_header) is %d\n", sizeof(struct heap_header));
+    main_init(&the_heap);
 
-    init_threads();
-    init_scheduler();
-    init_root_capability(&the_heap);
-
-    struct alloc_args stack_alloc_args = {
-        .type = TYPE_UNTYPED,
-        .size = STACK_SIZE,
-        .address = 1,
-        .depth = ROOT_CAP_SLOT_BITS
-    };
-    invoke_capability(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &stack_alloc_args, false);
-
-    void *stack_base = (void *) invoke_capability(1, ROOT_CAP_SLOT_BITS, UNTYPED_LOCK, 0, false);
-    size_t stack_pointer = (size_t) stack_base + STACK_SIZE;
-    printk("stack_base is 0x%x, stack_pointer is 0x%x\n", stack_base, stack_pointer);
-
-    struct alloc_args thread_alloc_args = {
-        .type = TYPE_THREAD,
-        .size = 0,
-        .address = 2,
-        .depth = ROOT_CAP_SLOT_BITS
-    };
-    invoke_capability(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &thread_alloc_args, false);
-
-    struct thread_registers registers;
-
-    memset((uint8_t *) &registers, 0, sizeof(struct thread_registers));
-    set_program_counter(&registers, (size_t) &test_thread);
-    set_stack_pointer(&registers, stack_pointer);
-
-    struct read_write_register_args register_write_args = {
-        &registers,
-        sizeof(struct thread_registers)
-    };
-
-    invoke_capability(2, ROOT_CAP_SLOT_BITS, THREAD_WRITE_REGISTERS, (size_t) &register_write_args, false);
-
-    struct alloc_args node_alloc_args = {
-        .type = TYPE_NODE,
-        .size = ROOT_CAP_SLOT_BITS,
-        .address = 3,
-        .depth = ROOT_CAP_SLOT_BITS
-    };
-    invoke_capability(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args, false);
-
-    struct node_copy_args alloc_copy_args = {
-        .source_address = 0,
-        .source_depth = ROOT_CAP_SLOT_BITS,
-        .dest_slot = 0,
-        .access_rights = -1,
-        .badge = 0,
-        .should_set_badge = 0
-    };
-    invoke_capability(3, ROOT_CAP_SLOT_BITS, NODE_COPY, (size_t) &alloc_copy_args, false);
-
-#if 0
-    // test to make sure this gets added to the same derivation list as the first copy
-    printk("copying again...\n");
-    alloc_copy_args.dest_slot = (1 << ROOT_CAP_SLOT_BITS) - 1;
-    invoke_capability(3, ROOT_CAP_SLOT_BITS, NODE_COPY, (size_t) &alloc_copy_args, false);
-
-    // test to make sure this gets deleted properly
-    printk("deleting...\n");
-    invoke_capability(3, ROOT_CAP_SLOT_BITS, NODE_DELETE, alloc_copy_args.dest_slot, false);
-
-    printk("original capability:\n");
-    struct look_up_result result;
-    look_up_capability_relative(0, ROOT_CAP_SLOT_BITS, false, &result);
-    print_capability_lists(result.slot);
-    unlock_looked_up_capability(&result);
-
-    printk("first copy:\n");
-    look_up_capability_relative(3, ROOT_CAP_SLOT_BITS * 2, false, &result);
-    print_capability_lists(result.slot);
-    unlock_looked_up_capability(&result);
-#endif
-
-    struct set_root_node_args set_root_node_args = {3, ROOT_CAP_SLOT_BITS};
-    invoke_capability(2, ROOT_CAP_SLOT_BITS, THREAD_SET_ROOT_NODE, (size_t) &set_root_node_args, false);
-
-    invoke_capability(2, ROOT_CAP_SLOT_BITS, THREAD_RESUME, 0, false);
-
-#if 1
-    heap_list_blocks(&the_heap);
-#endif
+    // TODO: move all this generic 68000 stuff into the arch layer
 
     // hop into user mode!
     struct thread_registers new_registers;
@@ -267,196 +140,15 @@ void after_sp_set(void) {
 
     // jump into user mode!
     __asm__ __volatile__ (
-        "movel %0, -(%%sp)\n\t"
-        "movew %1, -(%%sp)\n\t"
-        "moveml (%2), %%d0-%%d7/%%a0-%%a6\n\t"
+        "movel %0, %%sp\n\t"
+        "movel %1, -(%%sp)\n\t"
+        "movew %2, -(%%sp)\n\t"
+        "moveml (%3)+, %%d0-%%d7/%%a0-%%a6\n\t"
         "rte"
-        :: "r" (new_registers.program_counter), "r" (status_register), "r" (&new_registers.address)
+        :: "r" (new_stack_pointer), "r" (new_registers.program_counter), "r" (status_register), "r" (&new_registers.data)
     );
 
     while (1);
-}
-
-void test_thread_3(void) {
-    while (1) {
-        printk("thread 3!\n");
-        syscall_yield();
-        for (int j = 0; j < 524288; j ++);
-        syscall_yield();
-    }
-}
-
-void test_thread_2(void) {
-    printk("thread 2 started\n");
-
-    /*struct alloc_args alloc_args = {
-        .type = TYPE_UNTYPED,
-        .size = STACK_SIZE,
-        .address = 1,
-        .depth = ROOT_CAP_SLOT_BITS
-    };
-    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
-
-    void *stack_base = (void *) syscall_invoke(1, ROOT_CAP_SLOT_BITS, UNTYPED_LOCK, 0);
-    size_t stack_pointer = (size_t) stack_base + STACK_SIZE;
-    printk("thread 3 stack_base is 0x%x, stack_pointer is 0x%x\n", stack_base, stack_pointer);
-
-    struct alloc_args thread_alloc_args = {
-        .type = TYPE_THREAD,
-        .size = 0,
-        .address = 2,
-        .depth = ROOT_CAP_SLOT_BITS
-    };
-    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &thread_alloc_args);
-
-    struct thread_registers registers;
-
-    memset((uint8_t *) &registers, 0, sizeof(struct thread_registers));
-    set_program_counter(&registers, (size_t) &test_thread_3);
-    set_stack_pointer(&registers, stack_pointer);
-
-    struct read_write_register_args register_write_args = {
-        .address = &registers,
-        .size = sizeof(struct thread_registers)
-    };
-
-    syscall_invoke(2, ROOT_CAP_SLOT_BITS, THREAD_WRITE_REGISTERS, (size_t) &register_write_args);
-    syscall_invoke(2, ROOT_CAP_SLOT_BITS, THREAD_RESUME, 0);
-
-    while (1) {
-        printk("thread 2!\n");
-        syscall_yield();
-        for (int j = 0; j < 524288; j ++);
-        syscall_yield();
-    }*/
-
-    struct ipc_message receive = {
-        .capabilities = {{0, 0}, {0, 0}, {0, 0}, {0, 0}}
-    };
-    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ENDPOINT_RECEIVE, (size_t) &receive);
-    printk("thread 2: received message \"%s\"\n", &receive.buffer);
-
-    struct ipc_message send = {
-        .buffer = {'U', 'w', 'U', 0},
-        .capabilities = {{0, 0}, {0, 0}, {0, 0}, {0, 0}}
-    };
-    printk("thread 2: sending message \"%s\"\n", &send.buffer);
-    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ENDPOINT_SEND, (size_t) &send);
-
-    while (1) {
-        syscall_yield();
-    }
-}
-
-void test_thread(void) {
-    printk("thread 1 started\n");
-
-    //heap_list_blocks(&the_heap);
-
-    struct alloc_args alloc_args = {
-        .type = TYPE_UNTYPED,
-        .size = STACK_SIZE,
-        .address = 1,
-        .depth = ROOT_CAP_SLOT_BITS
-    };
-    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
-
-    void *stack_base = (void *) syscall_invoke(1, ROOT_CAP_SLOT_BITS, UNTYPED_LOCK, 0);
-    size_t stack_pointer = (size_t) stack_base + STACK_SIZE;
-    printk("thread 2 stack_base is 0x%x, stack_pointer is 0x%x\n", stack_base, stack_pointer);
-
-    struct alloc_args thread_alloc_args = {
-        .type = TYPE_THREAD,
-        .size = 0,
-        .address = 2,
-        .depth = ROOT_CAP_SLOT_BITS
-    };
-    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &thread_alloc_args);
-
-    struct thread_registers registers;
-
-    memset((uint8_t *) &registers, 0, sizeof(struct thread_registers));
-    set_program_counter(&registers, (size_t) &test_thread_2);
-    set_stack_pointer(&registers, stack_pointer);
-
-    struct read_write_register_args register_write_args = {
-        .address = &registers,
-        .size = sizeof(struct thread_registers)
-    };
-    syscall_invoke(2, ROOT_CAP_SLOT_BITS, THREAD_WRITE_REGISTERS, (size_t) &register_write_args);
-
-    struct alloc_args endpoint_alloc_args = {
-        .type = TYPE_ENDPOINT,
-        .size = 0,
-        .address = 3,
-        .depth = ROOT_CAP_SLOT_BITS,
-    };
-    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
-
-    struct alloc_args node_alloc_args = {
-        .type = TYPE_NODE,
-        .size = ROOT_CAP_SLOT_BITS,
-        .address = 4,
-        .depth = ROOT_CAP_SLOT_BITS,
-    };
-    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args);
-
-    struct node_copy_args node_copy_args = {
-        .source_address = endpoint_alloc_args.address,
-        .source_depth = endpoint_alloc_args.depth,
-        .dest_slot = 0,
-        .access_rights = -1,
-        .badge = 0,
-        .should_set_badge = 0
-    };
-    syscall_invoke(node_alloc_args.address, node_alloc_args.depth, NODE_COPY, (size_t) &node_copy_args);
-
-    struct set_root_node_args set_root_node_args = {node_alloc_args.address, node_alloc_args.depth};
-    syscall_invoke(2, ROOT_CAP_SLOT_BITS, THREAD_SET_ROOT_NODE, (size_t) &set_root_node_args);
-
-    syscall_invoke(2, ROOT_CAP_SLOT_BITS, THREAD_RESUME, 0);
-
-    struct ipc_message send = {
-        .buffer = {'H', 'e', 'l', 'l', 'o', 'r', 'l', 'd', '!', 0},
-        .capabilities = {{0, 0}, {0, 0}, {0, 0}, {0, 0}}
-    };
-    printk("thread 1: sending message \"%s\"\n", &send.buffer);
-    syscall_invoke(endpoint_alloc_args.address, endpoint_alloc_args.depth, ENDPOINT_SEND, (size_t) &send);
-
-    struct ipc_message receive = {
-        .capabilities = {{0, 0}, {0, 0}, {0, 0}, {0, 0}}
-    };
-    syscall_invoke(endpoint_alloc_args.address, endpoint_alloc_args.depth, ENDPOINT_RECEIVE, (size_t) &receive);
-    printk("thread 1: received message \"%s\"\n", &receive.buffer);
-
-    /*struct alloc_args test_alloc_args = {
-        .type = TYPE_UNTYPED,
-        .size = 4,
-        .address = 5,
-        .depth = ROOT_CAP_SLOT_BITS,
-    };
-    printk("args are at 0x%x\n", &test_alloc_args);
-    syscall_invoke(0, ROOT_CAP_SLOT_BITS, ADDRESS_SPACE_ALLOC, (size_t) &test_alloc_args);
-
-    char *ptr = (char *) syscall_invoke(5, ROOT_CAP_SLOT_BITS, UNTYPED_LOCK, 0);
-    ptr[0] = ':';
-    ptr[1] = '3';
-    ptr[2] = 'c';
-    ptr[3] = 0;
-
-    printk("thread 1: sending \"%s\" in capability\n", ptr);
-    syscall_invoke(5, ROOT_CAP_SLOT_BITS, UNTYPED_UNLOCK, 0);*/
-
-    /*while (1) {
-        printk("thread 1!\n");
-        syscall_yield();
-        for (int j = 0; j < 524288; j ++);
-        syscall_yield();
-    }*/
-
-    while (1) {
-        syscall_yield();
-    }
 }
 
 static void log_registers(const struct thread_registers *registers) {
@@ -507,8 +199,7 @@ void trap_handler(struct thread_registers *registers) {
             (size_t) registers->data[1],
             (size_t) registers->data[2],
             (size_t) registers->data[3],
-            (size_t) registers->address[0],
-            true
+            (size_t) registers->address[0]
         );
         break;
     }

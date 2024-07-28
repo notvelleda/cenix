@@ -43,7 +43,7 @@ void init_threads(void) {
     used_thread_ids[0] = 1; // id 0 is reserved for kernel resources
 }
 
-static size_t read_registers(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+static size_t read_registers(size_t address, size_t depth, struct capability *slot, size_t argument) {
     struct read_write_register_args *args = (struct read_write_register_args *) argument;
 
     bool should_unlock = heap_lock(slot->resource);
@@ -59,7 +59,7 @@ static size_t read_registers(size_t address, size_t depth, struct capability *sl
     return 1;
 }
 
-static size_t write_registers(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+static size_t write_registers(size_t address, size_t depth, struct capability *slot, size_t argument) {
     const struct read_write_register_args *args = (struct read_write_register_args *) argument;
 
     bool should_unlock = heap_lock(slot->resource);
@@ -75,7 +75,7 @@ static size_t write_registers(size_t address, size_t depth, struct capability *s
     return 1;
 }
 
-static size_t resume(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+static size_t resume(size_t address, size_t depth, struct capability *slot, size_t argument) {
     bool should_unlock = heap_lock(slot->resource);
 
     resume_thread((struct thread_capability *) slot->resource, EXEC_MODE_SUSPENDED);
@@ -87,7 +87,7 @@ static size_t resume(size_t address, size_t depth, struct capability *slot, size
     return 1;
 }
 
-static size_t suspend(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+static size_t suspend(size_t address, size_t depth, struct capability *slot, size_t argument) {
     bool should_unlock = heap_lock(slot->resource);
 
     suspend_thread((struct thread_capability *) slot->resource, EXEC_MODE_SUSPENDED);
@@ -99,14 +99,14 @@ static size_t suspend(size_t address, size_t depth, struct capability *slot, siz
     return 1;
 }
 
-static size_t set_root_node(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+static size_t set_root_node(size_t address, size_t depth, struct capability *slot, size_t argument) {
     //bool should_unlock = heap_lock(slot->resource);
 
     struct thread_capability *thread = (struct thread_capability *) slot->resource;
     const struct set_root_node_args *args = (struct set_root_node_args *) argument;
     struct look_up_result result;
 
-    if (!look_up_capability_relative(args->address, args->depth, from_userland, &result)) {
+    if (!look_up_capability_relative(args->address, args->depth, &result)) {
         /*if (should_unlock) {
             heap_unlock(slot->resource);
         }*/

@@ -37,9 +37,11 @@
 *.x86_64
 *.hex
 kernel/kernel
+init/init
 
 # Debug files
 *.dSYM/
 *.su
 *.idb
 *.pdb
+*.gdb

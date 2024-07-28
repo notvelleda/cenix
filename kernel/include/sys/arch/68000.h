@@ -30,3 +30,15 @@ struct thread_registers {
     uint16_t status_register; // most significant byte of this is discarded
     uint32_t program_counter;
 };
+
+static inline void set_program_counter(struct thread_registers *registers, size_t program_counter) {
+    registers->program_counter = (uint32_t) program_counter;
+}
+
+static inline void set_stack_pointer(struct thread_registers *registers, size_t stack_pointer) {
+    registers->stack_pointer = (uint32_t) stack_pointer;
+}
+
+static inline void set_got_pointer(struct thread_registers *registers, size_t got_pointer) {
+    registers->address[5] = (uint32_t) got_pointer;
+}

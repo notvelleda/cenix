@@ -59,8 +59,6 @@ struct capability {
     struct heap *heap;
 };
 
-extern struct capability kernel_root_capability;
-
 /// updates any references to a recently moved capability slot
 void update_capability_references(struct capability *capability);
 
@@ -87,10 +85,10 @@ struct look_up_result {
 /// on success, true is returned. on failure, false is returned
 bool look_up_capability(struct capability *root, size_t address, size_t depth, struct look_up_result *result);
 
-/// \brief looks up a capability relative to either the kernel root capability or the current thread's root capability
+/// \brief looks up a capability relative to the current thread's root capability
 ///
 /// on success, true is returned. on failure, false is returned
-bool look_up_capability_relative(size_t address, size_t depth, bool from_userland, struct look_up_result *result);
+bool look_up_capability_relative(size_t address, size_t depth, struct look_up_result *result);
 
 /// \brief looks up a capability relative to a given thread's root capability node
 ///
@@ -100,6 +98,9 @@ bool look_up_capability_absolute(const struct absolute_capability_address *addre
 // TODO: find a better name for this
 void unlock_looked_up_capability(struct look_up_result *result);
 
+/// populates a capability slot at the given address and search depth with the given heap-managed resource and invocation handlers
+bool populate_capability_slot(struct heap *heap, size_t address, size_t depth, void *resource, struct invocation_handlers *handlers, uint8_t flags);
+
 /// the maximum number of invocation handlers that a capability can have
 #define MAX_HANDLERS 5
 
@@ -107,7 +108,7 @@ struct invocation_handlers {
     /// how many invocation handlers in this struct are valid
     size_t num_handlers;
     /// the list of invocation handlers, stored as function pointers to handler functions
-    size_t (*handlers[MAX_HANDLERS])(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland);
+    size_t (*handlers[MAX_HANDLERS])(size_t address, size_t depth, struct capability *slot, size_t argument);
     /// called when the resource associated with a capability has been moved
     void (*on_moved)(void *resource);
     /// \brief called when the resource associated with a capability is about to be freed
@@ -131,25 +132,33 @@ struct capability_node_header {
     uint8_t nested_nodes;
 };
 
-/// gets how deep the tree of nodes is starting from the given capability node
-uint8_t get_nested_nodes_depth(const struct capability *node);
+/// \brief allocates memory for a capability node and initializes it
+///
+/// the size of this capability node is determined by slot_bits, where 2 raised to the power of slot_bits is the number of slots in this node.s
+/// if successful, a pointer to the allocated memory is returned
+void *alloc_node(struct heap *heap, size_t slot_bits);
 
 /// invocation handlers for capability nodes
 extern struct invocation_handlers node_handlers;
 
-/// invocation handlers for untyped capabilities
-extern struct invocation_handlers untyped_handlers;
+/// gets how deep the tree of nodes is starting from the given capability node
+uint8_t get_nested_nodes_depth(const struct capability *node);
+
+struct address_space_capability {
+    struct heap *heap_pointer; // pointer to a statically allocated heap object
+    // TODO: support address spaces other than the one belonging to the kernel
+};
 
 /// invocation handlers for address space capabilities
 extern struct invocation_handlers address_space_handlers;
 
+/// invocation handlers for untyped capabilities
+extern struct invocation_handlers untyped_handlers;
+
 /// in-kernel equivalent of syscall_invoke()
-size_t invoke_capability(size_t address, size_t depth, size_t handler_number, size_t argument, bool from_userland);
+size_t invoke_capability(size_t address, size_t depth, size_t handler_number, size_t argument);
 
 #include "heap.h"
-
-/// initializes the kernel's root capability
-void init_root_capability(struct heap *heap);
 
 /// the value of size_bits for the kernel's root capability node
 #define ROOT_CAP_SLOT_BITS 4

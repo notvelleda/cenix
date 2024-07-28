@@ -1,4 +1,5 @@
 ENTRY(_start)
+OUTPUT_FORMAT(elf32-m68k)
 
 MEMORY {
     ram : ORIGIN = 0x2000, LENGTH = 0x400000 - 0x2000

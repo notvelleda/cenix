@@ -1,52 +1,27 @@
-CROSS ?= m68k-unknown-elf-
-CC ?= $(CROSS)cc
-LD ?= $(CROSS)ld
+ADDITIONAL_SOURCES != [ "$(DEBUG)" = y ] && echo "printf/printf.c" || echo ""
 
-ARCH_68000 != [ -n "`echo $(PLATFORM) | grep -e '.*-68000'`" ] && echo "68000" || echo ""
-ARCH = $(ARCH_68000)
+BINARY = kernel
 
-DEBUG_FLAG != [ "$(DEBUG)" = y ] && echo "-DDEBUG" || echo ""
-
-CFLAGS += -O2 -Isrc -Iinclude -Iprintf -nostdlib -fno-builtin -ffreestanding -fno-stack-protector -static -Wall -DPLATFORM="$(PLATFORM)" $(DEBUG_FLAG) -DARCH_$(ARCH)
-
-ARCH_PATH = src/arch/$(ARCH)
-PLATFORM_PATH = src/platform/$(PLATFORM)
-
-# architecture-specific cc flags
-68000_CFLAGS != [ -n "`echo $(PLATFORM) | grep -e '.*-68000'`" ] && echo "-m68000 -DBITS=32" || echo ""
-CFLAGS += $(68000_CFLAGS)
+.include <../common-vars.mk>
 
 # platform-specific ld flags
 # these are used for things like specifying a linker script to be used if something other than the default is required
 MAC_LDFLAGS != [ "$(PLATFORM)" = mac-68000 ] && echo "-T$(PLATFORM_PATH)/kernel.ld" || echo ""
 LDFLAGS += $(MAC_LDFLAGS)
 
-ARCH_SOURCES != find $(ARCH_PATH) -name "*.c" -o -name "*.S"
-PLATFORM_SOURCES != find $(PLATFORM_PATH) -name "*.c" -o -name "*.S"
-COMMON_SOURCES != find src -maxdepth 1 -name "*.c"
+CWD != pwd
 
-PRINTF_SOURCES != [ "$(DEBUG)" = y ] && echo "printf/printf.c" || echo ""
+INIT_DIR=../init
+INIT_FILE=init
+INIT_OBJECT=$(CWD)/src/init.o
 
-SOURCE_FILES = $(COMMON_SOURCES) $(PLATFORM_SOURCES) $(ARCH_SOURCES) $(PRINTF_SOURCES)
-C_OBJECTS = $(SOURCE_FILES:.c=.o)
-OBJECTS = $(C_OBJECTS:.S=.o)
+OBJECTS += $(INIT_OBJECT)
 
-BINARY = kernel
+.include <../common-targets.mk>
 
-all: $(BINARY)
+# the binary format for the object that's converted from the init binary
+BINARY_68000 != [ "$(ARCH)" = 68000 ] && echo "elf32-m68k" || echo ""
+BINARY_FORMAT = $(BINARY_68000)
 
-.PHONY: clean
-
-$(BINARY): $(OBJECTS)
-	$(CC) $(LDFLAGS) $(OBJECTS) -o $(BINARY)
-
-.c.o:
-	$(CC) $(CFLAGS) -o $@ -c $<
-
-.S.o:
-	$(CC) $(CFLAGS) -o $@ -c $<
-
-clean:
-	-find . -name "*.o" | xargs -n1 rm
-	-rm $(BINARY)
-	-rm .depend
+$(INIT_OBJECT): $(INIT_DIR)/$(INIT_FILE)
+	cd $(INIT_DIR) && $(CROSS)objcopy -I binary -O $(BINARY_FORMAT) $(INIT_FILE) $(INIT_OBJECT)

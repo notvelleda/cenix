@@ -65,7 +65,7 @@ static void transfer_capabilities(
     }
 }
 
-static size_t endpoint_send(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+static size_t endpoint_send(size_t address, size_t depth, struct capability *slot, size_t argument) {
     struct ipc_message *message = (struct ipc_message *) argument;
     struct endpoint_capability *endpoint = (struct endpoint_capability *) slot->resource;
 
@@ -99,7 +99,7 @@ static size_t endpoint_send(size_t address, size_t depth, struct capability *slo
     return 1;
 }
 
-static size_t endpoint_receive(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+static size_t endpoint_receive(size_t address, size_t depth, struct capability *slot, size_t argument) {
     struct ipc_message *message = (struct ipc_message *) argument;
     struct endpoint_capability *endpoint = (struct endpoint_capability *) slot->resource;
 

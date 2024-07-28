@@ -24,6 +24,7 @@ struct heap_header {
     /// the address or handle that should be updated if the region this header controls is moved
     union {
         void **absolute_ptr;
+        void (*function)(void *);
         struct absolute_capability_address capability;
     } update_ref;
 
@@ -38,6 +39,7 @@ struct heap_header {
 #define KIND_MOVABLE 2
 // old kind goes here (bits 3 and 4, flag values 4 and 8)
 #define FLAG_CAPABILITY_RESOURCE 16
+#define FLAG_UPDATE_FUNCTION 32
 
 #define KIND_MASK 3
 #define GET_KIND(header) (header->flags & KIND_MASK)
@@ -106,23 +108,35 @@ void heap_list_blocks(struct heap *heap);
 #endif
 
 /// sets the absolute address that should be updated if the given memory region is moved.
-/// this update address will replace any addresses or handles set previously
+/// this update address will replace any addresses, handles, or functions set previously
 static inline void heap_set_update_absolute(void *ptr, void **absolute_ptr) {
     struct heap_header *header = (struct heap_header *) ((uint8_t *) ptr - sizeof(struct heap_header));
 
     // TODO: this section is probably critical, should interrupts be disabled?
-    header->flags &= ~FLAG_CAPABILITY_RESOURCE;
+    header->flags &= ~(FLAG_CAPABILITY_RESOURCE | FLAG_UPDATE_FUNCTION);
     header->update_ref.absolute_ptr = absolute_ptr;
+}
+
+/// sets the function that should be called if the given memory region is moved.
+/// this update function will replace any addresses, handles, or functions set previously
+static inline void heap_set_update_function(void *ptr, void (*function)(void *)) {
+    struct heap_header *header = (struct heap_header *) ((uint8_t *) ptr - sizeof(struct heap_header));
+
+    // TODO: this section is probably critical, should interrupts be disabled?
+    header->flags &= ~FLAG_CAPABILITY_RESOURCE;
+    header->flags |= FLAG_UPDATE_FUNCTION;
+    header->update_ref.function = function;
 }
 
 #include "capabilities.h"
 
 /// sets the address in capability space of the capability that should be updated if the given memory region is moved.
-/// this capability address will replace any absolute addresses or capability addresses set previously
+/// this capability address will replace any absolute addresses, capability addresses, or functions set previously
 static inline void heap_set_update_capability(void *ptr, const struct absolute_capability_address *address) {
     struct heap_header *header = (struct heap_header *) ((uint8_t *) ptr - sizeof(struct heap_header));
 
     // TODO: this section is probably critical, should interrupts be disabled?
+    header->flags &= ~FLAG_UPDATE_FUNCTION;
     header->flags |= FLAG_CAPABILITY_RESOURCE;
     header->update_ref.capability = *address;
 }

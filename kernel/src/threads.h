@@ -55,6 +55,7 @@ struct thread_capability {
 extern struct invocation_handlers thread_handlers;
 
 void init_threads(void);
+void on_thread_moved(void *resource);
 bool look_up_thread_by_id(uint16_t thread_id, uint8_t bucket_number, struct thread_capability **thread);
 
 #include "heap.h"

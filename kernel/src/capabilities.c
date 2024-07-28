@@ -7,8 +7,6 @@
 
 #undef DEBUG_CAPABILITIES
 
-struct capability kernel_root_capability;
-
 void update_capability_references(struct capability *capability) {
     LIST_UPDATE_ADDRESS_NO_CONTAINER(struct capability, resource_list, capability);
     LIST_UPDATE_ADDRESS_NO_CONTAINER(struct capability, derivation_list, capability);
@@ -158,7 +156,7 @@ void update_capability_addresses(struct capability *slot, const struct absolute_
 
 /* ==== capability node ==== */
 
-static size_t node_copy(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+static size_t node_copy(size_t address, size_t depth, struct capability *slot, size_t argument) {
     const struct node_copy_args *args = (struct node_copy_args *) argument;
 
     // resource lock/unlock is omitted here since no allocations take place
@@ -177,7 +175,7 @@ static size_t node_copy(size_t address, size_t depth, struct capability *slot, s
     }
 
     struct look_up_result result;
-    if (!look_up_capability_relative(args->source_address, args->source_depth, from_userland, &result)) {
+    if (!look_up_capability_relative(args->source_address, args->source_depth, &result)) {
         return 0;
     }
 
@@ -247,7 +245,7 @@ static size_t node_copy(size_t address, size_t depth, struct capability *slot, s
     return 1;
 }
 
-static size_t node_move(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+static size_t node_move(size_t address, size_t depth, struct capability *slot, size_t argument) {
     const struct node_copy_args *args = (struct node_copy_args *) argument;
 
     // resource lock/unlock is omitted here since no allocations take place
@@ -266,7 +264,7 @@ static size_t node_move(size_t address, size_t depth, struct capability *slot, s
     }
 
     struct look_up_result result;
-    if (!look_up_capability_relative(args->source_address, args->source_depth, from_userland, &result)) {
+    if (!look_up_capability_relative(args->source_address, args->source_depth, &result)) {
         return 0;
     }
 
@@ -286,7 +284,7 @@ static size_t node_move(size_t address, size_t depth, struct capability *slot, s
     return 1;
 }
 
-static size_t node_delete(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+static size_t node_delete(size_t address, size_t depth, struct capability *slot, size_t argument) {
     // resource lock/unlock is omitted here since no allocations take place
     struct capability_node_header *header = (struct capability_node_header *) slot->resource;
 
@@ -308,7 +306,7 @@ static size_t node_delete(size_t address, size_t depth, struct capability *slot,
     return 1;
 }
 
-static size_t node_revoke(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+static size_t node_revoke(size_t address, size_t depth, struct capability *slot, size_t argument) {
     // resource lock/unlock is omitted here since no allocations take place
     struct capability_node_header *header = (struct capability_node_header *) slot->resource;
 
@@ -378,11 +376,7 @@ struct invocation_handlers node_handlers = {
     .destructor = node_destructor
 };
 
-/// \brief allocates memory for a capability node and initializes it
-///
-/// the size of this capability node is determined by slot_bits, where 2 raised to the power of slot_bits is the number of slots in this node.s
-/// if successful, a pointer to the allocated memory is returned
-static void *alloc_node(struct heap *heap, size_t slot_bits) {
+void *alloc_node(struct heap *heap, size_t slot_bits) {
     size_t total_slots = 1 << slot_bits;
 
     size_t slots_start = sizeof(struct capability_node_header);
@@ -455,12 +449,9 @@ void unlock_looked_up_capability(struct look_up_result *result) {
     }
 }
 
-bool look_up_capability_relative(size_t address, size_t depth, bool from_userland, struct look_up_result *result) {
-    if (!from_userland) {
-        return look_up_capability(&kernel_root_capability, address, depth, result);
-    }
-
+bool look_up_capability_relative(size_t address, size_t depth, struct look_up_result *result) {
     if (scheduler_state.current_thread == NULL) {
+        printk("look_up_capability_relative: no current thread!\n");
         return false;
     }
 
@@ -475,10 +466,6 @@ bool look_up_capability_relative(size_t address, size_t depth, bool from_userlan
 }
 
 bool look_up_capability_absolute(const struct absolute_capability_address *address, struct look_up_result *result) {
-    if (address->thread_id == 0) {
-        return look_up_capability(&kernel_root_capability, address->address, address->depth, result);
-    }
-
     struct thread_capability *thread = NULL;
     bool should_unlock = look_up_thread_by_id(address->thread_id, address->bucket_number, &thread);
 
@@ -496,19 +483,27 @@ bool look_up_capability_absolute(const struct absolute_capability_address *addre
     return return_value;
 }
 
-/// populates a capability slot at the given address and search depth with the given heap-managed resource and invocation handlers
-static bool populate_capability_slot(struct heap *heap, size_t address, size_t depth, bool from_userland, void *resource, struct invocation_handlers *handlers) {
+bool populate_capability_slot(struct heap *heap, size_t address, size_t depth, void *resource, struct invocation_handlers *handlers, uint8_t flags) {
     struct look_up_result result;
-    if (!look_up_capability_relative(address, depth, from_userland, &result)) {
+
+    if (!look_up_capability_relative(address, depth, &result)) {
         printk("populate_capability_slot: failed to look up slot at 0x%x (%d bits)\n", address, depth);
-        heap_free(heap, resource);
+
+        if ((flags & CAP_FLAG_IS_HEAP_MANAGED) != 0) {
+            heap_free(heap, resource);
+        }
+
         return false;
     }
 
     // make sure destination slot is empty
     if (result.slot->handlers != NULL) {
         printk("populate_capability_slot: slot at 0x%x (%d bits) isn't empty\n", address, depth);
-        heap_free(heap, resource);
+
+        if ((flags & CAP_FLAG_IS_HEAP_MANAGED) != 0) {
+            heap_free(heap, resource);
+        }
+
         unlock_looked_up_capability(&result);
         return false;
     }
@@ -519,7 +514,11 @@ static bool populate_capability_slot(struct heap *heap, size_t address, size_t d
         // make sure this new node isn't too many layers of nesting deep
         if (container->nested_nodes >= MAX_NESTED_NODES) {
             printk("populate_capability_slot: too many levels of nesting\n");
-            heap_free(heap, resource);
+
+            if ((flags & CAP_FLAG_IS_HEAP_MANAGED) != 0) {
+                heap_free(heap, resource);
+            }
+
             unlock_looked_up_capability(&result);
             return false;
         }
@@ -532,26 +531,25 @@ static bool populate_capability_slot(struct heap *heap, size_t address, size_t d
     memset(result.slot, 0, sizeof(struct capability));
     result.slot->handlers = handlers;
     result.slot->resource = resource;
-    result.slot->flags = CAP_FLAG_IS_HEAP_MANAGED | CAP_FLAG_ORIGINAL;
+    result.slot->flags = flags | CAP_FLAG_ORIGINAL;
     result.slot->access_rights = -1; // all rights given
     LIST_INIT_NO_CONTAINER(result.slot, resource_list);
     // everything else here assumes NULL is 0
 
-    if (from_userland && scheduler_state.current_thread != NULL) {
+    if (scheduler_state.current_thread != NULL) {
         // get thread id and bucket number from current thread
         result.slot->address.thread_id = scheduler_state.current_thread->thread_id;
         result.slot->address.bucket_number = scheduler_state.current_thread->bucket_number;
-    } else {
-        // probably in the kernel, use the reserved thread id of 0 to indicate that
-        result.slot->address.thread_id = 0;
     }
 
     result.slot->address.address = address;
     result.slot->address.depth = depth;
     result.slot->heap = heap;
 
-    heap_set_update_capability(resource, &result.slot->address);
-    heap_unlock(resource);
+    if ((flags & CAP_FLAG_IS_HEAP_MANAGED) != 0) {
+        heap_set_update_capability(resource, &result.slot->address);
+        heap_unlock(resource);
+    }
 
     unlock_looked_up_capability(&result);
     return true;
@@ -590,19 +588,19 @@ uint8_t get_nested_nodes_depth(const struct capability *node) {
 
 // TODO: wrap these in a mutex
 
-static size_t untyped_lock(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+static size_t untyped_lock(size_t address, size_t depth, struct capability *slot, size_t argument) {
     if (!heap_lock(slot->resource)) {
         printk("untyped_lock: attempted to lock a memory region twice!\n");
     }
     return (size_t) slot->resource;
 }
 
-static size_t untyped_unlock(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+static size_t untyped_unlock(size_t address, size_t depth, struct capability *slot, size_t argument) {
     heap_unlock(slot->resource);
     return 0;
 }
 
-static size_t untyped_try_lock(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+static size_t untyped_try_lock(size_t address, size_t depth, struct capability *slot, size_t argument) {
     if (heap_lock(slot->resource)) {
         return (size_t) slot->resource;
     } else {
@@ -617,16 +615,11 @@ struct invocation_handlers untyped_handlers = {
 
 /* ==== address space ==== */
 
-struct address_space_capability {
-    struct heap *heap_pointer; // pointer to a statically allocated heap object
-    // TODO: support address spaces other than the one belonging to the kernel
-};
-
 #ifdef DEBUG
 const char *type_names[4] = {"untyped", "node", "thread", "endpoint"};
 #endif
 
-static size_t address_space_alloc(size_t address, size_t depth, struct capability *slot, size_t argument, bool from_userland) {
+static size_t address_space_alloc(size_t address, size_t depth, struct capability *slot, size_t argument) {
     const struct alloc_args *args = (struct alloc_args *) argument;
 
     if (args->type >= 4) {
@@ -695,7 +688,7 @@ static size_t address_space_alloc(size_t address, size_t depth, struct capabilit
     );
 #endif
 
-    return (size_t) populate_capability_slot(heap, args->address, args->depth, from_userland, resource, handlers);
+    return (size_t) populate_capability_slot(heap, args->address, args->depth, resource, handlers, CAP_FLAG_IS_HEAP_MANAGED);
 }
 
 struct invocation_handlers address_space_handlers = {
@@ -705,31 +698,22 @@ struct invocation_handlers address_space_handlers = {
 
 /* ==== misc ==== */
 
-void init_root_capability(struct heap *heap) {
-    memset(&kernel_root_capability, 0, sizeof(struct capability));
-    kernel_root_capability.handlers = &node_handlers;
-    kernel_root_capability.resource = alloc_node(heap, ROOT_CAP_SLOT_BITS);
-    kernel_root_capability.flags = CAP_FLAG_IS_HEAP_MANAGED | CAP_FLAG_ORIGINAL;
-    kernel_root_capability.access_rights = -1; // all rights given
-    LIST_INIT_NO_CONTAINER(&kernel_root_capability, resource_list);
-    kernel_root_capability.heap = heap;
-    // everything else here assumes NULL is 0
-
-    heap_set_update_capability(kernel_root_capability.resource, &kernel_root_capability.address);
-    heap_unlock(kernel_root_capability.resource);
-
-    struct address_space_capability *address_space_resource = heap_alloc(heap, sizeof(struct address_space_capability));
-    address_space_resource->heap_pointer = heap;
-    populate_capability_slot(heap, 0, ROOT_CAP_SLOT_BITS, false, address_space_resource, &address_space_handlers);
-}
-
 void update_capability_resource(const struct absolute_capability_address *address, void *new_resource_address) {
     struct look_up_result result;
 
-    if (address->thread_id == 0 && address->depth == 0) {
-        // update the kernel root capability
-        result.slot = &kernel_root_capability;
-        result.should_unlock = false;
+    if (address->address == 0 && address->depth == 0) {
+        // this capability is the root capability of a thread, look up the thread and use its root capability slot
+
+        struct thread_capability *thread;
+        result.should_unlock = look_up_thread_by_id(address->thread_id, address->bucket_number, &thread);
+        result.container = (void *) thread;
+
+        if (thread == NULL) {
+            printk("update_capability_resource: couldn't find thread 0x%x in bucket %d\n", address->thread_id, address->bucket_number);
+            return;
+        }
+
+        result.slot = &thread->root_capability;
     } else if (!look_up_capability_absolute(address, &result)) {
         printk("update_capability_resource: couldn't locate capability at 0x%x:0x%x (%d bits)\n", address->thread_id, address->address, address->depth);
         return;
@@ -752,10 +736,10 @@ void update_capability_resource(const struct absolute_capability_address *addres
     unlock_looked_up_capability(&result);
 }
 
-size_t invoke_capability(size_t address, size_t depth, size_t handler_number, size_t argument, bool from_userland) {
+size_t invoke_capability(size_t address, size_t depth, size_t handler_number, size_t argument) {
     struct look_up_result result;
 
-    if (!look_up_capability_relative(address, depth, from_userland, &result)) {
+    if (!look_up_capability_relative(address, depth, &result)) {
         printk("invoke_capability: couldn't locate capability at 0x%x (%d bits) for invocation\n", address, depth);
         return 0;
     }
@@ -772,7 +756,7 @@ size_t invoke_capability(size_t address, size_t depth, size_t handler_number, si
     printk("invoke_capability: invoking %d on 0x%d (%d bits) with argument 0x%x\n", handler_number, address, depth, argument);
 #endif
 
-    size_t return_value = handlers->handlers[handler_number](address, depth, result.slot, argument, from_userland);
+    size_t return_value = handlers->handlers[handler_number](address, depth, result.slot, argument);
     unlock_looked_up_capability(&result);
 
 #ifdef DEBUG_CAPABILITIES
