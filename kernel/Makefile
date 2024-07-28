@@ -2,6 +2,8 @@ ADDITIONAL_SOURCES != [ "$(DEBUG)" = y ] && echo "printf/printf.c" || echo ""
 
 BINARY = kernel
 
+CFLAGS += -O2
+
 .include <../common-vars.mk>
 
 # platform-specific ld flags

@@ -8,12 +8,12 @@
 bool bflt_load(struct heap *heap, void *binary_start, void *binary_end, struct thread_registers *registers) {
     size_t init_size = (size_t) binary_end - (size_t) binary_start;
 
-    printk("bflt_load: init binary is at 0x%x - 0x%x, size %d\n", binary_start, binary_end, init_size);
+    printk("bflt_load: init binary is at 0x%x to 0x%x, size %d\n", binary_start, binary_end, init_size);
 
     struct bflt_header *header = (struct bflt_header *) binary_start;
 
     if (header->magic[0] != 'b' || header->magic[1] != 'F' || header->magic[2] != 'L' || header->magic[3] != 'T') {
-        printk("bflt_load: init magic number is invalid!\n");
+        printk("bflt_load: init's magic number is invalid!\n");
         return false;
     }
 
@@ -44,6 +44,8 @@ bool bflt_load(struct heap *heap, void *binary_start, void *binary_end, struct t
         printk("bflt_load: couldn't allocate memory for init's data and/or code\n");
         return false;
     }
+
+    printk("bflt_load: init's allocated data is at 0x%x to 0x%x\n", allocation, (size_t) allocation + allocation_size);
 
     void *text_start;
     void *data_start;

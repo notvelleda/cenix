@@ -67,6 +67,7 @@ static size_t write_registers(size_t address, size_t depth, struct capability *s
     struct thread_capability *thread = (struct thread_capability *) slot->resource;
 
     memcpy(&thread->registers, args->address, args->size > sizeof(struct thread_registers) ? sizeof(struct thread_registers) : args->size);
+    sanitize_registers(&thread->registers);
 
     if (should_unlock) {
         heap_unlock(slot->resource);

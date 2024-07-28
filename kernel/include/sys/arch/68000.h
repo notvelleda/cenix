@@ -18,7 +18,7 @@ static inline size_t syscall_invoke(size_t address, size_t depth, size_t handler
     register size_t _depth asm ("d2") = depth;
     register size_t _handler_number asm ("d3") = handler_number;
     register size_t _argument asm ("a0") = argument;
-    __asm__ __volatile__ ("trap #0" : "=r" (return_value) : "r" (kind), "r" (_address), "r" (_depth), "r" (_handler_number), "r" (_argument));
+    __asm__ __volatile__ ("trap #0" : "=r" (return_value) : "r" (kind), "r" (_address), "r" (_depth), "r" (_handler_number), "r" (_argument) : "memory");
     return return_value;
 }
 

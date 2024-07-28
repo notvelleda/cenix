@@ -6,7 +6,7 @@ ARCH = $(ARCH_68000)
 
 DEBUG_FLAG != [ "$(DEBUG)" = y ] && echo "-DDEBUG" || echo ""
 
-CFLAGS += -fomit-frame-pointer -O2 -Isrc -Iinclude -Iprintf -nolibc -nostartfiles -fno-builtin -ffreestanding -fno-stack-protector -static -Wall -DPLATFORM="$(PLATFORM)" $(DEBUG_FLAG) -DARCH_$(ARCH)
+CFLAGS += -fomit-frame-pointer -Isrc -Iinclude -Iprintf -nolibc -nostartfiles -fno-builtin -ffreestanding -fno-stack-protector -static -Wall -DPLATFORM="$(PLATFORM)" $(DEBUG_FLAG) -DARCH_$(ARCH)
 LDFLAGS +=
 
 ARCH_PATH = src/arch/$(ARCH)

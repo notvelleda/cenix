@@ -19,3 +19,7 @@ static inline interrupt_status_t disable_interrupts(void) {
 static inline void restore_interrupt_status(interrupt_status_t status) {
     __asm__ __volatile__ ("movew %0, %%sr" :: "r" (status));
 }
+
+static inline void sanitize_registers(struct thread_registers *registers) {
+    registers->status_register &= 0x001f;
+}
