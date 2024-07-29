@@ -23,5 +23,15 @@
     rte
 .endm
 
-trampoline bad_interrupt_entry, exception_handler
+trampoline bad_interrupt_entry, bad_interrupt_handler
+trampoline bus_error_entry, bus_error_handler
+trampoline address_error_entry, address_error_handler
+trampoline illegal_instruction_entry, illegal_instruction_handler
+trampoline division_by_zero_entry, division_by_zero_handler
+trampoline chk_out_of_bounds_entry, chk_out_of_bounds_handler
+trampoline trapv_overflow_entry, trapv_overflow_handler
+trampoline privilege_violation_entry, privilege_violation_handler
+trampoline trace_entry, trace_handler
+trampoline unimplemented_instruction_a_entry, unimplemented_instruction_a_handler
+trampoline unimplemented_instruction_f_entry, unimplemented_instruction_f_handler
 trampoline trap_entry, trap_handler

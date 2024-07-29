@@ -115,11 +115,16 @@ bool bflt_load(struct heap *heap, void *binary_start, void *binary_end, struct t
         printk("bflt_load: fixed up %d GOT entries\n", i);
     }
 
+    size_t entry_point;
+
     if ((header->flags & BFLT_FLAG_GOTPIC) != 0) {
-        set_program_counter(registers, (size_t) binary_start + header->entry_point);
+        entry_point = (size_t) binary_start + header->entry_point;
     } else {
-        set_program_counter(registers, (size_t) allocation + header->entry_point - sizeof(struct bflt_header));
+        entry_point = (size_t) allocation + header->entry_point - sizeof(struct bflt_header);
     }
+
+    printk("bflt_load: init's entry point is 0x%x (offset %d)\n", entry_point, header->entry_point);
+    set_program_counter(registers, entry_point);
 
     // TODO: is this ok on all platforms? will ones be supported without a full descending stack?
     set_stack_pointer(registers, (size_t) allocation + allocation_size);

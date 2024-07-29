@@ -3,8 +3,19 @@
 #include "scheduler.h"
 #include "sys/kernel.h"
 
-extern void trap_entry(void);
 extern void bad_interrupt_entry(void);
+extern void bus_error_entry(void);
+extern void address_error_entry(void);
+extern void illegal_instruction_entry(void);
+extern void division_by_zero_entry(void);
+extern void chk_out_of_bounds_entry(void);
+extern void division_by_zero_entry(void);
+extern void trapv_overflow_entry(void);
+extern void privilege_violation_entry(void);
+extern void trace_entry(void);
+extern void unimplemented_instruction_a_entry(void);
+extern void unimplemented_instruction_f_entry(void);
+extern void trap_entry(void);
 
 void init_vector_table(void) {
     void **vector_table = (void **) 0;
@@ -12,9 +23,21 @@ void init_vector_table(void) {
     for (int i = 2; i < 64; i ++) {
         vector_table[i] = &bad_interrupt_entry;
     }
+
+    vector_table[2] = &bus_error_entry;
+    vector_table[3] = &address_error_entry;
+    vector_table[4] = &illegal_instruction_entry;
+    vector_table[5] = &division_by_zero_entry;
+    vector_table[6] = &chk_out_of_bounds_entry;
+    vector_table[7] = &trapv_overflow_entry;
+    vector_table[8] = &privilege_violation_entry;
+    vector_table[9] = &trace_entry;
+    vector_table[10] = &unimplemented_instruction_a_entry;
+    vector_table[11] = &unimplemented_instruction_f_entry;
     vector_table[32] = &trap_entry;
 }
 
+#ifdef DEBUG
 static void log_registers(const struct thread_registers *registers) {
     printk(
         "a0: 0x%08x, a1: 0x%08x, a2: 0x%08x, a3: 0x%08x\n",
@@ -46,11 +69,71 @@ static void log_registers(const struct thread_registers *registers) {
     );
     printk("status register: 0x%04x, program counter: 0x%08x\n", registers->status_register, registers->program_counter);
 }
+#else
+void _putchar(char c);
 
-void exception_handler(struct thread_registers *registers) {
-    printk("something happened lol\n");
+static void puts(const char *c) {
+    for (; *c; c ++) {
+        _putchar(*c);
+    }
+}
+#endif
+
+void handle_exception(const struct thread_registers *registers, const char *cause) {
+#ifdef DEBUG
+    printk("PANIC: unhandled exception \"%s\"\n", cause);
     log_registers(registers);
+    //printk("value at pc is 0x%04x\n", *(uint16_t *) registers->program_counter);
+#else
+    puts("PANIC: unhandled exception \"");
+    puts(cause);
+    puts("\"\n");
+#endif
     while (1);
+}
+
+void bad_interrupt_handler(struct thread_registers *registers) {
+    handle_exception(registers, "bad interrupt");
+}
+
+void bus_error_handler(struct thread_registers *registers) {
+    handle_exception(registers, "bus error");
+}
+
+void address_error_handler(struct thread_registers *registers) {
+    handle_exception(registers, "address error");
+}
+
+void illegal_instruction_handler(struct thread_registers *registers) {
+    handle_exception(registers, "illegal instruction");
+}
+
+void division_by_zero_handler(struct thread_registers *registers) {
+    handle_exception(registers, "division by zero");
+}
+
+void chk_out_of_bounds_handler(struct thread_registers *registers) {
+    handle_exception(registers, "CHK out of bounds");
+}
+
+void trapv_overflow_handler(struct thread_registers *registers) {
+    handle_exception(registers, "TRAPV with overflow flag set");
+}
+
+void privilege_violation_handler(struct thread_registers *registers) {
+    handle_exception(registers, "privilege violation");
+}
+
+void trace_handler(struct thread_registers *registers) {
+    handle_exception(registers, "trace");
+}
+
+void unimplemented_instruction_a_handler(struct thread_registers *registers) {
+    handle_exception(registers, "unimplemented instruction (line A)");
+}
+
+void unimplemented_instruction_f_handler(struct thread_registers *registers) {
+    handle_exception(registers, "unimplemented instruction (line F)");
 }
 
 void trap_handler(struct thread_registers *registers) {

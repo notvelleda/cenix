@@ -140,6 +140,8 @@ void _putchar(char c) {
     }
 
     uint16_t row_bytes = SCREEN_ROW;
+    // TODO: detect 64k ROM and use a hardcoded value of 64 in that case
+
     int column_offset = console_x & 0x3;
     uint8_t *dest = SCRN_BASE + console_y * FONT_HEIGHT * row_bytes + (console_x >> 2) * 3;
     const uint8_t *char_data = &font[(c - 32) * FONT_HEIGHT];
