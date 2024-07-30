@@ -2,34 +2,25 @@
 #include "arch/68000/interrupts.h"
 #include "arch/68000/user_mode_entry.h"
 #include "capabilities.h"
+#include "console.h"
 #include "debug.h"
-#include "font.h"
 #include "heap.h"
+#include "hw.h"
 #include "main.h"
-#include "platform/mac-68000/hw.h"
 #include "printf.h"
 #include "scheduler.h"
 #include "string.h"
 #include "sys/kernel.h"
 #include "threads.h"
 
-#define SCRN_BASE (*(void **) 0x0824)
-#define SCRN_LEN 0x5580
-
 #define SOUND_BASE (*(void **) 0x0266)
 #define SOUND_LEN 370
 
 #define MEM_TOP (*(void **) 0x0108)
 
+#define ROM_BASE (*(void **) 0x02ae)
+
 #define STACK_SIZE 4096
-
-#define SCREEN_WIDTH 512
-#define SCREEN_HEIGHT 342
-#define CONSOLE_HEIGHT ((SCREEN_HEIGHT / FONT_HEIGHT) * FONT_HEIGHT) // console height has to be a multiple of the font height!
-
-#define SCRN_LEN_CONSOLE ((SCREEN_WIDTH * CONSOLE_HEIGHT) / 8)
-
-#define SCREEN_ROW (*(uint16_t *) 0x0106)
 
 #define TOOL_DISP_TABLE ((uint32_t *) 0x0c00)
 
@@ -43,9 +34,8 @@ static uint8_t read_addr(uint8_t value) {
 
 void *new_stack_pointer;
 
-void _start(void) {
-    struct init_block init_block;
-
+void _start(uint16_t screen_width, uint16_t screen_height, const char *cmdline) {
+    init_console(screen_width, screen_height);
     init_vector_table();
 
     MAC_VIA_IER = 0x7f; // disable all VIA interrupts
@@ -62,6 +52,8 @@ void _start(void) {
 
     // hardware should be sane enough to enable interrupts now!
     asm volatile ("andiw #0xf8ff, %sr");
+
+    struct init_block init_block;
 
     init_block.kernel_start = init_block.memory_start = 0;
     init_block.kernel_end = &_end;
@@ -82,7 +74,7 @@ void _start(void) {
 }
 
 void after_sp_set(void) {
-    heap_lock_existing_region(&the_heap, SCRN_BASE, (uint8_t *) SCRN_BASE + SCRN_LEN);
+    lock_video_memory(&the_heap);
     heap_lock_existing_region(&the_heap, SOUND_BASE, (uint8_t *) SOUND_BASE + SOUND_LEN);
 
     size_t offset = 0xfd00 - 0xa100;
@@ -105,71 +97,4 @@ void after_sp_set(void) {
 
     main_init(&the_heap);
     enter_user_mode(new_stack_pointer);
-}
-
-const static uint8_t mask[12] = {
-    0xfc, 0x00, 0x00, /*0b11111100, 0b00000000, 0b00000000,*/
-    0x03, 0xf0, 0x00, /*0b00000011, 0b11110000, 0b00000000,*/
-    0x00, 0x0f, 0xc0, /*0b00000000, 0b00001111, 0b11000000,*/
-    0x00, 0x00, 0x3f  /*0b00000000, 0b00000000, 0b00111111 */
-};
-
-static int console_x = 0;
-static int console_y = 0;
-
-static void newline(void) {
-    uint16_t row_bytes = SCREEN_ROW;
-
-    console_x = 0;
-    console_y ++;
-
-    if (console_y >= (CONSOLE_HEIGHT / FONT_HEIGHT)) {
-        size_t move_distance = row_bytes * FONT_HEIGHT;
-
-        memmove((uint8_t *) SCRN_BASE, (uint8_t *) SCRN_BASE + move_distance, SCRN_LEN - move_distance);
-        memset((uint8_t *) SCRN_BASE + SCRN_LEN - move_distance, 0xff, move_distance);
-
-        console_y = (CONSOLE_HEIGHT / FONT_HEIGHT) - 1;
-    }
-}
-
-void _putchar(char c) {
-    if (c == '\n') {
-        newline();
-        return;
-    }
-
-    uint16_t row_bytes = SCREEN_ROW;
-    // TODO: detect 64k ROM and use a hardcoded value of 64 in that case
-
-    int column_offset = console_x & 0x3;
-    uint8_t *dest = SCRN_BASE + console_y * FONT_HEIGHT * row_bytes + (console_x >> 2) * 3;
-    const uint8_t *char_data = &font[(c - 32) * FONT_HEIGHT];
-
-    for (int row = 0; row < FONT_HEIGHT; row ++, dest += row_bytes) {
-        uint8_t data = ~*(char_data ++);
-
-        switch (column_offset) {
-        case 0:
-            *(dest + 0) = (*(dest + 0) & ~mask[0]) | (data & mask[0]);
-            break;
-        case 1:
-            *(dest + 0) = (*(dest + 0) & ~mask[3]) | (data >> 6);
-            *(dest + 1) = (*(dest + 1) & ~mask[4]) | (data << 2);
-            break;
-        case 2:
-            *(dest + 1) = (*(dest + 1) & ~mask[7]) | (data >> 4);
-            *(dest + 2) = (*(dest + 2) & ~mask[8]) | (data << 4);
-            break;
-        case 3:
-            *(dest + 2) = (*(dest + 2) & ~mask[11]) | (data >> 2);
-            break;
-        }
-    }
-
-    console_x ++;
-
-    if (console_x >= SCREEN_WIDTH / FONT_WIDTH) {
-        newline();
-    }
 }
