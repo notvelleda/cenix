@@ -9,7 +9,7 @@ ARCH = $(ARCH_68000)
 
 DEBUG_FLAG != [ "$(DEBUG)" = y ] && echo "-DDEBUG" || echo ""
 
-CFLAGS += -Isrc -Iinclude -I../include -I../common -I../printf
+CFLAGS += -Isrc -Iinclude -I$(PROJECT_ROOT)/include -I$(PROJECT_ROOT)/common -I$(PROJECT_ROOT)/printf
 CFLAGS += -fomit-frame-pointer -nolibc -nostartfiles -fno-builtin -ffreestanding -fno-stack-protector -static -Wall
 CFLAGS += -DPRINTF_DISABLE_SUPPORT_FLOAT -DPLATFORM="$(PLATFORM)" $(DEBUG_FLAG) -DARCH_$(ARCH)
 

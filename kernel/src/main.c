@@ -10,8 +10,10 @@
 #include "sys/kernel.h"
 #include "threads.h"
 
-extern uint8_t _binary_init_start[];
-extern uint8_t _binary_init_end;
+extern uint8_t _binary_process_server_start[];
+extern uint8_t _binary_process_server_end;
+
+struct thread_capability root_thread;
 
 void main_init(struct heap *heap) {
     printk("Hellorld!\n");
@@ -23,15 +25,35 @@ void main_init(struct heap *heap) {
     init_scheduler();
 
     struct thread_registers registers;
-    if (!bflt_load(heap, &_binary_init_start, &_binary_init_end, &registers)) {
-        printk("failed to load init binary, cannot continue\n");
+
+    size_t init_size = (size_t) &_binary_process_server_end - (size_t) &_binary_process_server_start;
+    printk("process server is at 0x%x to 0x%x, size %d\n", &_binary_process_server_start, &_binary_process_server_end, init_size);
+
+    struct bflt_header *header = (struct bflt_header *) &_binary_process_server_start;
+
+    if (!bflt_verify(header)) {
+        printk("format of process server binary is invalid, cannot continue\n");
         return;
     }
+
+    size_t allocation_size = bflt_allocation_size(header);
+    printk("allocation size for process server is %d\n", allocation_size);
+
+    void *allocation = heap_alloc(heap, allocation_size);
+
+    if (allocation == NULL) {
+        printk("couldn't allocate memory for process server's data and/or code\n");
+        return;
+    }
+
+    printk("process server's allocated data is at 0x%x to 0x%x\n", allocation, (size_t) allocation + allocation_size);
+
+    bflt_load(header, allocation, &registers);
 
     struct thread_capability *thread = alloc_thread(heap);
 
     if (thread == NULL) {
-        printk("init's thread allocation failed! cannot continue\n");
+        printk("process server's thread allocation failed! cannot continue\n");
         return;
     }
 
@@ -50,7 +72,7 @@ void main_init(struct heap *heap) {
     thread->root_capability.resource = alloc_node(heap, ROOT_CAP_SLOT_BITS);
 
     if (thread->root_capability.resource == NULL) {
-        printk("allocation of init's root capability node failed, cannot continue\n");
+        printk("allocation of process server's root capability node failed, cannot continue\n");
         return;
     }
 
@@ -82,7 +104,10 @@ void main_init(struct heap *heap) {
     // add debug capability to thread's root node
     populate_capability_slot(heap, 1, ROOT_CAP_SLOT_BITS, NULL, &debug_handlers, 0);
 
-    // TODO: should init be given ownership of its thread object? how would that work?
+    /*struct look_up_result result;
+    look_up_capability_relative(2, ROOT_CAP_SLOT_BITS, &result);
+    copy_capability(&scheduler_state.current_thread->root_capability, result.slot, 2, ROOT_CAP_SLOT_BITS);
+    unlock_looked_up_capability(&result);*/
 
     // reset the current thread to NULL since it's not running yet
     scheduler_state.current_thread->flags &= ~THREAD_CURRENTLY_RUNNING;

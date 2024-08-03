@@ -24,7 +24,7 @@ static uint16_t bits_per_pixel;
 
 static void (*putchar_fn)(char) = NULL;
 
-void mono_putchar(char c) {
+static void mono_putchar(char c) {
     int column_offset = console_x & 3;
     uint8_t *dest = SCRN_BASE + console_y * FONT_HEIGHT * row_bytes + (console_x >> 2) * 3;
     const uint8_t *char_data = &font[(c - 32) * FONT_HEIGHT];
@@ -38,11 +38,11 @@ void mono_putchar(char c) {
             break;
         case 1:
             *(dest + 0) = (*(dest + 0) & ~0b00000011) | (data >> 6);
-            *(dest + 1) = (*(dest + 1) & ~0b11110000) | (data << 2);
+            *(dest + 1) = (*(dest + 1) & ~0b11110000) | ((data << 2) & 0b11110000);
             break;
         case 2:
             *(dest + 1) = (*(dest + 1) & ~0b00001111) | (data >> 4);
-            *(dest + 2) = (*(dest + 2) & ~0b11000000) | (data << 4);
+            *(dest + 2) = (*(dest + 2) & ~0b11000000) | ((data << 4) & 0b11000000);
             break;
         case 3:
             *(dest + 2) = (*(dest + 2) & ~0b00111111) | (data >> 2);
@@ -51,7 +51,7 @@ void mono_putchar(char c) {
     }
 }
 
-void color_putchar_2bpp(char c) {
+static void color_putchar_2bpp(char c) {
     int column_offset = console_x & 1;
     uint8_t *dest = SCRN_BASE + console_y * FONT_HEIGHT * row_bytes + (console_x >> 1) * 3;
     const uint8_t *char_data = &font[(c - 32) * FONT_HEIGHT];
@@ -86,7 +86,7 @@ void color_putchar_2bpp(char c) {
     }
 }
 
-void color_putchar_4bpp(char c) {
+static void color_putchar_4bpp(char c) {
     uint8_t *dest = SCRN_BASE + console_y * FONT_HEIGHT * row_bytes + console_x * FONT_WIDTH / 2;
     const uint8_t *char_data = &font[(c - 32) * FONT_HEIGHT];
 
@@ -100,7 +100,7 @@ void color_putchar_4bpp(char c) {
     }
 }
 
-void color_putchar_8bpp(char c) {
+static void color_putchar_8bpp(char c) {
     uint8_t *dest = SCRN_BASE + console_y * FONT_HEIGHT * row_bytes + console_x * FONT_WIDTH;
     const uint8_t *char_data = &font[(c - 32) * FONT_HEIGHT];
 
@@ -114,7 +114,7 @@ void color_putchar_8bpp(char c) {
     }
 }
 
-void color_putchar_16bpp(char c) {
+static void color_putchar_16bpp(char c) {
     uint16_t *dest = (uint16_t *) (SCRN_BASE + console_y * FONT_HEIGHT * row_bytes + console_x * FONT_WIDTH * 2);
     const uint8_t *char_data = &font[(c - 32) * FONT_HEIGHT];
 
@@ -128,7 +128,7 @@ void color_putchar_16bpp(char c) {
     }
 }
 
-void color_putchar_32bpp(char c) {
+static void color_putchar_32bpp(char c) {
     uint32_t *dest = (uint32_t *) (SCRN_BASE + console_y * FONT_HEIGHT * row_bytes + console_x * FONT_WIDTH * 4);
     const uint8_t *char_data = &font[(c - 32) * FONT_HEIGHT];
 
@@ -150,7 +150,7 @@ void init_console(uint16_t screen_width_from_bootloader, uint16_t screen_height_
 
     row_bytes = SCREEN_ROW;
 
-    if (row_bytes == -1) {
+    if (row_bytes == 0xffff) {
         row_bytes = screen_width / 8;
     }
 

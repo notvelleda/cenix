@@ -76,6 +76,7 @@ void update_capability_addresses(struct capability *slot, const struct absolute_
 
 struct look_up_result {
     struct capability *slot;
+    size_t depth;
     void *container;
     bool should_unlock;
 };
@@ -99,7 +100,12 @@ bool look_up_capability_absolute(const struct absolute_capability_address *addre
 void unlock_looked_up_capability(struct look_up_result *result);
 
 /// populates a capability slot at the given address and search depth with the given heap-managed resource and invocation handlers
-bool populate_capability_slot(struct heap *heap, size_t address, size_t depth, void *resource, struct invocation_handlers *handlers, uint8_t flags);
+size_t populate_capability_slot(struct heap *heap, size_t address, size_t depth, void *resource, struct invocation_handlers *handlers, uint8_t flags);
+
+/// \brief copies a capability to the given empty slot
+///
+/// the parameters `address` and `depth` make up the address of the destination capability in capability space
+void copy_capability(struct capability *source, struct capability *dest, size_t address, size_t depth);
 
 /// the maximum number of invocation handlers that a capability can have
 #define MAX_HANDLERS 5

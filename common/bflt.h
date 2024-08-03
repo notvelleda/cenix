@@ -42,8 +42,9 @@ struct bflt_header {
 /// indicates to the binary loader that the rest of the file following the header is compressed in the Gzip format
 #define BFLT_FLAG_GZIP 4
 
-#include "heap.h"
 #include <stdbool.h>
 #include "sys/kernel.h"
 
-bool bflt_load(struct heap *heap, void *binary_start, void *binary_end, struct thread_registers *registers);
+bool bflt_verify(struct bflt_header *header);
+size_t bflt_allocation_size(struct bflt_header *header);
+void bflt_load(struct bflt_header *header, void *allocation, struct thread_registers *registers);

@@ -37,7 +37,14 @@
 *.x86_64
 *.hex
 kernel/kernel
-init/init
+process_server/process_server
+service_manager/service_manager
+vfs_server/vfs_server
+debug_console/debug_console
+initrd_tar_fs/initrd_tar_fs
+
+initrd
+initrd.tar
 
 # Debug files
 *.dSYM/

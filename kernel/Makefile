@@ -1,20 +1,24 @@
+PROJECT_ROOT = ..
+
 CFLAGS += -O2
 BINARY = kernel
 
-.include <../common-vars.mk>
+.include <$(PROJECT_ROOT)/common-vars.mk>
 
 # platform-specific ld flags
 # these are used for things like specifying a linker script to be used if something other than the default is required
 MAC_LDFLAGS != [ "$(PLATFORM)" = mac-68000 ] && echo "-T$(PLATFORM_PATH)/kernel.ld" || echo ""
 LDFLAGS += $(MAC_LDFLAGS)
 
-INIT_DIR=../init
-INIT_FILE=init
-INIT_OBJECT=$(CWD)/src/init.o
+PROCESS_SERVER_DIR=../process_server
+PROCESS_SERVER_FILE=process_server
+PROCESS_SERVER_OBJECT=$(CWD)/src/process_server.o
 
-OBJECTS += $(INIT_OBJECT)
+OBJECTS += $(PROCESS_SERVER_OBJECT)
 
-.include <../binary.mk>
+.include <$(PROJECT_ROOT)/binary.mk>
 
-$(INIT_OBJECT): $(INIT_DIR)/$(INIT_FILE)
-	cd $(INIT_DIR) && $(CROSS)objcopy -I binary -O $(BINARY_FORMAT) --rename-section .data=.rodata,alloc,load,readonly,data,contents $(INIT_FILE) $(INIT_OBJECT)
+OBJCOPY_FLAGS = -I binary -O $(BINARY_FORMAT) --rename-section .data=.rodata,alloc,load,readonly,data,contents
+
+$(PROCESS_SERVER_OBJECT): $(PROCESS_SERVER_DIR)/$(PROCESS_SERVER_FILE)
+	cd $(PROCESS_SERVER_DIR) && $(CROSS)objcopy $(OBJCOPY_FLAGS) $(PROCESS_SERVER_FILE) $(PROCESS_SERVER_OBJECT)

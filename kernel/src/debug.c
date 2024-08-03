@@ -10,7 +10,7 @@ static size_t debug_print(size_t address, size_t depth, struct capability *slot,
         _putchar(*c);
     }
 #endif
-    return 1;
+    return 0;
 }
 
 struct invocation_handlers debug_handlers = {

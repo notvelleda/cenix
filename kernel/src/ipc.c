@@ -96,7 +96,7 @@ static size_t endpoint_send(size_t address, size_t depth, struct capability *slo
         suspend_thread(thread, EXEC_MODE_BLOCKED);
     }
 
-    return 1;
+    return 0;
 }
 
 static size_t endpoint_receive(size_t address, size_t depth, struct capability *slot, size_t argument) {
@@ -130,7 +130,7 @@ static size_t endpoint_receive(size_t address, size_t depth, struct capability *
         suspend_thread(thread, EXEC_MODE_BLOCKED);
     }
 
-    return 1;
+    return 0;
 }
 
 static void on_endpoint_moved(void *resource) {

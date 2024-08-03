@@ -5,4 +5,4 @@ all: $(LIBRARY)
 $(LIBRARY): $(OBJECTS)
 	$(AR) $(ARFLAGS) $(LIBRARY) $(OBJECTS)
 
-.include <../common-targets.mk>
+.include <$(PROJECT_ROOT)/common-targets.mk>

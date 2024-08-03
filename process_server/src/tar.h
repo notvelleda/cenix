@@ -37,5 +37,6 @@ struct tar_iterator {
 
 int oct2bin(unsigned char *str, int size);
 void open_tar(struct tar_iterator *iter, const char *start, const char *end);
-bool next_file(struct tar_iterator *iter, struct tar_header **header, const char **data, size_t *size);
+bool tar_next_file(struct tar_iterator *iter, struct tar_header **header, const char **data, size_t *size);
+const char *tar_get_name(struct tar_header *header);
 bool tar_find(struct tar_iterator *iter, const char *to_find, char kind, const char **data, size_t *size);

@@ -56,7 +56,7 @@ static size_t read_registers(size_t address, size_t depth, struct capability *sl
         heap_unlock(slot->resource);
     }
 
-    return 1;
+    return 0;
 }
 
 static size_t write_registers(size_t address, size_t depth, struct capability *slot, size_t argument) {
@@ -73,7 +73,7 @@ static size_t write_registers(size_t address, size_t depth, struct capability *s
         heap_unlock(slot->resource);
     }
 
-    return 1;
+    return 0;
 }
 
 static size_t resume(size_t address, size_t depth, struct capability *slot, size_t argument) {
@@ -85,7 +85,7 @@ static size_t resume(size_t address, size_t depth, struct capability *slot, size
         heap_unlock(slot->resource);
     }
 
-    return 1;
+    return 0;
 }
 
 static size_t suspend(size_t address, size_t depth, struct capability *slot, size_t argument) {
@@ -97,7 +97,7 @@ static size_t suspend(size_t address, size_t depth, struct capability *slot, siz
         heap_unlock(slot->resource);
     }
 
-    return 1;
+    return 0;
 }
 
 static size_t set_root_node(size_t address, size_t depth, struct capability *slot, size_t argument) {
@@ -112,13 +112,13 @@ static size_t set_root_node(size_t address, size_t depth, struct capability *slo
             heap_unlock(slot->resource);
         }*/
 
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
-    size_t return_value = 0;
+    size_t return_value = 1; // TODO: use specific error value
 
     if (result.slot->handlers == &node_handlers && get_nested_nodes_depth(result.slot) < MAX_NESTED_NODES) {
-        return_value = 1;
+        return_value = 0;
 
         struct capability *root_slot = &thread->root_capability;
         move_capability(result.slot, root_slot);

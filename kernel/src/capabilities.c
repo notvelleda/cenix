@@ -154,6 +154,51 @@ void update_capability_addresses(struct capability *slot, const struct absolute_
     }
 }
 
+void copy_capability(struct capability *source, struct capability *dest, size_t address, size_t depth) {
+    memcpy(dest, source, sizeof(struct capability));
+#ifdef DEBUG_CAPABILITIES
+    printk("copy_capability: source: 0x%x, dest: 0x%x\n", source, dest);
+#endif
+
+    dest->flags &= ~(CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED);
+
+    dest->address.address = address;
+    dest->address.depth = depth;
+
+    // add the newly copied capability to the resource list of the one it was copied from
+    LIST_INSERT_NO_CONTAINER(struct capability, source, resource_list, dest);
+
+#ifdef DEBUG_CAPABILITIES
+    printk("copy_capability: source derivation: 0x%x, derived_from: 0x%x\n", source->derivation, source->derived_from);
+#endif
+
+    if ((source->flags & (CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED)) != 0) {
+        dest->derived_from = source;
+
+        if (source->derivation == NULL) {
+            // this new derivation is the first element in the list
+            source->derivation = dest;
+
+            LIST_INIT_NO_CONTAINER(dest, derivation_list);
+        } else {
+            // add this new derivation to the derivation list originating from the source capability
+            LIST_INSERT_NO_CONTAINER(struct capability, source->derivation, derivation_list, dest);
+        }
+    } else {
+        // this capability isn't an original derivation, just add it to the derivation list of the source
+        LIST_INSERT_NO_CONTAINER(struct capability, source, derivation_list, dest);
+    }
+
+    dest->derivation = NULL;
+
+#ifdef DEBUG_CAPABILITIES
+    printk("source:\n");
+    print_capability_lists(source);
+    printk("dest:\n");
+    print_capability_lists(dest);
+#endif
+}
+
 /* ==== capability node ==== */
 
 static size_t node_copy(size_t address, size_t depth, struct capability *slot, size_t argument) {
@@ -164,85 +209,44 @@ static size_t node_copy(size_t address, size_t depth, struct capability *slot, s
 
     // make sure slot id is valid
     if (args->dest_slot >= 1 << header->slot_bits) {
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
     struct capability *dest = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + args->dest_slot * sizeof(struct capability));
 
     // make sure destination slot is empty
     if (dest->handlers != NULL) {
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
     struct look_up_result result;
     if (!look_up_capability_relative(args->source_address, args->source_depth, &result)) {
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
     // make sure the source capability is eligible for copying.
     // copying of capability nodes isn't allowed because i just don't know how to deal with it currently and it may just overcomplicate things
     if (result.slot->handlers == &node_handlers) {
         unlock_looked_up_capability(&result);
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
     // if badge setting is requested, make sure the source capability is original
     if (args->should_set_badge && (result.slot->flags & CAP_FLAG_ORIGINAL) == 0) {
         unlock_looked_up_capability(&result);
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
-    memcpy(dest, result.slot, sizeof(struct capability));
-#ifdef DEBUG_CAPABILITIES
-    printk("node_copy: source: 0x%x, dest: 0x%x\n", result.slot, dest);
-#endif
-
-    dest->flags &= ~(CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED);
-
-    dest->address.address = address | (args->dest_slot << depth);
-    dest->address.depth = depth + header->slot_bits;
-
-    // add the newly copied capability to the resource list of the one it was copied from
-    LIST_INSERT_NO_CONTAINER(struct capability, result.slot, resource_list, dest);
-
-#ifdef DEBUG_CAPABILITIES
-    printk("node_copy: source derivation: 0x%x, derived_from: 0x%x\n", result.slot->derivation, result.slot->derived_from);
-#endif
-
-    if ((result.slot->flags & (CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED)) != 0) {
-        dest->derived_from = result.slot;
-
-        if (result.slot->derivation == NULL) {
-            // this new derivation is the first element in the list
-            result.slot->derivation = dest;
-
-            LIST_INIT_NO_CONTAINER(dest, derivation_list);
-        } else {
-            // add this new derivation to the derivation list originating from the source capability
-            LIST_INSERT_NO_CONTAINER(struct capability, result.slot->derivation, derivation_list, dest);
-        }
-    } else {
-        // this capability isn't an original derivation, just add it to the derivation list of the source
-        LIST_INSERT_NO_CONTAINER(struct capability, result.slot, derivation_list, dest);
-    }
-
-    dest->derivation = NULL;
+    copy_capability(result.slot, dest, address | (args->dest_slot << depth), depth + header->slot_bits);
 
     if (args->should_set_badge) {
         dest->badge = args->badge;
         dest->flags |= CAP_FLAG_BADGED;
     }
 
-#ifdef DEBUG_CAPABILITIES
-    printk("src:\n");
-    print_capability_lists(result.slot);
-    printk("dest:\n");
-    print_capability_lists(dest);
-#endif
-
     unlock_looked_up_capability(&result);
 
-    return 1;
+    return 0;
 }
 
 static size_t node_move(size_t address, size_t depth, struct capability *slot, size_t argument) {
@@ -253,19 +257,19 @@ static size_t node_move(size_t address, size_t depth, struct capability *slot, s
 
     // make sure slot id is valid
     if (args->dest_slot >= 1 << header->slot_bits) {
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
     struct capability *dest = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + args->dest_slot * sizeof(struct capability));
 
     // make sure destination slot is empty
     if (dest->handlers != NULL) {
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
     struct look_up_result result;
     if (!look_up_capability_relative(args->source_address, args->source_depth, &result)) {
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
     move_capability(result.slot, dest);
@@ -281,7 +285,7 @@ static size_t node_move(size_t address, size_t depth, struct capability *slot, s
 
     unlock_looked_up_capability(&result);
 
-    return 1;
+    return 0;
 }
 
 static size_t node_delete(size_t address, size_t depth, struct capability *slot, size_t argument) {
@@ -290,20 +294,20 @@ static size_t node_delete(size_t address, size_t depth, struct capability *slot,
 
     // make sure slot id is valid
     if (argument >= 1 << header->slot_bits) {
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
     struct capability *to_delete = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + argument * sizeof(struct capability));
 
     // make sure there's actually a capability here
     if (to_delete->handlers == NULL) {
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
     merge_derivation_lists(to_delete);
     delete_capability(to_delete);
 
-    return 1;
+    return 0;
 }
 
 static size_t node_revoke(size_t address, size_t depth, struct capability *slot, size_t argument) {
@@ -312,7 +316,7 @@ static size_t node_revoke(size_t address, size_t depth, struct capability *slot,
 
     // make sure slot id is valid
     if (argument >= 1 << header->slot_bits) {
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
     struct capability *to_revoke = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + argument * sizeof(struct capability));
@@ -323,7 +327,7 @@ static size_t node_revoke(size_t address, size_t depth, struct capability *slot,
         || to_revoke->handlers == &node_handlers
         || (to_revoke->flags & (CAP_FLAG_BADGED | CAP_FLAG_ORIGINAL)) == 0
     ) {
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
     // delete all the capabilities that have been derived from this one.
@@ -343,7 +347,7 @@ static size_t node_revoke(size_t address, size_t depth, struct capability *slot,
 
     to_revoke->derivation = NULL;
 
-    return 1;
+    return 0;
 }
 
 static void on_node_moved(void *resource) {
@@ -403,18 +407,22 @@ bool look_up_capability(struct capability *root, size_t address, size_t depth, s
         return false;
     }
 
+    bool use_first_non_node = depth == -1 ? true : false;
+
     address &= ((1 << depth) - 1); // make sure there aren't any invalid bits outside of the address
 
     bool should_unlock = heap_lock(root->resource);
     struct capability_node_header *header = (struct capability_node_header *) root->resource;
+    size_t actual_depth = 0;
 
     while (1) {
         size_t index_in_node = address & ((1 << header->slot_bits) - 1);
         struct capability *slot = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + index_in_node * sizeof(struct capability));
 
-        if (depth == header->slot_bits) {
+        if ((use_first_non_node && slot->handlers != &node_handlers) || depth == header->slot_bits) {
             // finished the search!
             result->slot = slot;
+            result->depth = actual_depth + header->slot_bits;
             result->container = header;
             result->should_unlock = should_unlock;
             return true;
@@ -430,6 +438,7 @@ bool look_up_capability(struct capability *root, size_t address, size_t depth, s
 
         address >>= header->slot_bits;
         depth -= header->slot_bits;
+        actual_depth += header->slot_bits;
 
         bool next_should_unlock = heap_lock(slot->resource);
         struct capability_node_header *next = (struct capability_node_header *) slot->resource;
@@ -483,7 +492,7 @@ bool look_up_capability_absolute(const struct absolute_capability_address *addre
     return return_value;
 }
 
-bool populate_capability_slot(struct heap *heap, size_t address, size_t depth, void *resource, struct invocation_handlers *handlers, uint8_t flags) {
+size_t populate_capability_slot(struct heap *heap, size_t address, size_t depth, void *resource, struct invocation_handlers *handlers, uint8_t flags) {
     struct look_up_result result;
 
     if (!look_up_capability_relative(address, depth, &result)) {
@@ -493,7 +502,7 @@ bool populate_capability_slot(struct heap *heap, size_t address, size_t depth, v
             heap_free(heap, resource);
         }
 
-        return false;
+        return 1; // TODO: use specific error value
     }
 
     // make sure destination slot is empty
@@ -505,7 +514,7 @@ bool populate_capability_slot(struct heap *heap, size_t address, size_t depth, v
         }
 
         unlock_looked_up_capability(&result);
-        return false;
+        return 1; // TODO: use specific error value
     }
 
     if (handlers == &node_handlers && result.container != NULL) {
@@ -520,7 +529,7 @@ bool populate_capability_slot(struct heap *heap, size_t address, size_t depth, v
             }
 
             unlock_looked_up_capability(&result);
-            return false;
+        return 1; // TODO: use specific error value
         }
 
         // update the nested nodes count of this new node
@@ -543,7 +552,7 @@ bool populate_capability_slot(struct heap *heap, size_t address, size_t depth, v
     }
 
     result.slot->address.address = address;
-    result.slot->address.depth = depth;
+    result.slot->address.depth = result.depth;
     result.slot->heap = heap;
 
     if ((flags & CAP_FLAG_IS_HEAP_MANAGED) != 0) {
@@ -552,7 +561,7 @@ bool populate_capability_slot(struct heap *heap, size_t address, size_t depth, v
     }
 
     unlock_looked_up_capability(&result);
-    return true;
+    return 0;
 }
 
 static uint8_t nesting_depth_search(const struct capability *node) {
@@ -597,7 +606,7 @@ static size_t untyped_lock(size_t address, size_t depth, struct capability *slot
 
 static size_t untyped_unlock(size_t address, size_t depth, struct capability *slot, size_t argument) {
     heap_unlock(slot->resource);
-    return 0;
+    return 1;
 }
 
 static size_t untyped_try_lock(size_t address, size_t depth, struct capability *slot, size_t argument) {
@@ -624,7 +633,7 @@ static size_t address_space_alloc(size_t address, size_t depth, struct capabilit
 
     if (args->type >= 4) {
         printk("address_space_alloc: invalid type %d\n", args->type);
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
     // make sure there's permission to create this kind of object
@@ -636,7 +645,7 @@ static size_t address_space_alloc(size_t address, size_t depth, struct capabilit
             args->type,
             type_names[args->type]
         );
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
     // get pointer to heap
@@ -674,7 +683,7 @@ static size_t address_space_alloc(size_t address, size_t depth, struct capabilit
 
     if (resource == NULL) {
         printk("address_space_alloc: heap allocation for type %d (%s) with size %d failed\n", args->type, type_names[args->type], args->size);
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
 #ifdef DEBUG_CAPABILITIES
@@ -688,7 +697,7 @@ static size_t address_space_alloc(size_t address, size_t depth, struct capabilit
     );
 #endif
 
-    return (size_t) populate_capability_slot(heap, args->address, args->depth, resource, handlers, CAP_FLAG_IS_HEAP_MANAGED);
+    return populate_capability_slot(heap, args->address, args->depth, resource, handlers, CAP_FLAG_IS_HEAP_MANAGED);
 }
 
 struct invocation_handlers address_space_handlers = {
@@ -741,7 +750,7 @@ size_t invoke_capability(size_t address, size_t depth, size_t handler_number, si
 
     if (!look_up_capability_relative(address, depth, &result)) {
         printk("invoke_capability: couldn't locate capability at 0x%x (%d bits) for invocation\n", address, depth);
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
     struct invocation_handlers *handlers = result.slot->handlers;
@@ -749,7 +758,7 @@ size_t invoke_capability(size_t address, size_t depth, size_t handler_number, si
     if (handlers == NULL || handler_number >= handlers->num_handlers) {
         printk("invoke_capability: invocation %d on capability 0x%x (%d bits) is invalid\n", handler_number, address, depth);
         unlock_looked_up_capability(&result);
-        return 0;
+        return 1; // TODO: use specific error value
     }
 
 #ifdef DEBUG_CAPABILITIES
