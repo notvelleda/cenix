@@ -1,6 +1,7 @@
 #include "tar.h"
 #include "printf.h"
 #include "string.h"
+#include "sys/kernel.h"
 
 void open_tar(struct tar_iterator *iter, const char *start, const char *end) {
     iter->start = start;
@@ -39,11 +40,7 @@ bool tar_next_file(struct tar_iterator *iter, struct tar_header **header, const 
     return true;
 }
 
-const char *tar_get_name(struct tar_header *header) {
-    static char name[257];
-
-    char *name_ptr = name;
-
+void tar_get_name(struct tar_header *header, char *name_ptr) {
     char *c = header->name;
     for (int i = 0; i < 100 && *c; i ++) {
         *(name_ptr ++) = *(c ++);
@@ -55,8 +52,6 @@ const char *tar_get_name(struct tar_header *header) {
     }
 
     *name_ptr = 0;
-
-    return name;
 }
 
 bool tar_find(struct tar_iterator *iter, const char *to_find, char kind, const char **data, size_t *size) {
@@ -75,7 +70,10 @@ bool tar_find(struct tar_iterator *iter, const char *to_find, char kind, const c
             continue;
         }
 
-        const char *name_ptr = tar_get_name(header);
+        char name[257]; // for some reason this didn't work as static, maybe there's a bug in bflt loading?
+
+        tar_get_name(header, name);
+        const char *name_ptr = name;
 
         if (*name_ptr == '/') {
             name_ptr ++;

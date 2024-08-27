@@ -6,7 +6,7 @@ CROSS=m68k-unknown-elf-
 
 MAKE_FLAGS="CROSS=$CROSS CC=${CROSS}cc PLATFORM=mac-68000"
 
-bmake -C vfs_server $MAKE_FLAGS
+bmake -C vfs_server $MAKE_FLAGS DEBUG=y
 bmake -C service_manager $MAKE_FLAGS
 
 bmake -C debug_console $MAKE_FLAGS
@@ -24,7 +24,7 @@ tar --format=ustar -cvf ../initrd.tar *
 cd ..
 
 bmake -C process_server $MAKE_FLAGS DEBUG=y
-bmake -C kernel $MAKE_FLAGS DEBUG=y # disabling debug for the kernel saves like 11k
+bmake -C kernel $MAKE_FLAGS DEBUG=n # disabling debug for the kernel saves like 11k
 
 cd tiny-mac-bootloader
 mkdir -p fs-contents

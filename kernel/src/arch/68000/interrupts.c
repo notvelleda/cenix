@@ -83,7 +83,6 @@ void handle_exception(const struct thread_registers *registers, const char *caus
 #ifdef DEBUG
     printk("PANIC: unhandled exception \"%s\"\n", cause);
     log_registers(registers);
-    //printk("value at pc is 0x%04x\n", *(uint16_t *) registers->program_counter);
 #else
     puts("PANIC: unhandled exception \"");
     puts(cause);

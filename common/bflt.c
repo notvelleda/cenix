@@ -1,10 +1,11 @@
 #include "bflt.h"
-#include "printf.h"
 #include <stdbool.h>
 #include "string.h"
 #include "sys/kernel.h"
 
-#ifndef DEBUG
+#ifdef DEBUG
+#include "printf.h"
+#else
 #define printf(...)
 #endif
 
@@ -93,6 +94,7 @@ void bflt_load(struct bflt_header *header, void *allocation, struct thread_regis
 
         int i = 0;
         for (; *got != -1; got ++, i ++) {
+            //uint32_t old = *got;
             if (*got < header->data_start - sizeof(struct bflt_header)) {
                 // this offset is in the text segment
                 *got += (uint32_t) text_start;
@@ -100,6 +102,7 @@ void bflt_load(struct bflt_header *header, void *allocation, struct thread_regis
                 // this offset is in either the data or bss segment
                 *got += (uint32_t) data_start - header->data_start - sizeof(struct bflt_header);
             }
+            //printf("entry %d is 0x%08x from 0x%08x\n", i, *got, old);
         }
 
         printf("bflt_load: fixed up %d GOT entries\n", i);

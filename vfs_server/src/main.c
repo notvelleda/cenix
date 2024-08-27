@@ -1,3 +1,10 @@
+#include "debug.h"
+#include "sys/kernel.h"
+
 void _start(void) {
-    while (1);
+    printf("hello from vfs server!\n");
+
+    while (1) {
+        syscall_yield();
+    }
 }

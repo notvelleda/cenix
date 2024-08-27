@@ -13,7 +13,7 @@
 #define PID_DATA_NODE_SLOT 5
 #define INIT_NODE_DEPTH 4
 
-void init_processes(void) {
+void init_process_table(void) {
     struct alloc_args set_alloc_args = {
         .type = TYPE_UNTYPED,
         .size = PID_MAX / 8,
@@ -85,7 +85,15 @@ static pid_t allocate_pid(void) {
     return pid;
 }
 
-pid_t exec_from_initrd(struct tar_iterator *iter, char *filename) {
+static void release_pid(pid_t pid) {
+    uint32_t *pointer = (uint32_t *) syscall_invoke(PID_SET_SLOT, -1, UNTYPED_LOCK, 0);
+
+    pointer[pid / 32] &= ~(1 << (pid % 32));
+
+    syscall_invoke(PID_SET_SLOT, -1, UNTYPED_UNLOCK, 0);
+}
+
+pid_t exec_from_initrd(struct tar_iterator *iter, char *filename, size_t root_node_address, size_t root_node_depth) {
     pid_t pid = allocate_pid();
 
     if (pid == 0) {
@@ -95,14 +103,14 @@ pid_t exec_from_initrd(struct tar_iterator *iter, char *filename) {
     const char *file_data;
     size_t file_size;
     if (!tar_find(iter, filename, TAR_NORMAL_FILE, &file_data, &file_size)) {
-        // TODO: release pid
+        release_pid(pid);
         return 0;
     }
 
     struct bflt_header *header = (struct bflt_header *) file_data;
 
     if (!bflt_verify(header)) {
-        // TODO: release pid
+        release_pid(pid);
         return 0;
     }
 
@@ -116,7 +124,7 @@ pid_t exec_from_initrd(struct tar_iterator *iter, char *filename) {
     };
 
     if (syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &data_alloc_args) != 0) {
-        // TODO: release pid
+        release_pid(pid);
         return 0;
     }
 
@@ -128,14 +136,16 @@ pid_t exec_from_initrd(struct tar_iterator *iter, char *filename) {
     };
 
     if (syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &thread_alloc_args) != 0) {
-        // TODO: release pid
+        // TODO: release resources
+        release_pid(pid);
         return 0;
     }
 
     void *data = (void *) syscall_invoke(data_alloc_args.address, -1, UNTYPED_LOCK, 0);
 
     if (data == NULL) {
-        // TODO: release pid
+        // TODO: release resources
+        release_pid(pid);
         return 0;
     }
 
@@ -147,6 +157,11 @@ pid_t exec_from_initrd(struct tar_iterator *iter, char *filename) {
         .size = sizeof(struct thread_registers)
     };
     syscall_invoke(thread_alloc_args.address, -1, THREAD_WRITE_REGISTERS, (size_t) &register_write_args);
+
+    struct set_root_node_args set_root_node_args = {root_node_address, root_node_depth};
+    syscall_invoke(thread_alloc_args.address, -1, THREAD_SET_ROOT_NODE, (size_t) &set_root_node_args);
+
+    syscall_invoke(thread_alloc_args.address, -1, THREAD_RESUME, 0);
 
     return pid;
 }

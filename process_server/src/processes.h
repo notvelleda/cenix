@@ -8,5 +8,5 @@
 
 typedef uint16_t pid_t;
 
-void init_processes(void);
-pid_t exec_from_initrd(struct tar_iterator *iter, char *filename);
+void init_process_table(void);
+pid_t exec_from_initrd(struct tar_iterator *iter, char *filename, size_t root_node_address, size_t root_node_depth);

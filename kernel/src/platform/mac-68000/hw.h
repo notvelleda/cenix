@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 // VIA base address
-#define MAC_VIA_BASE        0xefe1fe
+#define MAC_VIA_BASE        (*(uint32_t *) 0x01d4)
 
 // VIA register addresses
 #define MAC_VIA_BUFB        (*((volatile uint8_t *) (MAC_VIA_BASE + 512 * 0)))   // register B (zero offset)
@@ -60,8 +60,8 @@
 #define MAC_KEYB_NACK       0x77
 
 // SCC
-#define MAC_SCC_RD_BASE     0x9ffff8
-#define MAC_SCC_WR_BASE     0xbffff9
+#define MAC_SCC_RD_BASE     (*(uint32_t *) 0x01d8)
+#define MAC_SCC_WR_BASE     (*(uint32_t *) 0x01dc)
 
 #define MAC_SCC_A_DATA_RD   (*((volatile uint8_t *) (MAC_SCC_RD_BASE + 0x6))) // SCC channel A data read
 #define MAC_SCC_A_DATA_WR   (*((volatile uint8_t *) (MAC_SCC_WR_BASE + 0x6))) // SCC channel A data write
