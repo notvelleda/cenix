@@ -1,11 +1,14 @@
 #include "ipc.h"
 #include "capabilities.h"
+#include "debug.h"
 #include "heap.h"
 #include "linked_list.h"
 #include "scheduler.h"
 #include "string.h"
 #include "sys/kernel.h"
 #include "threads.h"
+
+#undef DEBUG_IPC
 
 static void transfer_capabilities(
     const struct thread_capability *sending,
@@ -29,10 +32,12 @@ static void transfer_capabilities(
         struct look_up_result source_result;
 
         if (!look_up_capability_absolute(&source_address, &source_result)) {
+            printk("transfer_capabilities: capability lookup for index %d's source failed\n", i);
             continue;
         }
 
         if (source_result.slot->handlers == NULL) {
+            printk("transfer_capabilities: capability slot for index %d's source isn't valid\n", i);
             unlock_looked_up_capability(&source_result);
             continue;
         }
@@ -46,11 +51,13 @@ static void transfer_capabilities(
         struct look_up_result dest_result;
 
         if (!look_up_capability_absolute(&dest_address, &dest_result)) {
+            printk("transfer_capabilities: capability lookup for index %d's destination failed\n", i);
             unlock_looked_up_capability(&source_result);
             continue;
         }
 
-        if (dest_result.slot->handlers == NULL) {
+        if (dest_result.slot->handlers != NULL) {
+            printk("transfer_capabilities: capability slot for index %d's destination isn't valid\n", i);
             unlock_looked_up_capability(&source_result);
             unlock_looked_up_capability(&dest_result);
             continue;
@@ -73,7 +80,13 @@ static size_t endpoint_send(size_t address, size_t depth, struct capability *slo
         // there's already a thread waiting to receive the message
         struct thread_capability *receiving;
         LIST_POP_FROM_START(endpoint->blocked_receiving, blocked_queue, receiving);
+
+#ifdef DEBUG_IPC
+        printk("endpoint_send: unblocking thread 0x%x to receive message\n", receiving->thread_id);
+#endif
+
         receiving->flags &= ~THREAD_BLOCKED_ON_RECEIVE;
+        receiving->blocked_on = NULL;
 
         memcpy(&receiving->message_buffer->buffer, &message->buffer, IPC_BUFFER_SIZE);
         receiving->message_buffer->badge = slot->badge;
@@ -85,6 +98,10 @@ static size_t endpoint_send(size_t address, size_t depth, struct capability *slo
     } else {
         // calling thread has to be blocked until a thread tries to receive the message
         struct thread_capability *thread = scheduler_state.current_thread;
+
+#ifdef DEBUG_IPC
+        printk("endpoint_send: blocking thread 0x%x while waiting for receiver\n", thread->thread_id);
+#endif
 
         thread->message_buffer = message;
         thread->sending_badge = slot->badge;
@@ -107,7 +124,13 @@ static size_t endpoint_receive(size_t address, size_t depth, struct capability *
         // there's already a thread waiting to send a message
         struct thread_capability *sending;
         LIST_POP_FROM_START(endpoint->blocked_sending, blocked_queue, sending);
+
+#ifdef DEBUG_IPC
+        printk("endpoint_receive: unblocking thread 0x%x to send message\n", sending->thread_id);
+#endif
+
         sending->flags &= ~THREAD_BLOCKED_ON_SEND;
+        sending->blocked_on = NULL;
 
         memcpy(&message->buffer, &sending->message_buffer->buffer, IPC_BUFFER_SIZE);
         message->badge = sending->sending_badge;
@@ -119,6 +142,10 @@ static size_t endpoint_receive(size_t address, size_t depth, struct capability *
     } else {
         // calling thread has to be blocked until a thread tries to send a message
         struct thread_capability *thread = scheduler_state.current_thread;
+
+#ifdef DEBUG_IPC
+        printk("endpoint_receive: blocking thread 0x%x while waiting for sender\n", thread->thread_id);
+#endif
 
         thread->message_buffer = message;
         thread->sending_badge = slot->badge;

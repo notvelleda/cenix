@@ -172,6 +172,15 @@ void on_thread_moved(void *resource) {
         LIST_UPDATE_ADDRESS(*thread->runqueue, runqueue_entry, thread);
     }
 
+    if (thread->blocked_on != NULL) {
+        // update references to this thread in the queue of threads blocked on the same resource as it
+        if ((thread->flags & THREAD_BLOCKED_ON_SEND) != 0) {
+            LIST_UPDATE_ADDRESS(thread->blocked_on->blocked_sending, blocked_queue, thread);
+        } else if ((thread->flags & THREAD_BLOCKED_ON_RECEIVE) != 0) {
+            LIST_UPDATE_ADDRESS(thread->blocked_on->blocked_receiving, blocked_queue, thread);
+        }
+    }
+
     // update references to this thread in the thread hash table
     LIST_UPDATE_ADDRESS(thread_hash_table[thread->bucket_number], table_entry, thread);
 
