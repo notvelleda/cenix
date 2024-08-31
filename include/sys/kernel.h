@@ -154,9 +154,15 @@ struct ipc_message {
         /// through the calling thread's address space
         size_t depth;
     } capabilities[IPC_CAPABILITY_SLOTS];
+    /// \brief if a capability's corresponding bit here is set, it will be copied to the receiving thread instead of moved
+    ///
+    /// this field is ignored on `endpoint_receive` invocations
+    uint8_t to_copy;
     /// when a capability is successfully transferred from the sending thread to the receiving thread, its corresponding bit will be set here
     uint8_t transferred_capabilities;
-    /// the badge of the capability that sent this message. this field is ignored on `endpoint_send` invocations
+    /// \brief the badge of the capability that sent this message.
+    ///
+    /// this field is ignored on `endpoint_send` invocations
     size_t badge;
 };
 

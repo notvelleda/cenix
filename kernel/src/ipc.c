@@ -4,6 +4,7 @@
 #include "heap.h"
 #include "linked_list.h"
 #include "scheduler.h"
+#include <stdbool.h>
 #include "string.h"
 #include "sys/kernel.h"
 #include "threads.h"
@@ -36,7 +37,9 @@ static void transfer_capabilities(
             continue;
         }
 
-        if (source_result.slot->handlers == NULL) {
+        bool should_copy = (sent_message->to_copy & (1 << i)) > 0;
+
+        if (source_result.slot->handlers == NULL || (should_copy && source_result.slot->handlers == &node_handlers)) {
             printk("transfer_capabilities: capability slot for index %d's source isn't valid\n", i);
             unlock_looked_up_capability(&source_result);
             continue;
@@ -63,7 +66,12 @@ static void transfer_capabilities(
             continue;
         }
 
-        move_capability(source_result.slot, dest_result.slot);
+        if (should_copy) {
+            copy_capability(source_result.slot, dest_result.slot, dest_address.address, dest_address.depth);
+        } else {
+            move_capability(source_result.slot, dest_result.slot);
+        }
+
         update_capability_addresses(dest_result.slot, &dest_address, 0);
         recv_buffer->transferred_capabilities |= 1 << i;
 

@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "sys/kernel.h"
+#include "sys/vfs.h"
 #include "tar.h"
 
 extern const char _binary_initrd_tar_start;
@@ -10,33 +11,22 @@ extern const char _binary_initrd_tar_end;
 
 // TODO: consolidate the different definitions of this
 #define INIT_NODE_DEPTH 4
+#define VFS_ENDPOINT_SLOT 8
 
 void _start(void) {
-    printf("hello from process server!\n");
+    printf("hellorld from process server!\n");
 
     init_process_table();
 
     size_t initrd_size = (size_t) &_binary_initrd_tar_end - (size_t) &_binary_initrd_tar_start;
 
-    printf("initrd is at 0x%x to 0x%x, size %d\n", &_binary_initrd_tar_start, &_binary_initrd_tar_end, initrd_size);
+    printf("initrd is at 0x%x to 0x%x (%d bytes)\n", &_binary_initrd_tar_start, &_binary_initrd_tar_end, initrd_size);
 
-    struct tar_iterator iter;
-    open_tar(&iter, &_binary_initrd_tar_start, &_binary_initrd_tar_end);
+    printf("starting vfs_server...\n");
 
-    /*struct tar_header *header;
-    const char *data;
-    size_t size;
+    pid_t vfs_pid = allocate_pid();
 
-    while (tar_next_file(&iter, &header, &data, &size)) {
-        if (header->kind != TAR_NORMAL_FILE) {
-            continue;
-        }
-
-        printf("found file %s\n", tar_get_name(header));
-    }
-
-    open_tar(&iter, &_binary_initrd_tar_start, &_binary_initrd_tar_end);*/
-
+    // allocate an endpoint that the vfs server will use to send a properly set up endpoint back to the process server
     struct alloc_args endpoint_alloc_args = {
         .type = TYPE_ENDPOINT,
         .size = 0,
@@ -45,13 +35,14 @@ void _start(void) {
     };
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
 
-    struct alloc_args vfs_root_alloc_args = {
+    // set up the vfs server's capability space
+    struct alloc_args root_alloc_args = {
         .type = TYPE_NODE,
         .size = INIT_NODE_DEPTH,
         .address = 7,
         .depth = INIT_NODE_DEPTH
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &vfs_root_alloc_args);
+    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &root_alloc_args);
 
     struct node_copy_args alloc_copy_args = {
         .source_address = 0,
@@ -61,7 +52,7 @@ void _start(void) {
         .badge = 0,
         .should_set_badge = 0
     };
-    syscall_invoke(vfs_root_alloc_args.address, vfs_root_alloc_args.depth, NODE_COPY, (size_t) &alloc_copy_args);
+    syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &alloc_copy_args);
 
     struct node_copy_args debug_copy_args = {
         .source_address = 1,
@@ -71,7 +62,7 @@ void _start(void) {
         .badge = 0,
         .should_set_badge = 0
     };
-    syscall_invoke(vfs_root_alloc_args.address, vfs_root_alloc_args.depth, NODE_COPY, (size_t) &debug_copy_args);
+    syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &debug_copy_args);
 
     struct node_copy_args endpoint_copy_args = {
         .source_address = endpoint_alloc_args.address,
@@ -81,24 +72,71 @@ void _start(void) {
         .badge = 0,
         .should_set_badge = 0
     };
-    syscall_invoke(vfs_root_alloc_args.address, vfs_root_alloc_args.depth, NODE_COPY, (size_t) &endpoint_copy_args);
+    syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &endpoint_copy_args);
 
-    pid_t vfs_pid = exec_from_initrd(&iter, "/sbin/vfs_server", vfs_root_alloc_args.address, vfs_root_alloc_args.depth);
-    printf("vfs server is pid %d\n", vfs_pid);
+    struct tar_iterator iter;
+    open_tar(&iter, &_binary_initrd_tar_start, &_binary_initrd_tar_end);
 
+    exec_from_initrd(vfs_pid, &iter, "/sbin/vfs_server", root_alloc_args.address, root_alloc_args.depth);
+
+    printf("done! (pid %d)\n", vfs_pid);
+
+    // receive the endpoint that will be used for communicating with the vfs server from the vfs server
     struct ipc_message message = {
-        .capabilities = {{8, INIT_NODE_DEPTH}, {0, 0}, {0, 0}, {0, 0}}
+        .capabilities = {{VFS_ENDPOINT_SLOT, -1}}
     };
     syscall_invoke(endpoint_alloc_args.address, endpoint_alloc_args.depth, ENDPOINT_RECEIVE, (size_t) &message);
 
-    printf("got message! transferred_capabilities is 0x%x\n", message.transferred_capabilities);
-
-    printf("sending response\n");
-
-    struct ipc_message message2 = {
-        .capabilities = {{0, 0}, {0, 0}, {0, 0}, {0, 0}}
+    // test messages just to make sure the vfs main loop is working
+    /*struct ipc_message message2 = {
+        .capabilities = {}
     };
     syscall_invoke(message.capabilities[0].address, message.capabilities[0].depth, ENDPOINT_SEND, (size_t) &message2);
+    syscall_invoke(message.capabilities[0].address, message.capabilities[0].depth, ENDPOINT_SEND, (size_t) &message2);*/
+
+    // TODO: start initrd_tar_fs to mount initrd as root directory, mount /proc, start debug_console for initial stdout (/dev/debug_console?), start service manager
+
+    printf("starting initrd_tar_fs...\n");
+
+    pid_t initrd_tar_fs_pid = allocate_pid();
+
+    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &root_alloc_args);
+    syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &alloc_copy_args);
+
+    // TODO: inform vfs of new process and how it relates to its creator (in this case, this process) so it can provide a new endpoint for communication with it
+
+    struct ipc_message to_send = {
+        .buffer = {
+            VFS_NEW_PROCESS,
+            VFS_SHARE_NAMESPACE,
+            initrd_tar_fs_pid >> 8, initrd_tar_fs_pid & 0xff,
+            0, 1
+        },
+        .capabilities = {{endpoint_alloc_args.address, -1}},
+        .to_copy = 1
+    };
+    struct ipc_message to_receive = {
+        .capabilities = {{(1 << INIT_NODE_DEPTH) | root_alloc_args.address, -1}}
+    };
+
+    vfs_call(VFS_ENDPOINT_SLOT, endpoint_alloc_args.address, &to_send, &to_receive);
+
+    open_tar(&iter, &_binary_initrd_tar_start, &_binary_initrd_tar_end);
+
+    /*for (int i = 0; i < 1048576; i ++) {
+        __asm__ __volatile__ ("nop");
+        __asm__ __volatile__ ("nop");
+        __asm__ __volatile__ ("nop");
+        __asm__ __volatile__ ("nop");
+        __asm__ __volatile__ ("nop");
+        __asm__ __volatile__ ("nop");
+        __asm__ __volatile__ ("nop");
+        __asm__ __volatile__ ("nop");
+    }*/
+
+    exec_from_initrd(initrd_tar_fs_pid, &iter, "/sbin/initrd_tar_fs", root_alloc_args.address, root_alloc_args.depth);
+
+    printf("done! (pid %d)\n", initrd_tar_fs_pid);
 
     while (1) {
         syscall_yield();

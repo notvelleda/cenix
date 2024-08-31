@@ -1,5 +1,6 @@
 #include "processes.h"
 #include "bflt.h"
+#include "debug.h"
 #include <stddef.h>
 #include <stdint.h>
 #include "string.h"
@@ -11,6 +12,7 @@
 #define PID_THREAD_NODE_SLOT 3
 #define PID_INFO_NODE_SLOT 4
 #define PID_DATA_NODE_SLOT 5
+#define VFS_ENDPOINT_SLOT 8
 #define INIT_NODE_DEPTH 4
 
 void init_process_table(void) {
@@ -49,13 +51,13 @@ void init_process_table(void) {
     struct alloc_args data_node_alloc_args = {
         .type = TYPE_NODE,
         .size = PID_BITS,
-        .address = PID_INFO_NODE_SLOT,
+        .address = PID_DATA_NODE_SLOT,
         .depth = -1
     };
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &data_node_alloc_args);
 }
 
-static pid_t allocate_pid(void) {
+pid_t allocate_pid(void) {
     uint32_t *pointer = (uint32_t *) syscall_invoke(PID_SET_SLOT, -1, UNTYPED_LOCK, 0);
 
     if (pointer == NULL) {
@@ -85,7 +87,7 @@ static pid_t allocate_pid(void) {
     return pid;
 }
 
-static void release_pid(pid_t pid) {
+void release_pid(pid_t pid) {
     uint32_t *pointer = (uint32_t *) syscall_invoke(PID_SET_SLOT, -1, UNTYPED_LOCK, 0);
 
     pointer[pid / 32] &= ~(1 << (pid % 32));
@@ -93,28 +95,23 @@ static void release_pid(pid_t pid) {
     syscall_invoke(PID_SET_SLOT, -1, UNTYPED_UNLOCK, 0);
 }
 
-pid_t exec_from_initrd(struct tar_iterator *iter, char *filename, size_t root_node_address, size_t root_node_depth) {
-    pid_t pid = allocate_pid();
-
-    if (pid == 0) {
-        return 0;
-    }
-
+size_t exec_from_initrd(pid_t pid, struct tar_iterator *iter, char *filename, size_t root_node_address, size_t root_node_depth) {
     const char *file_data;
     size_t file_size;
     if (!tar_find(iter, filename, TAR_NORMAL_FILE, &file_data, &file_size)) {
-        release_pid(pid);
-        return 0;
+        printf("exec_from_initrd: couldn't find %s in initrd\n", filename);
+        return 1;
     }
 
     struct bflt_header *header = (struct bflt_header *) file_data;
 
     if (!bflt_verify(header)) {
-        release_pid(pid);
-        return 0;
+        return 1;
     }
 
     size_t allocation_size = bflt_allocation_size(header);
+
+    printf("exec_from_initrd: allocation size is %d\n", allocation_size);
 
     struct alloc_args data_alloc_args = {
         .type = TYPE_UNTYPED,
@@ -124,8 +121,8 @@ pid_t exec_from_initrd(struct tar_iterator *iter, char *filename, size_t root_no
     };
 
     if (syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &data_alloc_args) != 0) {
-        release_pid(pid);
-        return 0;
+        printf("exec_from_initrd: memory allocation for thread data failed\n");
+        return 1;
     }
 
     struct alloc_args thread_alloc_args = {
@@ -136,17 +133,19 @@ pid_t exec_from_initrd(struct tar_iterator *iter, char *filename, size_t root_no
     };
 
     if (syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &thread_alloc_args) != 0) {
+        printf("exec_from_initrd: memory allocation for thread failed\n");
+
         // TODO: release resources
-        release_pid(pid);
-        return 0;
+        return 1;
     }
 
     void *data = (void *) syscall_invoke(data_alloc_args.address, -1, UNTYPED_LOCK, 0);
 
     if (data == NULL) {
+        printf("exec_from_initrd: failed to lock thread data\n");
+
         // TODO: release resources
-        release_pid(pid);
-        return 0;
+        return 1;
     }
 
     struct thread_registers registers;
@@ -163,5 +162,5 @@ pid_t exec_from_initrd(struct tar_iterator *iter, char *filename, size_t root_no
 
     syscall_invoke(thread_alloc_args.address, -1, THREAD_RESUME, 0);
 
-    return pid;
+    return 0;
 }

@@ -16,6 +16,9 @@ mkdir -p initrd/sbin
 cp vfs_server/vfs_server initrd/sbin/
 cp service_manager/service_manager initrd/sbin/
 
+mkdir -p initrd/proc
+mkdir -p initrd/dev
+
 cp debug_console/debug_console initrd/sbin/debug_console
 cp initrd_tar_fs/initrd_tar_fs initrd/sbin/initrd_tar_fs
 

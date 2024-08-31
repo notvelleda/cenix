@@ -26,8 +26,8 @@ void main_init(struct heap *heap) {
 
     struct thread_registers registers;
 
-    size_t init_size = (size_t) &_binary_process_server_end - (size_t) &_binary_process_server_start;
-    printk("process server is at 0x%x to 0x%x, size %d\n", &_binary_process_server_start, &_binary_process_server_end, init_size);
+    size_t process_server_size = (size_t) &_binary_process_server_end - (size_t) &_binary_process_server_start;
+    printk("process server is at 0x%x to 0x%x (%d bytes)\n", &_binary_process_server_start, &_binary_process_server_end, process_server_size);
 
     struct bflt_header *header = (struct bflt_header *) &_binary_process_server_start;
 

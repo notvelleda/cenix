@@ -9,7 +9,7 @@
 #include "sys/kernel.h"
 #include "linked_list.h"
 
-#undef DEBUG_THREADS
+#define DEBUG_THREADS
 
 #define NUM_BUCKETS 128
 
@@ -228,24 +228,28 @@ struct thread_capability *alloc_thread(struct heap *heap) {
     // if a thread id couldn't be found, give up
     if (!has_thread_id) {
 #ifdef DEBUG_THREADS
-        printk("threads: couldn't allocate id for new thread!\n");
+        printk("alloc_thread: couldn't allocate id for new thread!\n");
 #endif
         return NULL;
     }
 
 #ifdef DEBUG_THREADS
-    printk("threads: allocated id %d for new thread\n", thread_id);
+    printk("alloc_thread: allocated id %d for new thread\n", thread_id);
 #endif
 
     struct thread_capability *thread = heap_alloc(heap, sizeof(struct thread_capability));
 
     if (thread == NULL) {
 #ifdef DEBUG_THREADS
-        printk("threads: heap_alloc for new thread failed!\n");
+        printk("alloc_thread: heap_alloc for new thread failed!\n");
 #endif
         used_thread_ids[thread_id / PTR_BITS] &= ~(1 << (thread_id % PTR_BITS)); // release thread id
         return NULL;
     }
+
+#ifdef DEBUG_THREADS
+    printk("alloc_thread: allocated resource 0x%x for new thread\n", thread);
+#endif
 
     memset((uint8_t *) thread, 0, sizeof(struct thread_capability));
     thread->exec_mode = EXEC_MODE_SUSPENDED;
@@ -256,7 +260,7 @@ struct thread_capability *alloc_thread(struct heap *heap) {
     thread->bucket_number = id_hash % NUM_BUCKETS;
 
 #ifdef DEBUG_THREADS
-    printk("threads: hashed thread id is 0x%08x, bucket number is %d\n", id_hash, thread->bucket_number);
+    printk("alloc_thread: hashed thread id is 0x%08x, bucket number is %d\n", id_hash, thread->bucket_number);
 #endif
 
     // insert this thread into the thread hash table

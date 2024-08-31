@@ -98,15 +98,16 @@ void delete_capability(struct capability *to_delete) {
 
 #ifdef DEBUG
 void print_capability_lists(struct capability *capability) {
+    printk("this capability: 0x%x\n", capability);
     struct capability *c = capability->resource_list.start;
     printk("resource start: 0x%x, end: 0x%x\n", c, capability->resource_list.end);
     for (; c != NULL; c = c->resource_list.next) {
-        printk(" - 0x%x\n", c);
+        printk(" - 0x%x (start 0x%x, end 0x%x)\n", c, c->resource_list.start, c->resource_list.end);
     }
     c = capability->derivation_list.start;
     printk("derivation start: 0x%x, end: 0x%x\n", c, capability->derivation_list.end);
     for (; c != NULL; c = c->derivation_list.next) {
-        printk(" - 0x%x\n", c);
+        printk(" - 0x%x (start 0x%x, end 0x%x)\n", c, c->derivation_list.start, c->derivation_list.end);
     }
 }
 #endif
@@ -492,8 +493,55 @@ bool look_up_capability_absolute(const struct absolute_capability_address *addre
     return return_value;
 }
 
+static const char *handlers_to_name(struct invocation_handlers *handlers) {
+    if (handlers == &debug_handlers) {
+        return "debug";
+    } else if (handlers == &endpoint_handlers) {
+        return "endpoint";
+    } else if (handlers == &thread_handlers) {
+        return "thread";
+    } else if (handlers == &node_handlers) {
+        return "node";
+    } else if (handlers == &untyped_handlers) {
+        return "untyped";
+    } else if (handlers == &address_space_handlers) {
+        return "address space";
+    } else if (handlers == NULL) {
+        return "nothing";
+    } else {
+        return "unknown";
+    }
+}
+
+static void list_capability_node_slots(struct capability_node_header *header) {
+    int last_empty = -1;
+    int i = 0;
+    for (; i < (1 << header->slot_bits); i ++) {
+        struct capability *slot = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + i * sizeof(struct capability));
+
+        if (slot->handlers != NULL) {
+            if (last_empty != -1) {
+                printk("0x%x to 0x%x: nothing\n", last_empty, i);
+                last_empty = -1;
+            }
+
+            printk("0x%x: %s\n", i, handlers_to_name(slot->handlers));
+        } else if (last_empty == -1) {
+            last_empty = i;
+        }
+    }
+
+    if (last_empty != -1) {
+        printk("0x%x to 0x%x: nothing\n", last_empty, i);
+    }
+}
+
 size_t populate_capability_slot(struct heap *heap, size_t address, size_t depth, void *resource, struct invocation_handlers *handlers, uint8_t flags) {
     struct look_up_result result;
+//#ifdef DEBUG
+#if 0
+    result.container = NULL;
+#endif
 
     if (!look_up_capability_relative(address, depth, &result)) {
         printk("populate_capability_slot: failed to look up slot at 0x%x (%d bits)\n", address, depth);
@@ -507,11 +555,18 @@ size_t populate_capability_slot(struct heap *heap, size_t address, size_t depth,
 
     // make sure destination slot is empty
     if (result.slot->handlers != NULL) {
-        printk("populate_capability_slot: slot at 0x%x (%d bits) isn't empty\n", address, depth);
+        printk("populate_capability_slot: slot at 0x%x (%d bits) isn't empty (contains %s)\n", address, depth, handlers_to_name(result.slot->handlers));
 
         if ((flags & CAP_FLAG_IS_HEAP_MANAGED) != 0) {
             heap_free(heap, resource);
         }
+
+//#ifdef DEBUG
+#if 0
+        if (result.container != NULL) {
+            list_capability_node_slots(result.container);
+        }
+#endif
 
         unlock_looked_up_capability(&result);
         return 1; // TODO: use specific error value
@@ -662,6 +717,15 @@ static size_t address_space_alloc(size_t address, size_t depth, struct capabilit
     void *resource = NULL;
     struct invocation_handlers *handlers;
 
+#ifdef DEBUG_CAPABILITIES
+    printk(
+        "address_space_alloc: allocating resource of type %d (%s) with size %d\n",
+        args->type,
+        type_names[args->type],
+        args->size
+    );
+#endif
+
     switch (args->type) {
     case TYPE_UNTYPED:
         resource = heap_alloc(heap, args->size);
@@ -687,14 +751,7 @@ static size_t address_space_alloc(size_t address, size_t depth, struct capabilit
     }
 
 #ifdef DEBUG_CAPABILITIES
-    printk(
-        "address_space_alloc: allocated resource 0x%x of type %d (%s) with size %d, handlers 0x%x\n",
-        resource,
-        args->type,
-        type_names[args->type],
-        args->size,
-        handlers
-    );
+    printk("address_space_alloc: allocated resource 0x%x with handlers 0x%x\n", resource, handlers);
 #endif
 
     return populate_capability_slot(heap, args->address, args->depth, resource, handlers, CAP_FLAG_IS_HEAP_MANAGED);
