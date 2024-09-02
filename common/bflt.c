@@ -9,7 +9,7 @@
 #define printf(...)
 #endif
 
-bool bflt_verify(struct bflt_header *header) {
+bool bflt_verify(const struct bflt_header *header) {
     if (header->magic[0] != 'b' || header->magic[1] != 'F' || header->magic[2] != 'L' || header->magic[3] != 'T') {
         printf("bflt_verify: magic number is invalid!\n");
         return false;
@@ -28,7 +28,7 @@ bool bflt_verify(struct bflt_header *header) {
     return true;
 }
 
-size_t bflt_allocation_size(struct bflt_header *header) {
+size_t bflt_allocation_size(const struct bflt_header *header) {
     if ((header->flags & BFLT_FLAG_GOTPIC) != 0) {
         // if this binary has the GOTPIC flag set, its text segment doesn't have to be copied
         return header->bss_end - header->data_start + header->stack_size;

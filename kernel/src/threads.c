@@ -9,7 +9,7 @@
 #include "sys/kernel.h"
 #include "linked_list.h"
 
-#define DEBUG_THREADS
+#undef DEBUG_THREADS
 
 #define NUM_BUCKETS 128
 

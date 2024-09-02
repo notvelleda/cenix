@@ -45,6 +45,6 @@ struct bflt_header {
 #include <stdbool.h>
 #include "sys/kernel.h"
 
-bool bflt_verify(struct bflt_header *header);
-size_t bflt_allocation_size(struct bflt_header *header);
+bool bflt_verify(const struct bflt_header *header);
+size_t bflt_allocation_size(const struct bflt_header *header);
 void bflt_load(struct bflt_header *header, void *allocation, struct thread_registers *registers);

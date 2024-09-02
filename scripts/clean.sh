@@ -1,3 +1,5 @@
+#!/bin/sh
+
 bmake -C vfs_server clean
 bmake -C service_manager clean
 bmake -C debug_console clean

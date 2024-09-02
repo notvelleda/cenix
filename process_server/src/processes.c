@@ -27,7 +27,7 @@ void init_process_table(void) {
     // TODO: use system pointer width for this
     uint32_t *pointer = (uint32_t *) syscall_invoke(PID_SET_SLOT, -1, UNTYPED_LOCK, 0);
 
-    memset(pointer, PID_MAX / 8, 0);
+    memset(pointer, 0, PID_MAX / 8);
     *pointer = 3; // pids 0 and 1 are reserved
 
     syscall_invoke(PID_SET_SLOT, -1, UNTYPED_UNLOCK, 0);
@@ -95,7 +95,7 @@ void release_pid(pid_t pid) {
     syscall_invoke(PID_SET_SLOT, -1, UNTYPED_UNLOCK, 0);
 }
 
-size_t exec_from_initrd(pid_t pid, struct tar_iterator *iter, char *filename, size_t root_node_address, size_t root_node_depth) {
+size_t exec_from_initrd(pid_t pid, struct tar_iterator *iter, const char *filename, size_t root_node_address, size_t root_node_depth) {
     const char *file_data;
     size_t file_size;
     if (!tar_find(iter, filename, TAR_NORMAL_FILE, &file_data, &file_size)) {

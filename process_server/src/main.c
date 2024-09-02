@@ -9,7 +9,7 @@
 extern const char _binary_initrd_tar_start;
 extern const char _binary_initrd_tar_end;
 
-// TODO: consolidate the different definitions of this
+// TODO: consolidate the various definitions of this
 #define INIT_NODE_DEPTH 4
 #define VFS_ENDPOINT_SLOT 8
 
@@ -102,6 +102,7 @@ void _start(void) {
 
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &root_alloc_args);
     syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &alloc_copy_args);
+    syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &debug_copy_args);
 
     // TODO: inform vfs of new process and how it relates to its creator (in this case, this process) so it can provide a new endpoint for communication with it
 
@@ -116,24 +117,12 @@ void _start(void) {
         .to_copy = 1
     };
     struct ipc_message to_receive = {
-        .capabilities = {{(1 << INIT_NODE_DEPTH) | root_alloc_args.address, -1}}
+        .capabilities = {{(2 << INIT_NODE_DEPTH) | root_alloc_args.address, -1}}
     };
 
     vfs_call(VFS_ENDPOINT_SLOT, endpoint_alloc_args.address, &to_send, &to_receive);
 
     open_tar(&iter, &_binary_initrd_tar_start, &_binary_initrd_tar_end);
-
-    /*for (int i = 0; i < 1048576; i ++) {
-        __asm__ __volatile__ ("nop");
-        __asm__ __volatile__ ("nop");
-        __asm__ __volatile__ ("nop");
-        __asm__ __volatile__ ("nop");
-        __asm__ __volatile__ ("nop");
-        __asm__ __volatile__ ("nop");
-        __asm__ __volatile__ ("nop");
-        __asm__ __volatile__ ("nop");
-    }*/
-
     exec_from_initrd(initrd_tar_fs_pid, &iter, "/sbin/initrd_tar_fs", root_alloc_args.address, root_alloc_args.depth);
 
     printf("done! (pid %d)\n", initrd_tar_fs_pid);

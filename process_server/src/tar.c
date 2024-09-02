@@ -41,7 +41,7 @@ bool tar_next_file(struct tar_iterator *iter, struct tar_header **header, const 
 }
 
 void tar_get_name(struct tar_header *header, char *name_ptr) {
-    char *c = header->name;
+    const char *c = header->name;
     for (int i = 0; i < 100 && *c; i ++) {
         *(name_ptr ++) = *(c ++);
     }

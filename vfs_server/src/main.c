@@ -4,6 +4,8 @@
 #include "sys/kernel.h"
 #include "sys/vfs.h"
 
+#define INIT_NODE_DEPTH 4
+
 void _start(void) {
     printf("hellorld from vfs server!\n");
 
@@ -19,9 +21,9 @@ void _start(void) {
     // since the root capability of this thread's capability space can't be modified, a new capability node needs to be created
     const struct alloc_args node_alloc_args = {
         .type = TYPE_NODE,
-        .size = 2,
+        .size = 3,
         .address = 4,
-        .depth = 4
+        .depth = INIT_NODE_DEPTH
     };
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args);
 
@@ -90,18 +92,29 @@ void _start(void) {
                 const struct node_copy_args copy_args = {
                     .source_address = endpoint_alloc_args.address,
                     .source_depth = endpoint_alloc_args.depth,
-                    .dest_slot = 0,
+                    .dest_slot = IPC_CAPABILITY_SLOTS + 1,
                     .access_rights = -1,
                     .badge = new_pid,
                     .should_set_badge = 1
                 };
-                syscall_invoke(node_alloc_args.address, node_alloc_args.depth, NODE_COPY, (size_t) &copy_args);
+                size_t result = syscall_invoke(node_alloc_args.address, node_alloc_args.depth, NODE_COPY, (size_t) &copy_args);
 
-                // send it back to the process server
-                struct ipc_message message = {
-                    .capabilities = {{(copy_args.dest_slot << node_alloc_args.depth) | node_alloc_args.address, node_alloc_args.depth + node_alloc_args.size}}
-                };
-                syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
+                if (result == 0) {
+                    // send it back to the process server
+                    struct ipc_message message = {
+                        .capabilities = {{(copy_args.dest_slot << node_alloc_args.depth) | node_alloc_args.address, node_alloc_args.depth + node_alloc_args.size}}
+                    };
+                    syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
+                } else {
+                    printf("node copy failed with error %d\n", result);
+
+                    struct ipc_message message = {
+                        .capabilities = {}
+                    };
+                    *(size_t *) &message.buffer = result;
+
+                    syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
+                }
             }
 
             break;

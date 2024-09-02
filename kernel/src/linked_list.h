@@ -174,14 +174,14 @@ if ((item)->field.prev != NULL && (item)->field.next != NULL) { \
     (item)->field.next->field.prev = (item)->field.prev; \
 } else { \
     /* this is either the start or end of the list, so all the links in the list need to be updated */ \
-    if ((item)->field.prev == NULL) { \
+    if ((item)->field.prev == NULL && (item)->field.next != NULL) { \
         type *start = (item)->field.next; \
         start->field.prev = NULL; \
         for (type *link = start; link != NULL; link = link->field.next) { \
             link->field.start = start; \
         } \
     } \
-    if ((item)->field.next == NULL) { \
+    if ((item)->field.next == NULL && (item)->field.prev != NULL) { \
         type *end = (item)->field.prev; \
         end->field.next = NULL; \
         for (type *link = end; link != NULL; link = link->field.prev) { \

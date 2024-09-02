@@ -200,6 +200,26 @@ void copy_capability(struct capability *source, struct capability *dest, size_t 
 #endif
 }
 
+static const char *handlers_to_name(const struct invocation_handlers *handlers) {
+    if (handlers == &debug_handlers) {
+        return "debug";
+    } else if (handlers == &endpoint_handlers) {
+        return "endpoint";
+    } else if (handlers == &thread_handlers) {
+        return "thread";
+    } else if (handlers == &node_handlers) {
+        return "node";
+    } else if (handlers == &untyped_handlers) {
+        return "untyped";
+    } else if (handlers == &address_space_handlers) {
+        return "address space";
+    } else if (handlers == NULL) {
+        return "nothing";
+    } else {
+        return "unknown";
+    }
+}
+
 /* ==== capability node ==== */
 
 static size_t node_copy(size_t address, size_t depth, struct capability *slot, size_t argument) {
@@ -217,23 +237,27 @@ static size_t node_copy(size_t address, size_t depth, struct capability *slot, s
 
     // make sure destination slot is empty
     if (dest->handlers != NULL) {
+        printk("node_copy: destination slot is occupied (contains %s)\n", handlers_to_name(dest->handlers));
         return 1; // TODO: use specific error value
     }
 
     struct look_up_result result;
     if (!look_up_capability_relative(args->source_address, args->source_depth, &result)) {
+        printk("node_copy: failed to look up capability to be copied\n");
         return 1; // TODO: use specific error value
     }
 
     // make sure the source capability is eligible for copying.
     // copying of capability nodes isn't allowed because i just don't know how to deal with it currently and it may just overcomplicate things
     if (result.slot->handlers == &node_handlers) {
+        printk("node_copy: capability nodes are not able to be copied\n");
         unlock_looked_up_capability(&result);
         return 1; // TODO: use specific error value
     }
 
     // if badge setting is requested, make sure the source capability is original
     if (args->should_set_badge && (result.slot->flags & CAP_FLAG_ORIGINAL) == 0) {
+        printk("node_copy: source capability is not original\n");
         unlock_looked_up_capability(&result);
         return 1; // TODO: use specific error value
     }
@@ -493,31 +517,11 @@ bool look_up_capability_absolute(const struct absolute_capability_address *addre
     return return_value;
 }
 
-static const char *handlers_to_name(struct invocation_handlers *handlers) {
-    if (handlers == &debug_handlers) {
-        return "debug";
-    } else if (handlers == &endpoint_handlers) {
-        return "endpoint";
-    } else if (handlers == &thread_handlers) {
-        return "thread";
-    } else if (handlers == &node_handlers) {
-        return "node";
-    } else if (handlers == &untyped_handlers) {
-        return "untyped";
-    } else if (handlers == &address_space_handlers) {
-        return "address space";
-    } else if (handlers == NULL) {
-        return "nothing";
-    } else {
-        return "unknown";
-    }
-}
-
 static void list_capability_node_slots(struct capability_node_header *header) {
     int last_empty = -1;
     int i = 0;
     for (; i < (1 << header->slot_bits); i ++) {
-        struct capability *slot = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + i * sizeof(struct capability));
+        const struct capability *slot = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + i * sizeof(struct capability));
 
         if (slot->handlers != NULL) {
             if (last_empty != -1) {
