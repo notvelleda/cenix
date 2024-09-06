@@ -59,6 +59,17 @@ void yield_thread(void) {
     scheduler_state.pending_context_switch = true;
 }
 
+void handle_thread_exception(struct thread_registers *registers, const char *cause) {
+    struct thread_capability *thread = scheduler_state.current_thread;
+
+    printk("thread 0x%x encountered exception \"%s\"\n", thread->thread_id, cause);
+
+    suspend_thread(thread, EXEC_MODE_SUSPENDED);
+    // TODO: trigger notification for this
+
+    try_context_switch(registers);
+}
+
 // code that runs when no other process is running
 // TODO: use the arch abstraction layer to put the cpu into some kind of low power/sleep mode or something until the next interrupt
 static void idle_thread(void) {

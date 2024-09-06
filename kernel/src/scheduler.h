@@ -41,5 +41,7 @@ void suspend_thread(struct thread_capability *thread, uint8_t new_exec_mode);
 /// yields the rest of the time slice for the current thread, allowing other threads to execute
 void yield_thread(void);
 
+void handle_thread_exception(struct thread_registers *registers, const char *cause);
+
 /// if a context switch has been requested (i.e. by suspending a thread), this function will perform it
 void try_context_switch(struct thread_registers *registers);

@@ -79,16 +79,20 @@ static void puts(const char *c) {
 }
 #endif
 
-void handle_exception(const struct thread_registers *registers, const char *cause) {
+void handle_exception(struct thread_registers *registers, const char *cause) {
+    if ((registers->status_register & (1 << 13)) == 0) {
+        handle_thread_exception(registers, cause);
+    } else {
 #ifdef DEBUG
-    printk("PANIC: unhandled exception \"%s\"\n", cause);
-    log_registers(registers);
+        printk("PANIC: unhandled exception \"%s\"\n", cause);
+        log_registers(registers);
 #else
-    puts("PANIC: unhandled exception \"");
-    puts(cause);
-    puts("\"\n");
+        puts("PANIC: unhandled exception \"");
+        puts(cause);
+        puts("\"\n");
 #endif
-    while (1);
+        while (1);
+    }
 }
 
 void bad_interrupt_handler(struct thread_registers *registers) {
