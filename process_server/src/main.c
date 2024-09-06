@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "sys/kernel.h"
+#include "sys/types.h"
 #include "sys/vfs.h"
 #include "tar.h"
 

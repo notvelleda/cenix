@@ -1,7 +1,7 @@
 #pragma once
 
 #include <stddef.h>
-#include "sys/misc.h"
+#include "sys/types.h"
 #include "tar.h"
 
 void init_process_table(void);

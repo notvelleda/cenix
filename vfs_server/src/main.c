@@ -1,13 +1,17 @@
 #include "debug.h"
 #include <stddef.h>
-#include "sys/misc.h"
+#include <stdbool.h>
 #include "sys/kernel.h"
+#include "sys/types.h"
 #include "sys/vfs.h"
+#include "vfs.h"
 
 #define INIT_NODE_DEPTH 4
 
 void _start(void) {
     printf("hellorld from vfs server!\n");
+
+    init_vfs_structures();
 
     // allocate a new endpoint to handle all client <-> vfs communication
     const struct alloc_args endpoint_alloc_args = {
@@ -27,25 +31,7 @@ void _start(void) {
     };
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args);
 
-    // TODO: set up vfs data structures for the process server
-
-    // set up badged endpoint for process 1 (process server)
-    const struct node_copy_args copy_args = {
-        .source_address = endpoint_alloc_args.address,
-        .source_depth = endpoint_alloc_args.depth,
-        .dest_slot = 0,
-        .access_rights = -1,
-        .badge = 1,
-        .should_set_badge = 1
-    };
-    syscall_invoke(node_alloc_args.address, node_alloc_args.depth, NODE_COPY, (size_t) &copy_args);
-
-    // the vfs server is started with an endpoint in its capability space that can be used to communicate with the process server,
-    // so the actual endpoint that they'll use for communication needs to be sent back to the process server using it
-    struct ipc_message message = {
-        .capabilities = {{(copy_args.dest_slot << node_alloc_args.depth) | node_alloc_args.address, node_alloc_args.depth + node_alloc_args.size}}
-    };
-    syscall_invoke(2, -1, ENDPOINT_SEND, (size_t) &message);
+    set_up_filesystem_for_process(1, 1, 0, 2, endpoint_alloc_args.address, node_alloc_args.address, 0, node_alloc_args.size);
 
     // main vfs server loop
 
@@ -64,18 +50,27 @@ void _start(void) {
             continue;
         }
 
+        size_t fs_id = received.badge >> 1;
+        bool can_modify_namespace = received.badge & 1;
+
         // TODO: properly handle message
-        printf("vfs server: got message %d from process %d!\n", received.buffer[0], received.badge);
+        printf("vfs server: got message %d for fs %d (can modify: %s)!\n", received.buffer[0], fs_id, can_modify_namespace ? "true" : "false");
 
         switch (received.buffer[0]) {
         case VFS_OPEN:
             printf("open (flags 0x%x, mode 0x%x)\n", received.buffer[1], received.buffer[2]);
             break;
         case VFS_MOUNT:
-            printf("mount (flags 0x%x)\n", received.buffer[1]);
-            break;
-        case VFS_BIND:
-            printf("bind (flags 0x%x)\n", received.buffer[1]);
+            {
+                printf("mount (flags 0x%x)\n", received.buffer[1]);
+
+                struct ipc_message message = {
+                    .capabilities = {}
+                };
+                *(size_t *) &message.buffer = mount();
+
+                syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
+            }
             break;
         case VFS_UNMOUNT:
             printf("unmount\n");
@@ -88,25 +83,19 @@ void _start(void) {
 
                 printf("new process (pid %d, creator %d, flags 0x%x)\n", new_pid, creator_pid, received.buffer[1]);
 
-                // make a new endpoint with the badge being the pid of the new process
-                const struct node_copy_args copy_args = {
-                    .source_address = endpoint_alloc_args.address,
-                    .source_depth = endpoint_alloc_args.depth,
-                    .dest_slot = IPC_CAPABILITY_SLOTS + 1,
-                    .access_rights = -1,
-                    .badge = new_pid,
-                    .should_set_badge = 1
-                };
-                size_t result = syscall_invoke(node_alloc_args.address, node_alloc_args.depth, NODE_COPY, (size_t) &copy_args);
+                size_t result = set_up_filesystem_for_process(
+                    creator_pid,
+                    new_pid,
+                    received.buffer[1],
+                    received.capabilities[0].address,
+                    endpoint_alloc_args.address,
+                    node_alloc_args.address,
+                    IPC_CAPABILITY_SLOTS + 1,
+                    node_alloc_args.size
+                );
 
-                if (result == 0) {
-                    // send it back to the process server
-                    struct ipc_message message = {
-                        .capabilities = {{(copy_args.dest_slot << node_alloc_args.depth) | node_alloc_args.address, node_alloc_args.depth + node_alloc_args.size}}
-                    };
-                    syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
-                } else {
-                    printf("node copy failed with error %d\n", result);
+                if (result != 0) {
+                    printf("set_up_filesystem_for_process failed with error %d\n", result);
 
                     struct ipc_message message = {
                         .capabilities = {}

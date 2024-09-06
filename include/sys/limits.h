@@ -8,5 +8,3 @@
 
 #define PID_MAX 1024
 #define PID_BITS 9
-
-typedef uint16_t pid_t;

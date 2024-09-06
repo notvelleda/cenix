@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include "string.h"
 #include "sys/kernel.h"
+#include "sys/limits.h"
+#include "sys/types.h"
 #include "tar.h"
 
 #define ALLOC_SLOT 0

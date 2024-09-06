@@ -11,13 +11,14 @@
 
 #define VFS_OPEN 0
 #define VFS_MOUNT 1
-#define VFS_BIND 2
-#define VFS_UNMOUNT 3
+#define VFS_UNMOUNT 2
 
 #define VFS_NEW_PROCESS 255
 
 /// if this flag is set, the new process will share its filesystem namespace with its creator
 #define VFS_SHARE_NAMESPACE 1
+/// if this flag is set, the new process will not be able to run mount/bind/unmount operations
+#define VFS_READ_ONLY_NAMESPACE 2
 
 #define MREPL 0
 #define MBEFORE 1
@@ -66,19 +67,6 @@ static inline size_t vfs_mount(size_t vfs_endpoint, size_t reply_endpoint, size_
     return vfs_call(vfs_endpoint, reply_endpoint, &to_send, &to_receive);
 }
 
-static inline size_t vfs_bind(size_t vfs_endpoint, size_t reply_endpoint, size_t path, size_t source, uint8_t flags) {
-    struct ipc_message to_send = {
-        .buffer = {VFS_BIND, flags},
-        .capabilities = {{reply_endpoint, -1}, {path, -1}, {source, -1}},
-        .to_copy = 1 // TODO: should these all be copied?
-    };
-    struct ipc_message to_receive = {
-        .capabilities = {}
-    };
-
-    return vfs_call(vfs_endpoint, reply_endpoint, &to_send, &to_receive);
-}
-
 static inline size_t vfs_unmount(size_t vfs_endpoint, size_t reply_endpoint, size_t path, size_t to_unmount) {
     struct ipc_message to_send = {
         .buffer = {VFS_UNMOUNT},
@@ -97,10 +85,9 @@ static inline size_t vfs_unmount(size_t vfs_endpoint, size_t reply_endpoint, siz
 #define FD_WRITE 2
 #define FD_WRITE_FAST 3
 #define FD_STAT 4
-#define FD_CLOSE 5
-#define FD_OPEN 6
-#define FD_LINK 7
-#define FD_UNLINK 8
+#define FD_OPEN 5
+#define FD_LINK 6
+#define FD_UNLINK 7
 
 static inline size_t fd_read(size_t fd_address, size_t reply_endpoint, size_t read_buffer, size_t size, size_t position) {
     struct ipc_message to_send = {
