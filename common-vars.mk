@@ -24,9 +24,9 @@ CFLAGS += $(68000_CFLAGS)
 BINARY_68000 != [ "$(ARCH)" = 68000 ] && echo "elf32-m68k" || echo ""
 BINARY_FORMAT = $(BINARY_68000)
 
-ARCH_SOURCES != find $(ARCH_PATH) -name "*.c" -o -name "*.S"
-PLATFORM_SOURCES != find $(PLATFORM_PATH) -name "*.c" -o -name "*.S"
-COMMON_SOURCES != find src -maxdepth 1 -name "*.c"
+ARCH_SOURCES != find $(ARCH_PATH) -name "*.c" -o -name "*.S" 2>/dev/null || true
+PLATFORM_SOURCES != find $(PLATFORM_PATH) -name "*.c" -o -name "*.S" 2>/dev/null || true
+COMMON_SOURCES != find src -maxdepth 1 -name "*.c" 2>/dev/null || true
 SOURCE_FILES = $(COMMON_SOURCES) $(PLATFORM_SOURCES) $(ARCH_SOURCES) $(ADDITIONAL_SOURCES)
 
 DEBUG_OBJECTS_COND != [ "$(DEBUG)" = y ] && echo $(DEBUG_OBJECTS) || echo ""

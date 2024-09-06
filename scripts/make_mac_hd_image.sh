@@ -4,7 +4,7 @@ set -e
 
 CROSS=m68k-unknown-elf-
 
-MAKE_FLAGS="CROSS=$CROSS CC=${CROSS}cc PLATFORM=mac-68000"
+MAKE_FLAGS="CROSS=$CROSS CC=${CROSS}cc PLATFORM=mac-68000 $@"
 
 bmake -C vfs_server $MAKE_FLAGS DEBUG=y
 bmake -C service_manager $MAKE_FLAGS
@@ -23,7 +23,7 @@ cp debug_console/debug_console initrd/sbin/debug_console
 cp initrd_tar_fs/initrd_tar_fs initrd/sbin/initrd_tar_fs
 
 cd initrd
-tar --format=ustar -cvf ../initrd.tar *
+tar --format=ustar --blocking-factor=1 -cvf ../initrd.tar *
 cd ..
 
 bmake -C process_server $MAKE_FLAGS DEBUG=y
