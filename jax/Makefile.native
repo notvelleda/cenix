@@ -1,0 +1,7 @@
+PROJECT_ROOT = ..
+
+SOURCE_FILES != find src -name "*.c" 2>/dev/null
+OBJECTS = $(SOURCE_FILES:.c=.o)
+BINARY = jax
+
+.include <$(PROJECT_ROOT)/binary.mk>

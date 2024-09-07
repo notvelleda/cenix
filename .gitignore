@@ -42,6 +42,7 @@ service_manager/service_manager
 vfs_server/vfs_server
 debug_console/debug_console
 initrd_tar_fs/initrd_tar_fs
+jax/jax
 
 initrd
 initrd.tar

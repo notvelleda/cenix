@@ -6,6 +6,8 @@ CROSS=m68k-unknown-elf-
 
 MAKE_FLAGS="CROSS=$CROSS CC=${CROSS}cc PLATFORM=mac-68000 $@"
 
+bmake -C jax -f Makefile.native $@
+
 bmake -C vfs_server $MAKE_FLAGS DEBUG=y
 bmake -C service_manager $MAKE_FLAGS
 
