@@ -4,7 +4,7 @@
 #define VFS_ENDPOINT_ADDRESS 2
 
 void _start(void) {
-    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "hellorld from initrd_tar_fs!\n");
+    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "hellorld from initrd_jax_fs!\n");
 
     struct alloc_args endpoint_alloc_args = {
         .type = TYPE_ENDPOINT,

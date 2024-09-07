@@ -1,5 +1,6 @@
 PROJECT_ROOT = ..
 
+CFLAGS = -O2
 SOURCE_FILES != find src -name "*.c" 2>/dev/null
 OBJECTS = $(SOURCE_FILES:.c=.o)
 BINARY = jax

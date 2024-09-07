@@ -7,7 +7,7 @@ BINARY = process_server
 .include <$(PROJECT_ROOT)/common-vars.mk>
 
 INITRD_DIR=../
-INITRD_FILE=initrd.tar
+INITRD_FILE=initrd.jax
 INITRD_OBJECT=$(CWD)/src/initrd.o
 
 OBJECTS += $(INITRD_OBJECT)

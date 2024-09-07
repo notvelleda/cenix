@@ -12,7 +12,7 @@ bmake -C vfs_server $MAKE_FLAGS DEBUG=y
 bmake -C service_manager $MAKE_FLAGS
 
 bmake -C debug_console $MAKE_FLAGS
-bmake -C initrd_tar_fs $MAKE_FLAGS
+bmake -C initrd_jax_fs $MAKE_FLAGS
 
 mkdir -p initrd/sbin
 cp vfs_server/vfs_server initrd/sbin/
@@ -22,10 +22,10 @@ mkdir -p initrd/proc
 mkdir -p initrd/dev
 
 cp debug_console/debug_console initrd/sbin/debug_console
-cp initrd_tar_fs/initrd_tar_fs initrd/sbin/initrd_tar_fs
+cp initrd_jax_fs/initrd_jax_fs initrd/sbin/initrd_jax_fs
 
 cd initrd
-tar --format=ustar --blocking-factor=1 -cvf ../initrd.tar *
+../jax/jax -cvf ../initrd.jax *
 cd ..
 
 bmake -C process_server $MAKE_FLAGS DEBUG=y

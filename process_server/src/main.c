@@ -1,14 +1,14 @@
 #include "debug.h"
+#include "jax.h"
 #include "processes.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include "sys/kernel.h"
 #include "sys/types.h"
 #include "sys/vfs.h"
-#include "tar.h"
 
-extern const char _binary_initrd_tar_start;
-extern const char _binary_initrd_tar_end;
+extern const uint8_t _binary_initrd_jax_start;
+extern const uint8_t _binary_initrd_jax_end;
 
 // TODO: consolidate the various definitions of this
 #define INIT_NODE_DEPTH 4
@@ -19,9 +19,9 @@ void _start(void) {
 
     init_process_table();
 
-    size_t initrd_size = (size_t) &_binary_initrd_tar_end - (size_t) &_binary_initrd_tar_start;
+    size_t initrd_size = (size_t) &_binary_initrd_jax_end - (size_t) &_binary_initrd_jax_start;
 
-    printf("initrd is at 0x%x to 0x%x (%d bytes)\n", &_binary_initrd_tar_start, &_binary_initrd_tar_end, initrd_size);
+    printf("initrd is at 0x%x to 0x%x (%d bytes)\n", &_binary_initrd_jax_start, &_binary_initrd_jax_end, initrd_size);
 
     printf("starting vfs_server...\n");
 
@@ -75,8 +75,8 @@ void _start(void) {
     };
     syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &endpoint_copy_args);
 
-    struct tar_iterator iter;
-    open_tar(&iter, &_binary_initrd_tar_start, &_binary_initrd_tar_end);
+    struct jax_iterator iter;
+    open_jax(&iter, &_binary_initrd_jax_start, &_binary_initrd_jax_end);
 
     exec_from_initrd(vfs_pid, &iter, "/sbin/vfs_server", root_alloc_args.address, root_alloc_args.depth);
 
@@ -95,11 +95,11 @@ void _start(void) {
     syscall_invoke(message.capabilities[0].address, message.capabilities[0].depth, ENDPOINT_SEND, (size_t) &message2);
     syscall_invoke(message.capabilities[0].address, message.capabilities[0].depth, ENDPOINT_SEND, (size_t) &message2);*/
 
-    // TODO: start initrd_tar_fs to mount initrd as root directory, mount /proc, start debug_console for initial stdout (/dev/debug_console?), start service manager
+    // TODO: start initrd_jax_fs to mount initrd as root directory, mount /proc, start debug_console for initial stdout (/dev/debug_console?), start service manager
 
-    printf("starting initrd_tar_fs...\n");
+    printf("starting initrd_jax_fs...\n");
 
-    pid_t initrd_tar_fs_pid = allocate_pid();
+    pid_t initrd_jax_fs_pid = allocate_pid();
 
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &root_alloc_args);
     syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &alloc_copy_args);
@@ -111,7 +111,7 @@ void _start(void) {
         .buffer = {
             VFS_NEW_PROCESS,
             VFS_SHARE_NAMESPACE,
-            initrd_tar_fs_pid >> 8, initrd_tar_fs_pid & 0xff,
+            initrd_jax_fs_pid >> 8, initrd_jax_fs_pid & 0xff,
             0, 1
         },
         .capabilities = {{endpoint_alloc_args.address, -1}},
@@ -123,10 +123,10 @@ void _start(void) {
 
     vfs_call(VFS_ENDPOINT_SLOT, endpoint_alloc_args.address, &to_send, &to_receive);
 
-    open_tar(&iter, &_binary_initrd_tar_start, &_binary_initrd_tar_end);
-    exec_from_initrd(initrd_tar_fs_pid, &iter, "/sbin/initrd_tar_fs", root_alloc_args.address, root_alloc_args.depth);
+    open_jax(&iter, &_binary_initrd_jax_start, &_binary_initrd_jax_end);
+    exec_from_initrd(initrd_jax_fs_pid, &iter, "/sbin/initrd_jax_fs", root_alloc_args.address, root_alloc_args.depth);
 
-    printf("done! (pid %d)\n", initrd_tar_fs_pid);
+    printf("done! (pid %d)\n", initrd_jax_fs_pid);
 
     while (1) {
         syscall_yield();

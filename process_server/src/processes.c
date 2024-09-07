@@ -1,13 +1,13 @@
 #include "processes.h"
 #include "bflt.h"
 #include "debug.h"
+#include "jax.h"
 #include <stddef.h>
 #include <stdint.h>
 #include "string.h"
 #include "sys/kernel.h"
 #include "sys/limits.h"
 #include "sys/types.h"
-#include "tar.h"
 
 #define ALLOC_SLOT 0
 #define PID_SET_SLOT 2
@@ -97,10 +97,10 @@ void release_pid(pid_t pid) {
     syscall_invoke(PID_SET_SLOT, -1, UNTYPED_UNLOCK, 0);
 }
 
-size_t exec_from_initrd(pid_t pid, struct tar_iterator *iter, const char *filename, size_t root_node_address, size_t root_node_depth) {
+size_t exec_from_initrd(pid_t pid, struct jax_iterator *iter, const char *filename, size_t root_node_address, size_t root_node_depth) {
     const char *file_data;
     size_t file_size;
-    if (!tar_find(iter, filename, TAR_NORMAL_FILE, &file_data, &file_size)) {
+    if (!jax_find(iter, filename, TYPE_REGULAR, &file_data, &file_size)) {
         printf("exec_from_initrd: couldn't find %s in initrd\n", filename);
         return 1;
     }

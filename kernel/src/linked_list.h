@@ -106,13 +106,11 @@ do { \
 /// this operation is O(n) because it has to update every link in the list, and should therefore be avoided if possible
 #define LIST_APPEND_NO_CONTAINER(type, container, field, item) \
 do { \
-    printk("item: 0x%x, start: 0x%x, end: 0x%x\n", (item), (container)->field.start, (container)->field.end); \
     (container)->field.end->field.next = (item); \
     (item)->field.prev = (container)->field.end; \
     (item)->field.next = NULL; \
     (item)->field.start = (container)->field.start; \
     LIST_ITER_NO_CONTAINER(type, field, container, link) { \
-        printk("append: 0x%x\n", link); \
         link->field.end = (item); \
     } \
 } while (0)
