@@ -29,7 +29,7 @@ cd initrd
 cd ..
 
 bmake -C process_server $MAKE_FLAGS DEBUG=y
-bmake -C kernel $MAKE_FLAGS DEBUG=n # disabling debug for the kernel saves like 11k
+bmake -C kernel $MAKE_FLAGS DEBUG=y # disabling debug for the kernel saves like 11k
 
 cd tiny-mac-bootloader
 mkdir -p fs-contents

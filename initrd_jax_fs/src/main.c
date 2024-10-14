@@ -35,18 +35,6 @@ void _start(void) {
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args);
 
     vfs_mount(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, path_alloc_args.address, fd_alloc_args.address, MREPL);
-    //vfs_mount(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, -1, -1, MREPL);
-
-    /*struct ipc_message to_send = {
-        .buffer = {VFS_MOUNT, MREPL},
-        .capabilities = {{endpoint_alloc_args.address, -1}},
-        .to_copy = 1
-    };
-    struct ipc_message to_receive = {
-        .capabilities = {}
-    };
-
-    vfs_call(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, &to_send, &to_receive);*/
 
     syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "got here\n");
 

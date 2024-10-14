@@ -1,5 +1,7 @@
 #pragma once
 
+// jax parser implementing the spec described in https://wiki.restless.systems/wiki/Jax_Archive
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

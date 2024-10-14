@@ -1,10 +1,11 @@
 #include "debug.h"
+#include "namespaces.h"
 #include <stddef.h>
 #include <stdbool.h>
+#include "structures.h"
 #include "sys/kernel.h"
 #include "sys/types.h"
 #include "sys/vfs.h"
-#include "vfs.h"
 
 #define INIT_NODE_DEPTH 4
 
@@ -64,10 +65,11 @@ void _start(void) {
             {
                 printf("mount (flags 0x%x)\n", received.buffer[1]);
 
+                // TODO: return an error if can_modify_namespace is false
                 struct ipc_message message = {
                     .capabilities = {}
                 };
-                *(size_t *) &message.buffer = mount();
+                *(size_t *) &message.buffer = mount(fs_id, received.capabilities[1].address, received.capabilities[2].address, received.buffer[1]);
 
                 syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
             }
