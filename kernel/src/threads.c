@@ -1,4 +1,5 @@
 #include "threads.h"
+#include "errno.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include "arch.h"
@@ -112,10 +113,10 @@ static size_t set_root_node(size_t address, size_t depth, struct capability *slo
             heap_unlock(slot->resource);
         }*/
 
-        return 1; // TODO: use specific error value
+        return ENOCAPABILITY;
     }
 
-    size_t return_value = 1; // TODO: use specific error value
+    size_t return_value = ECAPINVAL;
 
     if (result.slot->handlers == &node_handlers && get_nested_nodes_depth(result.slot) < MAX_NESTED_NODES) {
         return_value = 0;

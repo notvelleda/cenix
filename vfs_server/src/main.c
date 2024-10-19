@@ -53,10 +53,14 @@ void _start(void) {
         // TODO: hand off received messages to worker threads with maybe some kind of timeout so they can be killed if a process or fs server is unresponsive
 
         if (IPC_FLAGS(received.badge) == IPC_FLAG_IS_DIRECTORY) {
+            // handle directory proxy calls
             handle_directory_message(thread_id, &received, endpoint_alloc_args.address, IPC_CAPABILITY_SLOTS + 1);
         } else if (IPC_FLAGS(received.badge) == IPC_FLAG_IS_MOUNT_POINT) {
-            // TODO
+            // handle mount point directory calls
+            handle_mount_point_message(thread_id, &received, endpoint_alloc_args.address, IPC_CAPABILITY_SLOTS + 1);
         } else {
+            // handle vfs calls
+
             size_t fs_id = IPC_ID(received.badge);
             bool can_modify_namespace = IPC_FLAGS(received.badge) == IPC_FLAG_CAN_MODIFY;
 
@@ -64,7 +68,18 @@ void _start(void) {
 
             switch (received.buffer[0]) {
             case VFS_OPEN:
-                printf("open (flags 0x%x, mode 0x%x)\n", received.buffer[1], received.buffer[2]);
+                {
+                    printf("open (flags 0x%x, mode 0x%x)\n", received.buffer[1], received.buffer[2]);
+
+                    // TODO: this
+                    struct ipc_message message = {
+                        .capabilities = {}
+                    };
+                    *(size_t *) &message.buffer = ENOSYS;
+
+                    syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
+                }
+
                 break;
             case VFS_MOUNT:
                 {
@@ -80,7 +95,18 @@ void _start(void) {
                 }
                 break;
             case VFS_UNMOUNT:
-                printf("unmount\n");
+                {
+                    printf("unmount\n");
+
+                    // TODO: this
+                    struct ipc_message message = {
+                        .capabilities = {}
+                    };
+                    *(size_t *) &message.buffer = ENOSYS;
+
+                    syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
+                }
+
                 break;
             case VFS_NEW_PROCESS:
                 {
@@ -113,6 +139,13 @@ void _start(void) {
                 }
 
                 break;
+            default:
+                struct ipc_message message = {
+                    .capabilities = {}
+                };
+                *(size_t *) &message.buffer = EBADMSG;
+
+                syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
             }
         }
 

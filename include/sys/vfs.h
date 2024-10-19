@@ -1,5 +1,6 @@
 #pragma once
 
+#include "errno.h"
 #include <stddef.h>
 #include <stdint.h>
 #include "string.h"
@@ -115,7 +116,7 @@ static inline size_t fd_read(size_t fd_address, size_t reply_endpoint, size_t re
 
 static inline size_t fd_read_fast(size_t fd_address, size_t reply_endpoint, uint8_t *read_buffer, size_t size, size_t position) {
     if (size > IPC_BUFFER_SIZE - sizeof(size_t)) {
-        return 1;
+        return EINVAL;
     }
 
     struct ipc_message to_send = {
@@ -160,7 +161,7 @@ static inline size_t fd_write(size_t fd_address, size_t reply_endpoint, size_t w
 
 static inline size_t fd_write_fast(size_t fd_address, size_t reply_endpoint, const uint8_t *write_buffer, size_t size, size_t position) {
     if (size > IPC_BUFFER_SIZE - 1 - sizeof(size_t)) {
-        return 1;
+        return EINVAL;
     }
 
     struct ipc_message to_send = {

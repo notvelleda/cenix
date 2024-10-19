@@ -1,4 +1,5 @@
 #include "capabilities.h"
+#include "errno.h"
 #include "ipc.h"
 #include "linked_list.h"
 #include "scheduler.h"
@@ -230,7 +231,7 @@ static size_t node_copy(size_t address, size_t depth, struct capability *slot, s
 
     // make sure slot id is valid
     if (args->dest_slot >= 1 << header->slot_bits) {
-        return 1; // TODO: use specific error value
+        return EINVAL;
     }
 
     struct capability *dest = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + args->dest_slot * sizeof(struct capability));
@@ -238,13 +239,13 @@ static size_t node_copy(size_t address, size_t depth, struct capability *slot, s
     // make sure destination slot is empty
     if (dest->handlers != NULL) {
         printk("node_copy: destination slot is occupied (contains %s)\n", handlers_to_name(dest->handlers));
-        return 1; // TODO: use specific error value
+        return ECAPEXISTS;
     }
 
     struct look_up_result result;
     if (!look_up_capability_relative(args->source_address, args->source_depth, &result)) {
         printk("node_copy: failed to look up capability to be copied\n");
-        return 1; // TODO: use specific error value
+        return ENOCAPABILITY;
     }
 
     // make sure the source capability is eligible for copying.
@@ -252,14 +253,14 @@ static size_t node_copy(size_t address, size_t depth, struct capability *slot, s
     if (result.slot->handlers == &node_handlers) {
         printk("node_copy: capability nodes are not able to be copied\n");
         unlock_looked_up_capability(&result);
-        return 1; // TODO: use specific error value
+        return ECAPINVAL;
     }
 
     // if badge setting is requested, make sure the source capability is original
     if (args->should_set_badge && (result.slot->flags & CAP_FLAG_ORIGINAL) == 0) {
         printk("node_copy: source capability is not original\n");
         unlock_looked_up_capability(&result);
-        return 1; // TODO: use specific error value
+        return ECAPINVAL;
     }
 
     copy_capability(result.slot, dest, address | (args->dest_slot << depth), depth + header->slot_bits);
@@ -282,19 +283,19 @@ static size_t node_move(size_t address, size_t depth, struct capability *slot, s
 
     // make sure slot id is valid
     if (args->dest_slot >= 1 << header->slot_bits) {
-        return 1; // TODO: use specific error value
+        return EINVAL;
     }
 
     struct capability *dest = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + args->dest_slot * sizeof(struct capability));
 
     // make sure destination slot is empty
     if (dest->handlers != NULL) {
-        return 1; // TODO: use specific error value
+        return ECAPEXISTS;
     }
 
     struct look_up_result result;
     if (!look_up_capability_relative(args->source_address, args->source_depth, &result)) {
-        return 1; // TODO: use specific error value
+        return ENOCAPABILITY;
     }
 
     move_capability(result.slot, dest);
@@ -319,14 +320,14 @@ static size_t node_delete(size_t address, size_t depth, struct capability *slot,
 
     // make sure slot id is valid
     if (argument >= 1 << header->slot_bits) {
-        return 1; // TODO: use specific error value
+        return EINVAL;
     }
 
     struct capability *to_delete = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + argument * sizeof(struct capability));
 
     // make sure there's actually a capability here
     if (to_delete->handlers == NULL) {
-        return 1; // TODO: use specific error value
+        return ENOCAPABILITY;
     }
 
     merge_derivation_lists(to_delete);
@@ -341,18 +342,18 @@ static size_t node_revoke(size_t address, size_t depth, struct capability *slot,
 
     // make sure slot id is valid
     if (argument >= 1 << header->slot_bits) {
-        return 1; // TODO: use specific error value
+        return EINVAL;
     }
 
     struct capability *to_revoke = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + argument * sizeof(struct capability));
 
     // make sure there's actually a capability here and that this capability is eligible for revocation
-    if (
-        to_revoke->handlers == NULL
-        || to_revoke->handlers == &node_handlers
-        || (to_revoke->flags & (CAP_FLAG_BADGED | CAP_FLAG_ORIGINAL)) == 0
-    ) {
-        return 1; // TODO: use specific error value
+    if (to_revoke->handlers == NULL) {
+        return ENOCAPABILITY;
+    }
+
+    if (to_revoke->handlers == &node_handlers || (to_revoke->flags & (CAP_FLAG_BADGED | CAP_FLAG_ORIGINAL)) == 0) {
+        return ECAPINVAL;
     }
 
     // delete all the capabilities that have been derived from this one.
@@ -557,7 +558,7 @@ size_t populate_capability_slot(struct heap *heap, size_t address, size_t depth,
             heap_free(heap, resource);
         }
 
-        return 1; // TODO: use specific error value
+        return ENOCAPABILITY;
     }
 
     // make sure destination slot is empty
@@ -576,7 +577,7 @@ size_t populate_capability_slot(struct heap *heap, size_t address, size_t depth,
 #endif
 
         unlock_looked_up_capability(&result);
-        return 1; // TODO: use specific error value
+        return ECAPEXISTS;
     }
 
     if (handlers == &node_handlers && result.container != NULL) {
@@ -591,7 +592,7 @@ size_t populate_capability_slot(struct heap *heap, size_t address, size_t depth,
             }
 
             unlock_looked_up_capability(&result);
-        return 1; // TODO: use specific error value
+            return ETOOMUCHNESTING;
         }
 
         // update the nested nodes count of this new node
@@ -668,7 +669,7 @@ static size_t untyped_lock(size_t address, size_t depth, struct capability *slot
 
 static size_t untyped_unlock(size_t address, size_t depth, struct capability *slot, size_t argument) {
     heap_unlock(slot->resource);
-    return 1;
+    return 0;
 }
 
 static size_t untyped_try_lock(size_t address, size_t depth, struct capability *slot, size_t argument) {
@@ -699,7 +700,7 @@ static size_t address_space_alloc(size_t address, size_t depth, struct capabilit
 
     if (args->type >= 4) {
         printk("address_space_alloc: invalid type %d\n", args->type);
-        return 1; // TODO: use specific error value
+        return EINVAL;
     }
 
     // make sure there's permission to create this kind of object
@@ -711,7 +712,7 @@ static size_t address_space_alloc(size_t address, size_t depth, struct capabilit
             args->type,
             type_names[args->type]
         );
-        return 1; // TODO: use specific error value
+        return EPERM;
     }
 
     // get pointer to heap
@@ -758,7 +759,7 @@ static size_t address_space_alloc(size_t address, size_t depth, struct capabilit
 
     if (resource == NULL) {
         printk("address_space_alloc: heap allocation for type %d (%s) with size %d failed\n", args->type, type_names[args->type], args->size);
-        return 1; // TODO: use specific error value
+        return ENOMEM;
     }
 
 #ifdef DEBUG_CAPABILITIES
@@ -818,15 +819,16 @@ size_t invoke_capability(size_t address, size_t depth, size_t handler_number, si
 
     if (!look_up_capability_relative(address, depth, &result)) {
         printk("invoke_capability: couldn't locate capability at 0x%x (%d bits) for invocation\n", address, depth);
-        return 1; // TODO: use specific error value
+        return ENOCAPABILITY;
     }
 
     struct invocation_handlers *handlers = result.slot->handlers;
 
+    // TODO: add guard value to invocation numbers so you can't accidentally run a different invocation than was intended
     if (handlers == NULL || handler_number >= handlers->num_handlers) {
         printk("invoke_capability: invocation %d on capability 0x%x (%d bits) is invalid\n", handler_number, address, depth);
         unlock_looked_up_capability(&result);
-        return 1; // TODO: use specific error value
+        return ECAPINVAL;
     }
 
 #ifdef DEBUG_CAPABILITIES

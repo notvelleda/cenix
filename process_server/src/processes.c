@@ -1,6 +1,7 @@
 #include "processes.h"
 #include "bflt.h"
 #include "debug.h"
+#include "errno.h"
 #include "jax.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -101,13 +102,13 @@ size_t exec_from_initrd(pid_t pid, struct jax_iterator *iter, const char *filena
     size_t file_size;
     if (!jax_find(iter, filename, TYPE_REGULAR, &file_data, &file_size)) {
         printf("exec_from_initrd: couldn't find %s in initrd\n", filename);
-        return 1;
+        return ENOENT;
     }
 
     struct bflt_header *header = (struct bflt_header *) file_data;
 
     if (!bflt_verify(header)) {
-        return 1;
+        return ENOEXEC;
     }
 
     size_t allocation_size = bflt_allocation_size(header);
@@ -123,7 +124,7 @@ size_t exec_from_initrd(pid_t pid, struct jax_iterator *iter, const char *filena
 
     if (syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &data_alloc_args) != 0) {
         printf("exec_from_initrd: memory allocation for thread data failed\n");
-        return 1;
+        return ENOMEM;
     }
 
     struct alloc_args thread_alloc_args = {
@@ -136,8 +137,8 @@ size_t exec_from_initrd(pid_t pid, struct jax_iterator *iter, const char *filena
     if (syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &thread_alloc_args) != 0) {
         printf("exec_from_initrd: memory allocation for thread failed\n");
 
-        // TODO: release resources
-        return 1;
+        syscall_invoke(PID_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, pid);
+        return ENOMEM;
     }
 
     void *data = (void *) syscall_invoke(data_alloc_args.address, -1, UNTYPED_LOCK, 0);
@@ -145,8 +146,9 @@ size_t exec_from_initrd(pid_t pid, struct jax_iterator *iter, const char *filena
     if (data == NULL) {
         printf("exec_from_initrd: failed to lock thread data\n");
 
-        // TODO: release resources
-        return 1;
+        syscall_invoke(PID_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, pid);
+        syscall_invoke(PID_THREAD_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, pid);
+        return ENOMEM;
     }
 
     struct thread_registers registers;

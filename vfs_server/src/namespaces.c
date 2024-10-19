@@ -99,7 +99,7 @@ size_t set_up_filesystem_for_process(pid_t creator_pid, pid_t new_pid, uint8_t f
         struct process_data *creator_process_data = (struct process_data *) syscall_invoke(creator_process_data_address, -1, UNTYPED_LOCK, 0);
 
         if (creator_process_data == NULL) {
-            return 1;
+            return ENOMEM;
         }
 
         fs_namespace = creator_process_data->fs_namespace;
@@ -110,7 +110,7 @@ size_t set_up_filesystem_for_process(pid_t creator_pid, pid_t new_pid, uint8_t f
         struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(address, -1, UNTYPED_LOCK, 0);
 
         if (namespace == NULL) {
-            return 1;
+            return ENOMEM;
         }
 
         namespace->references ++;
@@ -121,7 +121,7 @@ size_t set_up_filesystem_for_process(pid_t creator_pid, pid_t new_pid, uint8_t f
         size_t namespace_address = alloc_namespace();
 
         if (namespace_address == -1) {
-            return 1;
+            return ENOMEM;
         }
 
         fs_namespace = namespace_address >> INIT_NODE_DEPTH;
@@ -137,7 +137,7 @@ size_t set_up_filesystem_for_process(pid_t creator_pid, pid_t new_pid, uint8_t f
 
     if (syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args) != 0) {
         free_namespace(fs_namespace);
-        return 1;
+        return ENOMEM;
     }
 
     struct process_data *process_data = (struct process_data *) syscall_invoke(alloc_args.address, -1, UNTYPED_LOCK, 0);
@@ -145,7 +145,7 @@ size_t set_up_filesystem_for_process(pid_t creator_pid, pid_t new_pid, uint8_t f
     if (process_data == NULL) {
         free_namespace(fs_namespace);
         syscall_invoke(PROCESS_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, new_pid);
-        return 1;
+        return ENOMEM;
     }
 
     process_data->fs_namespace = fs_namespace; // TODO: set this
@@ -199,11 +199,11 @@ size_t mount(size_t fs_id, size_t path, size_t directory_fd, uint8_t flags) {
     struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(namespace_address, -1, UNTYPED_LOCK, 0);
 
     if (namespace == NULL) {
-        return 1;
+        return ENOMEM;
     }
 
     if (is_root && namespace->root_address != -1) {
-        return 1;
+        return EEXIST;
     }
 
     // TODO: handle flags properly so existing mount points can be added on to
@@ -213,7 +213,7 @@ size_t mount(size_t fs_id, size_t path, size_t directory_fd, uint8_t flags) {
 
     if (mount_point_address == -1) {
         syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
-        return -1;
+        return ENOMEM;
     }
 
     struct mount_point *mount_point = (struct mount_point *) syscall_invoke(mount_point_address, -1, UNTYPED_LOCK, 0);
@@ -221,7 +221,7 @@ size_t mount(size_t fs_id, size_t path, size_t directory_fd, uint8_t flags) {
     if (mount_point == NULL) {
         free_structure(USED_MOUNT_POINT_IDS_SLOT, MOUNT_POINTS_NODE_SLOT, MAX_MOUNT_POINTS, mount_point_address);
         syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
-        return -1;
+        return ENOMEM;
     }
 
     mount_point->previous = -1;
@@ -248,7 +248,7 @@ size_t mount(size_t fs_id, size_t path, size_t directory_fd, uint8_t flags) {
             if (other_mount_point == NULL) {
                 free_structure(USED_MOUNT_POINT_IDS_SLOT, MOUNT_POINTS_NODE_SLOT, MAX_MOUNT_POINTS, mount_point_address);
                 syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
-                return -1;
+                return ENOMEM;
             }
 
             other_mount_point->previous = mount_point_address;

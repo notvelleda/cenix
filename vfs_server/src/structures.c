@@ -1,4 +1,5 @@
 #include "structures.h"
+#include "errno.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -171,7 +172,7 @@ size_t mark_slot_unused(size_t used_slots_address, size_t max_items, size_t slot
     size_t *pointer = (size_t *) syscall_invoke(used_slots_address, -1, UNTYPED_LOCK, 0);
 
     if (pointer == NULL) {
-        return 1;
+        return ENOMEM;
     }
 
     if (slot_number >= max_items) {
