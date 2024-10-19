@@ -104,6 +104,14 @@ static inline void heap_unlock(void *ptr) {
 /// frees a region of memory, allowing it to be reused for other things
 void heap_free(struct heap *heap, void *ptr);
 
+/// \brief gets the size of the object at the given address
+///
+/// if the address doesn't correspond to a valid object allocated on a heap, the returned value is undefined
+static inline size_t heap_sizeof(void *ptr) {
+    struct heap_header *header = (struct heap_header *) ((uint8_t *) ptr - sizeof(struct heap_header));
+    return header->size - sizeof(struct heap_header);
+}
+
 #ifdef DEBUG
 /// prints out a list of all the blocks in the heap
 void heap_list_blocks(struct heap *heap);

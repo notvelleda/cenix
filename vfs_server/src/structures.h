@@ -2,16 +2,27 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include "sys/kernel.h"
+#include "sys/vfs.h"
 
-#define INIT_NODE_DEPTH 4
+#define PROCESS_DATA_NODE_SLOT 4
 
-#define PROCESS_DATA_NODE_SLOT 5
-#define MOUNT_POINTS_NODE_SLOT 6
-#define USED_MOUNT_POINT_IDS_SLOT 7
-#define INODES_SLOT 8
-#define USED_INODES_SLOT 9
+#define MOUNT_POINTS_NODE_SLOT 5
+#define USED_MOUNT_POINT_IDS_SLOT 6
+
+#define MOUNTED_LIST_INFO_SLOT 7
+#define MOUNTED_LIST_NODE_SLOT 8
+#define USED_MOUNTED_LISTS_SLOT 9
+
 #define NAMESPACE_NODE_SLOT 10
 #define USED_NAMESPACES_SLOT 11
+
+#define DIRECTORY_NODE_SLOT 12
+#define DIRECTORY_INFO_SLOT 13
+#define USED_DIRECTORY_IDS_SLOT 14
+
+#define THREAD_STORAGE_NODE_SLOT 15
+// no more slots are available in the root node as it's only 4 bits
 
 #define MOUNT_POINTS_BITS 8
 #define MAX_MOUNT_POINTS 256
@@ -22,7 +33,20 @@
 #define NAMESPACE_BITS 8
 #define MAX_NAMESPACES 256
 
+#define DIRECTORY_BITS 8
+#define MAX_OPEN_DIRECTORIES 256
+
+// should this be defined here?
+#define THREAD_STORAGE_BITS 3
+#define MAX_WORKER_THREADS 8
+#define THREAD_STORAGE_NODE_BITS 3
+
 #define SIZE_BITS (sizeof(size_t) * 8)
+
+#define THREAD_STORAGE_ADDRESS(thread_id) (((thread_id) << INIT_NODE_DEPTH) | THREAD_STORAGE_NODE_SLOT)
+#define THREAD_STORAGE_DEPTH (THREAD_STORAGE_BITS + INIT_NODE_DEPTH)
+#define THREAD_STORAGE_SLOT(thread_id, slot) (((slot) << (THREAD_STORAGE_BITS + INIT_NODE_DEPTH)) | THREAD_STORAGE_ADDRESS(thread_id))
+#define THREAD_STORAGE_SLOT_DEPTH (THREAD_STORAGE_NODE_BITS + THREAD_STORAGE_DEPTH)
 
 /// structure that describes a mount/bind point in the virtual filesystem
 struct mount_point {
@@ -33,10 +57,9 @@ struct mount_point {
     /// how many references to this mount point exist
     size_t references;
     /// the filesystem that this mount point is contained in
-    size_t enclosing_file_system;
+    size_t enclosing_filesystem;
     /// the inode (unique identifier) of the directory that this mount point refers to
-    // TODO: should inodes always be a size_t? would it be better for them to be a uint32_t so that 8/16 bit systems don't have issues?
-    size_t inode;
+    ino_t inode;
     /// the address in capability space of the first capability node containing directory entries mounted at this mount point
     size_t first_node;
 };
@@ -47,6 +70,8 @@ struct mounted_list_info {
     size_t used_slots;
     /// stores which slots in the capability node containing this structure are marked with the MCREATE flag
     size_t create_flagged_slots;
+    // TODO: should this be part of a linked list so that more mount points than size_t has bits can be added to a given inode?
+    // i was originally thinking of something like this after all
 };
 
 struct process_data {
@@ -69,6 +94,22 @@ struct fs_namespace {
 
 /// initializes and allocates vfs structures
 void init_vfs_structures(void);
+
+/// \brief finds the index of a cleared bit in a bitset, setting it in the process, and calls the given callback while its lock is held.
+///
+/// `used_slots_address` denotes the address of the capability containing the bitset, and `max_items` is the maximum number of entries in that bitset.
+///
+/// the first argument to the callback function is the `data` argument, and the second argument to it is the id of the free bit in the bitset.
+/// if the callback returns -1, the bit at the given index will be cleared before the function returns.
+size_t find_slot_for(size_t used_slots_address, size_t max_items, void *data, size_t (*fn)(void *, size_t));
+
+/// \brief clears a bit in a bitset.
+///
+/// `used_slots_address` denotes the address of the capability containing the bitset, and `max_items` is the maximum number of entries in that bitset.
+/// `slot_number` is the index of the bit to clear in that bitset, which is bounds checked with `max_items`.
+///
+/// upon success, 0 is returned. if an error is encountered, the non-zero error value will be returned.
+size_t mark_slot_unused(size_t used_slots_address, size_t max_items, size_t slot_number);
 
 size_t alloc_structure(size_t used_slots_address, size_t node_address, size_t max_items, size_t structure_size);
 size_t free_structure(size_t used_slots_address, size_t node_address, size_t max_items, size_t structure_address);

@@ -71,6 +71,9 @@ struct node_move_args {
 /// the handler number for the `untyped_try_lock` invocation
 #define UNTYPED_TRY_LOCK 2
 
+/// the handler number for the `untyped_sizeof` invocation
+#define UNTYPED_SIZEOF 3
+
 /// the handler number for the `address_space_alloc` invocation
 #define ADDRESS_SPACE_ALLOC 0
 
@@ -130,19 +133,26 @@ struct set_root_node_args {
 /// the handler number for the `endpoint_receive` invocation
 #define ENDPOINT_RECEIVE 1
 
+// TODO: should there be an endpoint_call invocation that combines send and receive, but always copies the capability in slot 0
+// (and fails if one isn't provided) with send only access, then waits for a response on it?
+
 /// the handler number for the `debug_print` invocation
 #define DEBUG_PRINT 0
 
 /// the size of the IPC message buffer
-#define IPC_BUFFER_SIZE 32
+#define IPC_BUFFER_SIZE 64
 
 /// how many capabilities can be transferred in a single IPC call
 #define IPC_CAPABILITY_SLOTS 4
+
+/// the depth of the process server's (and some other things' too :3) root capability node
+#define INIT_NODE_DEPTH 4
 
 /// arguments passed to the `endpoint_send` and `endpoint_receive` invocations
 struct ipc_message {
     /// raw data to be copied to the receiving thread or to be copied from the sending thread, depending on the invocation
     uint8_t buffer[IPC_BUFFER_SIZE];
+    // TODO: should there be a field that stores how many bytes of this buffer have been written to, so that no more data than needs to be copied has to be?
     /// \brief a list of addresses of capability slots
     ///
     /// when sending a message, any of these fields with a depth of greater than 0 will be moved
@@ -163,6 +173,7 @@ struct ipc_message {
     /// \brief the badge of the capability that sent this message.
     ///
     /// this field is ignored on `endpoint_send` invocations
+    // TODO: should this really be a size_t? maybe it should be hardcoded as like a uint16_t or uint32_t instead
     size_t badge;
 };
 

@@ -8,6 +8,8 @@
 #include "debug.h"
 
 void init_vfs_structures(void) {
+    // TODO: should these be asserted just in case? like nothing here *should* fail but what if it does
+
     const struct alloc_args process_data_node_alloc_args = {
         .type = TYPE_NODE,
         .size = PID_BITS,
@@ -31,25 +33,31 @@ void init_vfs_structures(void) {
         .depth = -1
     };
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_mount_point_ids_alloc_args);
-
     // TODO: zero this out
 
-    const struct alloc_args inodes_node_alloc_args = {
+    const struct alloc_args mounted_list_info_alloc_args = {
         .type = TYPE_NODE,
         .size = MOUNTED_FS_BITS,
-        .address = INODES_SLOT,
+        .address = MOUNTED_LIST_INFO_SLOT,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &inodes_node_alloc_args);
+    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &mounted_list_info_alloc_args);
 
-    const struct alloc_args used_inodes_alloc_args = {
+    const struct alloc_args mounted_list_node_alloc_args = {
+        .type = TYPE_NODE,
+        .size = MOUNTED_FS_BITS,
+        .address = MOUNTED_LIST_NODE_SLOT,
+        .depth = -1
+    };
+    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &mounted_list_node_alloc_args);
+
+    const struct alloc_args used_mounted_lists_alloc_args = {
         .type = TYPE_UNTYPED,
         .size = MAX_MOUNTED_FS / 8,
-        .address = USED_INODES_SLOT,
+        .address = USED_MOUNTED_LISTS_SLOT,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_inodes_alloc_args);
-
+    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_mounted_lists_alloc_args);
     // TODO: zero this out
 
     const struct alloc_args namespaces_node_alloc_args = {
@@ -67,13 +75,62 @@ void init_vfs_structures(void) {
         .depth = -1
     };
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_namespaces_alloc_args);
-
     // TODO: zero this out
+
+    const struct alloc_args directory_node_alloc_args = {
+        .type = TYPE_NODE,
+        .size = DIRECTORY_BITS,
+        .address = DIRECTORY_NODE_SLOT,
+        .depth = -1
+    };
+    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &directory_node_alloc_args);
+
+    const struct alloc_args directory_info_alloc_args = {
+        .type = TYPE_NODE,
+        .size = DIRECTORY_BITS,
+        .address = DIRECTORY_INFO_SLOT,
+        .depth = -1
+    };
+    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &directory_info_alloc_args);
+
+    const struct alloc_args used_directories_alloc_args = {
+        .type = TYPE_UNTYPED,
+        .size = MAX_OPEN_DIRECTORIES / 8,
+        .address = USED_DIRECTORY_IDS_SLOT,
+        .depth = -1
+    };
+    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_directories_alloc_args);
+    // TODO: zero this out
+
+    const struct alloc_args thread_storage_node_alloc_args = {
+        .type = TYPE_NODE,
+        .size = THREAD_STORAGE_BITS,
+        .address = THREAD_STORAGE_NODE_SLOT,
+        .depth = -1
+    };
+    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &thread_storage_node_alloc_args);
+
+    for (int i = 0; i < MAX_WORKER_THREADS; i ++) {
+        const struct alloc_args node_alloc_args = {
+            .type = TYPE_NODE,
+            .size = 3,
+            .address = (i << INIT_NODE_DEPTH) | THREAD_STORAGE_NODE_SLOT,
+            .depth = -1
+        };
+        syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args);
+
+        const struct alloc_args reply_endpoint_alloc_args = {
+            .type = TYPE_ENDPOINT,
+            .size = 0,
+            .address = (7 << (THREAD_STORAGE_BITS + INIT_NODE_DEPTH)) | node_alloc_args.address,
+            .depth = -1
+        };
+
+        syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_endpoint_alloc_args);
+    }
 }
 
-size_t alloc_structure(size_t used_slots_address, size_t node_address, size_t max_items, size_t structure_size) {
-    // find an empty slot in the node for this structure
-    // the lock is held throughout to prevent race conditions even tho it probably doesn't matter too much
+size_t find_slot_for(size_t used_slots_address, size_t max_items, void *data, size_t (*fn)(void *, size_t)) {
     size_t *pointer = (size_t *) syscall_invoke(used_slots_address, -1, UNTYPED_LOCK, 0);
 
     if (pointer == NULL) {
@@ -98,41 +155,65 @@ size_t alloc_structure(size_t used_slots_address, size_t node_address, size_t ma
         break;
     }
 
-    // allocate the new structure
-    const struct alloc_args alloc_args = {
-        .type = TYPE_UNTYPED,
-        .size = structure_size,
-        .address = (id << INIT_NODE_DEPTH) | node_address,
-        .depth = -1
-    };
+    size_t result = fn(data, id);
 
-    if (syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args) != 0) {
+    if (result == -1) {
+        // mark the id as free if the function fails
         pointer[id / SIZE_BITS] &= ~(1 << (id % SIZE_BITS));
-        return -1;
     }
 
     syscall_invoke(used_slots_address, -1, UNTYPED_UNLOCK, 0);
 
-    return alloc_args.address;
+    return result;
 }
 
-size_t free_structure(size_t used_slots_address, size_t node_address, size_t max_items, size_t structure_address) {
-    // even tho the possibility of a race condition here doesn't matter much, it's better to hold the lock throughout anyway
+size_t mark_slot_unused(size_t used_slots_address, size_t max_items, size_t slot_number) {
     size_t *pointer = (size_t *) syscall_invoke(used_slots_address, -1, UNTYPED_LOCK, 0);
 
     if (pointer == NULL) {
         return 1;
     }
 
-    size_t id = structure_address >> INIT_NODE_DEPTH;
+    if (slot_number >= max_items) {
+        size_t unlock_result = syscall_invoke(used_slots_address, -1, UNTYPED_UNLOCK, 0);
+        return unlock_result != 0 ? unlock_result : 1;
+    }
 
-    size_t result = syscall_invoke(node_address, INIT_NODE_DEPTH, NODE_DELETE, id);
+    pointer[slot_number / SIZE_BITS] &= ~(1 << (slot_number % SIZE_BITS));
+
+    return syscall_invoke(used_slots_address, -1, UNTYPED_UNLOCK, 0);
+}
+
+static size_t alloc_structure_callback(void *data, size_t id) {
+    struct alloc_args *alloc_args = (struct alloc_args *) data;
+    alloc_args->address |= id << INIT_NODE_DEPTH;
+
+    if (syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) alloc_args) == 0) {
+        return alloc_args->address;
+    } else {
+        return -1;
+    }
+}
+
+size_t alloc_structure(size_t used_slots_address, size_t node_address, size_t max_items, size_t structure_size) {
+    struct alloc_args alloc_args = {
+        .type = TYPE_UNTYPED,
+        .size = structure_size,
+        .address = /*(id << INIT_NODE_DEPTH) |*/ node_address,
+        .depth = -1
+    };
+
+    return find_slot_for(used_slots_address, max_items, &alloc_args, &alloc_structure_callback);
+}
+
+size_t free_structure(size_t used_slots_address, size_t node_address, size_t max_items, size_t structure_address) {
+    size_t slot_number = structure_address >> INIT_NODE_DEPTH;
+
+    size_t result = syscall_invoke(node_address, INIT_NODE_DEPTH, NODE_DELETE, slot_number);
 
     if (result != 0) {
         return result;
     }
 
-    pointer[id / SIZE_BITS] &= ~(1 << (id % SIZE_BITS));
-
-    return syscall_invoke(used_slots_address, -1, UNTYPED_UNLOCK, 0);
+    return mark_slot_unused(used_slots_address, max_items, slot_number);
 }

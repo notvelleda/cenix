@@ -1,5 +1,6 @@
 #include "namespaces.h"
 #include "debug.h"
+#include "ipc.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include "structures.h"
@@ -89,7 +90,7 @@ static uint8_t hash(size_t value) {
     return result;
 }
 
-size_t set_up_filesystem_for_process(pid_t creator_pid, pid_t new_pid, uint8_t flags, size_t reply_address, size_t endpoint_address, size_t node_address, size_t slot, size_t node_bits) {
+size_t set_up_filesystem_for_process(pid_t creator_pid, pid_t new_pid, uint8_t flags, size_t reply_address, size_t endpoint_address, size_t thread_id, size_t slot) {
     size_t fs_namespace;
 
     if ((flags & VFS_SHARE_NAMESPACE) != 0) {
@@ -150,7 +151,7 @@ size_t set_up_filesystem_for_process(pid_t creator_pid, pid_t new_pid, uint8_t f
     process_data->fs_namespace = fs_namespace; // TODO: set this
     process_data->can_modify_namespace = (flags & VFS_READ_ONLY_NAMESPACE) != 0 ? false : true;
 
-    size_t badge = (process_data->fs_namespace << 1) | (process_data->can_modify_namespace ? 1 : 0);
+    size_t badge = IPC_BADGE(process_data->fs_namespace, process_data->can_modify_namespace ? IPC_FLAG_CAN_MODIFY : 0);
 
     syscall_invoke(alloc_args.address, -1, UNTYPED_UNLOCK, 0);
 
@@ -163,7 +164,7 @@ size_t set_up_filesystem_for_process(pid_t creator_pid, pid_t new_pid, uint8_t f
         .badge = badge,
         .should_set_badge = 1
     };
-    size_t result = syscall_invoke(node_address, INIT_NODE_DEPTH, NODE_COPY, (size_t) &copy_args);
+    size_t result = syscall_invoke(THREAD_STORAGE_ADDRESS(thread_id), THREAD_STORAGE_DEPTH, NODE_COPY, (size_t) &copy_args);
 
     if (result != 0) {
         printf("set_up_filesystem_for_process: node_copy failed with error %d\n", result);
@@ -173,14 +174,16 @@ size_t set_up_filesystem_for_process(pid_t creator_pid, pid_t new_pid, uint8_t f
     }
 
     struct ipc_message message = {
-        .capabilities = {{(copy_args.dest_slot << INIT_NODE_DEPTH) | node_address, INIT_NODE_DEPTH + node_bits}}
+        .capabilities = {{THREAD_STORAGE_SLOT(thread_id, slot), THREAD_STORAGE_SLOT_DEPTH}}
     };
     result = syscall_invoke(reply_address, -1, ENDPOINT_SEND, (size_t) &message);
+
+    // delete the copied endpoint just in case it wasn't transferred or the reply invocation failed
+    syscall_invoke(THREAD_STORAGE_ADDRESS(thread_id), THREAD_STORAGE_DEPTH, NODE_DELETE, slot);
 
     if (result != 0) {
         free_namespace(fs_namespace);
         syscall_invoke(PROCESS_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, new_pid);
-        syscall_invoke(node_address, INIT_NODE_DEPTH, NODE_DELETE, slot);
         return result;
     }
 
@@ -189,7 +192,7 @@ size_t set_up_filesystem_for_process(pid_t creator_pid, pid_t new_pid, uint8_t f
 
 size_t mount(size_t fs_id, size_t path, size_t directory_fd, uint8_t flags) {
     // TODO: properly walk the filesystem tree to find the containing inode
-    size_t inode = 0;
+    ino_t inode = 0;
     bool is_root = true;
 
     size_t namespace_address = (fs_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
@@ -202,6 +205,9 @@ size_t mount(size_t fs_id, size_t path, size_t directory_fd, uint8_t flags) {
     if (is_root && namespace->root_address != -1) {
         return 1;
     }
+
+    // TODO: handle flags properly so existing mount points can be added on to
+    // TODO: figure out how the hell directory_fd should be stored
 
     size_t mount_point_address = alloc_structure(USED_MOUNT_POINT_IDS_SLOT, MOUNT_POINTS_NODE_SLOT, MAX_MOUNT_POINTS, sizeof(struct mount_point));
 
@@ -221,13 +227,16 @@ size_t mount(size_t fs_id, size_t path, size_t directory_fd, uint8_t flags) {
     mount_point->previous = -1;
     mount_point->next = -1;
     mount_point->references = 1;
-    mount_point->enclosing_file_system = 0; // TODO: set this properly
+    mount_point->enclosing_filesystem = 0; // TODO: set this properly
     mount_point->inode = inode;
     mount_point->first_node = 0;
 
     if (is_root) {
         namespace->root_address = mount_point_address;
     } else {
+        // TODO: should the hash value take something else into account as well (maybe the containing filesystem?) in order to reduce
+        // collisions between, for example, sequentially assigned inodes in multiple basic filesystem implementations?
+        // or should that be left up to the filesystem drivers themselves
         uint8_t bucket = hash(inode) % NUM_BUCKETS;
         size_t *bucket_value = &namespace->mount_point_addresses[bucket];
 
@@ -255,4 +264,43 @@ size_t mount(size_t fs_id, size_t path, size_t directory_fd, uint8_t flags) {
     syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
 
     return 0;
+}
+
+size_t find_mount_point(size_t fs_id, ino_t inode, size_t enclosing_filesystem) {
+    size_t namespace_address = (fs_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
+    struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(namespace_address, -1, UNTYPED_LOCK, 0);
+
+    if (namespace == NULL) {
+        return -1;
+    }
+
+    uint8_t bucket = hash(inode) % NUM_BUCKETS;
+    size_t *bucket_value = &namespace->mount_point_addresses[bucket];
+
+    if (*bucket_value == -1) {
+        syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
+        return -1;
+    }
+
+    for (size_t address = *bucket_value; address != -1;) {
+        struct mount_point *mount_point = (struct mount_point *) syscall_invoke(address, -1, UNTYPED_LOCK, 0);
+
+        if (mount_point == NULL) {
+            syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
+            return -1;
+        }
+
+        if (mount_point->inode == inode && mount_point->enclosing_filesystem == enclosing_filesystem) {
+            syscall_invoke(address, -1, UNTYPED_UNLOCK, 0);
+            syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
+            return address;
+        }
+
+        size_t next_address = mount_point->next;
+        syscall_invoke(address, -1, UNTYPED_UNLOCK, 0);
+        address = next_address;
+    }
+
+    syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
+    return -1;
 }

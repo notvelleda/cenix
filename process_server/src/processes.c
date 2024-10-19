@@ -15,7 +15,6 @@
 #define PID_INFO_NODE_SLOT 4
 #define PID_DATA_NODE_SLOT 5
 #define VFS_ENDPOINT_SLOT 8
-#define INIT_NODE_DEPTH 4
 
 void init_process_table(void) {
     struct alloc_args set_alloc_args = {

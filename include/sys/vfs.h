@@ -1,13 +1,18 @@
 #pragma once
 
-#include "sys/kernel.h"
 #include <stddef.h>
 #include <stdint.h>
 #include "string.h"
+#include "sys/kernel.h"
+#include "sys/types.h"
+#include "sys/stat.h"
 
 // plan 9-like vfs operations
 // TODO: document this
 // TODO: should the function declarations here be moved into libc? are the optimization advantages worth it?
+// TODO: should the position argument (or next_entry_position in vfs_directory_entry) really be size_t? shouldn't it be uint32_t/uint64_t
+// TODO: properly document that strings in untyped capabilities must be null terminated since the kernel doesn't guarantee that untyped objects will stay the same size
+// (though they should be bounds checked with untyped_sizeof anyway)
 
 #define VFS_OPEN 0
 #define VFS_MOUNT 1
@@ -88,6 +93,7 @@ static inline size_t vfs_unmount(size_t vfs_endpoint, size_t reply_endpoint, siz
 #define FD_OPEN 5
 #define FD_LINK 6
 #define FD_UNLINK 7
+// TODO: chmod, chown (could these be combined into one call?)
 
 static inline size_t fd_read(size_t fd_address, size_t reply_endpoint, size_t read_buffer, size_t size, size_t position) {
     struct ipc_message to_send = {
@@ -173,17 +179,23 @@ static inline size_t fd_write_fast(size_t fd_address, size_t reply_endpoint, con
     return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
 }
 
-static inline size_t fd_stat(size_t fd_address, size_t reply_endpoint, size_t stat_address) {
+static inline size_t fd_stat(size_t fd_address, size_t reply_endpoint, struct stat *stat_buffer) {
     struct ipc_message to_send = {
         .buffer = {FD_STAT},
         .capabilities = {{reply_endpoint, -1}},
         .to_copy = 1
     };
     struct ipc_message to_receive = {
-        .capabilities = {{stat_address, -1}}
+        .capabilities = {}
     };
 
-    return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
+    size_t result = vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
+
+    if (result == 0) {
+        memcpy(stat_buffer, &to_receive.buffer, sizeof(struct stat));
+    }
+
+    return result;
 }
 
 static inline size_t fd_open(size_t fd_address, size_t reply_endpoint, size_t name_address, size_t fd_slot, uint8_t flags, uint8_t mode) {
@@ -224,3 +236,39 @@ static inline size_t fd_unlink(size_t fd_address, size_t reply_endpoint, size_t 
 
     return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
 }
+
+/// \brief describes the format of directory entries as returned by the VFS and all filesystem servers.
+///
+/// directory entries are read by opening a directory (i.e. with `vfs_open`) and reading their contents similarly to a regular file.
+///
+/// however, unlike with character streams, the `position` argument to `fd_read`/`fd_read_fast` is undefined but consistent, with the only defined value being
+/// 0 (which always means the first entry in the directory).
+/// in order to read directory entries other than the first one, the `position` argument must be set to the value of `next_entry` as read from another valid
+/// directory entry (i.e. one which was also read with a valid position) in the same directory.
+///
+/// if the position at which a directory entry is read is not 0 and has not come from the `next_entry` field of a valid directory entry in that same directory,
+/// the behavior of any `fd_read`/`fd_read_fast` calls at that position is undefined.
+///
+/// when reading a directory entry, each call to `fd_read`/`fd_read_fast` will fill up as much of the provided buffer as possible from that position,
+/// however unlike with files you cannot increment the position value to read more of the directory entry afterwards (since this would lead to undefined behavior).
+/// if more of a directory entry needs to be read, this can be accomplished by simply calling `fd_read`/`fd_read_fast` again at that same position but with a larger
+/// buffer.
+struct vfs_directory_entry {
+    /// \brief the inode number corresponding to this directory entry.
+    ///
+    /// this must be a unique (to this filesystem) ID corresponding to the file with the name in this directory entry in the directory being read.
+    /// hard-linked files (i.e. files sharing an inode) are allowed to share the same ID number.
+    ///
+    /// this field is effectively meaningless to most programs since the user-facing filesystem API exclusively uses filenames and paths, however
+    /// it's crucial to making the VFS layer work properly so it's required.
+    ino_t inode;
+    /// \brief the position at which to read the next directory entry in this directory.
+    ///
+    /// if this value is 0, there are no more entries left in this directory.
+    /// see the description of the `vfs_directory_entry` struct for further details.
+    size_t next_entry_position;
+    /// \brief the length of the name of this directory entry.
+    ///
+    /// the filename is located immediately after this field and must be the length stored in this field without a null terminator at the end.
+    uint16_t name_length;
+};

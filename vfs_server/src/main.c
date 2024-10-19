@@ -1,4 +1,6 @@
 #include "debug.h"
+#include "directories.h"
+#include "ipc.h"
 #include "namespaces.h"
 #include <stddef.h>
 #include <stdbool.h>
@@ -6,11 +8,16 @@
 #include "sys/kernel.h"
 #include "sys/types.h"
 #include "sys/vfs.h"
-
-#define INIT_NODE_DEPTH 4
+#include "sys/stat.h"
 
 void _start(void) {
     printf("hellorld from vfs server!\n");
+
+    // sanity check :3
+    if (sizeof(struct stat) >= 64 - sizeof(size_t)) {
+        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "stat structure is too big!\n");
+        while (1);
+    }
 
     init_vfs_structures();
 
@@ -23,24 +30,16 @@ void _start(void) {
     };
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
 
-    // since the root capability of this thread's capability space can't be modified, a new capability node needs to be created
-    const struct alloc_args node_alloc_args = {
-        .type = TYPE_NODE,
-        .size = 3,
-        .address = 4,
-        .depth = INIT_NODE_DEPTH
-    };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args);
-
-    set_up_filesystem_for_process(1, 1, 0, 2, endpoint_alloc_args.address, node_alloc_args.address, 0, node_alloc_args.size);
+    set_up_filesystem_for_process(1, 1, 0, 2, endpoint_alloc_args.address, 0, 0);
 
     // main vfs server loop
 
+    size_t thread_id = 0;
     struct ipc_message received;
 
     for (int i = 0; i < IPC_CAPABILITY_SLOTS; i ++) {
-        received.capabilities[i].address = (i << node_alloc_args.depth) | node_alloc_args.address;
-        received.capabilities[i].depth = node_alloc_args.depth + node_alloc_args.size;
+        received.capabilities[i].address = THREAD_STORAGE_SLOT(thread_id, i);
+        received.capabilities[i].depth = THREAD_STORAGE_SLOT_DEPTH;
     }
 
     while (1) {
@@ -51,70 +50,76 @@ void _start(void) {
             continue;
         }
 
-        size_t fs_id = received.badge >> 1;
-        bool can_modify_namespace = received.badge & 1;
+        // TODO: hand off received messages to worker threads with maybe some kind of timeout so they can be killed if a process or fs server is unresponsive
 
-        // TODO: properly handle message
-        printf("vfs server: got message %d for fs %d (can modify: %s)!\n", received.buffer[0], fs_id, can_modify_namespace ? "true" : "false");
+        if (IPC_FLAGS(received.badge) == IPC_FLAG_IS_DIRECTORY) {
+            handle_directory_message(thread_id, &received, endpoint_alloc_args.address, IPC_CAPABILITY_SLOTS + 1);
+        } else if (IPC_FLAGS(received.badge) == IPC_FLAG_IS_MOUNT_POINT) {
+            // TODO
+        } else {
+            size_t fs_id = IPC_ID(received.badge);
+            bool can_modify_namespace = IPC_FLAGS(received.badge) == IPC_FLAG_CAN_MODIFY;
 
-        switch (received.buffer[0]) {
-        case VFS_OPEN:
-            printf("open (flags 0x%x, mode 0x%x)\n", received.buffer[1], received.buffer[2]);
-            break;
-        case VFS_MOUNT:
-            {
-                printf("mount (flags 0x%x)\n", received.buffer[1]);
+            printf("vfs server: got message %d for fs %d (can modify: %s)!\n", received.buffer[0], fs_id, can_modify_namespace ? "true" : "false");
 
-                // TODO: return an error if can_modify_namespace is false
-                struct ipc_message message = {
-                    .capabilities = {}
-                };
-                *(size_t *) &message.buffer = mount(fs_id, received.capabilities[1].address, received.capabilities[2].address, received.buffer[1]);
+            switch (received.buffer[0]) {
+            case VFS_OPEN:
+                printf("open (flags 0x%x, mode 0x%x)\n", received.buffer[1], received.buffer[2]);
+                break;
+            case VFS_MOUNT:
+                {
+                    printf("mount (flags 0x%x)\n", received.buffer[1]);
 
-                syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
-            }
-            break;
-        case VFS_UNMOUNT:
-            printf("unmount\n");
-            break;
-        case VFS_NEW_PROCESS:
-            {
-                // TODO: verify that this is coming from the process server
-                pid_t new_pid = (received.buffer[2] << 8) | received.buffer[3];
-                pid_t creator_pid = (received.buffer[4] << 8) | received.buffer[5];
-
-                printf("new process (pid %d, creator %d, flags 0x%x)\n", new_pid, creator_pid, received.buffer[1]);
-
-                size_t result = set_up_filesystem_for_process(
-                    creator_pid,
-                    new_pid,
-                    received.buffer[1],
-                    received.capabilities[0].address,
-                    endpoint_alloc_args.address,
-                    node_alloc_args.address,
-                    IPC_CAPABILITY_SLOTS + 1,
-                    node_alloc_args.size
-                );
-
-                if (result != 0) {
-                    printf("set_up_filesystem_for_process failed with error %d\n", result);
-
+                    // TODO: return an error if can_modify_namespace is false
                     struct ipc_message message = {
                         .capabilities = {}
                     };
-                    *(size_t *) &message.buffer = result;
+                    *(size_t *) &message.buffer = mount(fs_id, received.capabilities[1].address, received.capabilities[2].address, received.buffer[1]);
 
                     syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
                 }
-            }
+                break;
+            case VFS_UNMOUNT:
+                printf("unmount\n");
+                break;
+            case VFS_NEW_PROCESS:
+                {
+                    // TODO: verify that this is coming from the process server
+                    pid_t new_pid = (received.buffer[2] << 8) | received.buffer[3];
+                    pid_t creator_pid = (received.buffer[4] << 8) | received.buffer[5];
 
-            break;
+                    printf("new process (pid %d, creator %d, flags 0x%x)\n", new_pid, creator_pid, received.buffer[1]);
+
+                    size_t result = set_up_filesystem_for_process(
+                        creator_pid,
+                        new_pid,
+                        received.buffer[1],
+                        received.capabilities[0].address,
+                        endpoint_alloc_args.address,
+                        thread_id,
+                        IPC_CAPABILITY_SLOTS + 1
+                    );
+
+                    if (result != 0) {
+                        printf("set_up_filesystem_for_process failed with error %d\n", result);
+
+                        struct ipc_message message = {
+                            .capabilities = {}
+                        };
+                        *(size_t *) &message.buffer = result;
+
+                        syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
+                    }
+                }
+
+                break;
+            }
         }
 
         // delete any leftover capabilities that were transferred
         for (size_t i = 0; i < IPC_CAPABILITY_SLOTS; i ++) {
             if ((received.transferred_capabilities & (1 << i)) != 0) {
-                syscall_invoke(node_alloc_args.address, node_alloc_args.depth, NODE_DELETE, i);
+                syscall_invoke(THREAD_STORAGE_ADDRESS(thread_id), THREAD_STORAGE_DEPTH, NODE_DELETE, i);
             }
         }
     }

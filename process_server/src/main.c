@@ -10,8 +10,6 @@
 extern const uint8_t _binary_initrd_jax_start;
 extern const uint8_t _binary_initrd_jax_end;
 
-// TODO: consolidate the various definitions of this
-#define INIT_NODE_DEPTH 4
 #define VFS_ENDPOINT_SLOT 8
 
 void _start(void) {

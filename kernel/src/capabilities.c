@@ -517,6 +517,8 @@ bool look_up_capability_absolute(const struct absolute_capability_address *addre
     return return_value;
 }
 
+//#ifdef DEBUG
+#if 0
 static void list_capability_node_slots(struct capability_node_header *header) {
     int last_empty = -1;
     int i = 0;
@@ -539,6 +541,7 @@ static void list_capability_node_slots(struct capability_node_header *header) {
         printk("0x%x to 0x%x: nothing\n", last_empty, i);
     }
 }
+#endif
 
 size_t populate_capability_slot(struct heap *heap, size_t address, size_t depth, void *resource, struct invocation_handlers *handlers, uint8_t flags) {
     struct look_up_result result;
@@ -676,9 +679,13 @@ static size_t untyped_try_lock(size_t address, size_t depth, struct capability *
     }
 }
 
+static size_t untyped_sizeof(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    return heap_sizeof(slot->resource);
+}
+
 struct invocation_handlers untyped_handlers = {
-    .num_handlers = 3,
-    .handlers = {untyped_lock, untyped_unlock, untyped_try_lock},
+    .num_handlers = 4,
+    .handlers = {untyped_lock, untyped_unlock, untyped_try_lock, untyped_sizeof},
 };
 
 /* ==== address space ==== */
