@@ -208,6 +208,7 @@ size_t mount(size_t fs_id, size_t path, size_t directory_fd, uint8_t flags) {
 
     // TODO: handle flags properly so existing mount points can be added on to
     // TODO: figure out how the hell directory_fd should be stored
+    // TODO: if directory_fd is a proxied endpoint, copy the original endpoint to prevent any Wackiness
 
     size_t mount_point_address = alloc_structure(USED_MOUNT_POINT_IDS_SLOT, MOUNT_POINTS_NODE_SLOT, MAX_MOUNT_POINTS, sizeof(struct mount_point));
 

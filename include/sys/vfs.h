@@ -193,7 +193,7 @@ static inline size_t fd_stat(size_t fd_address, size_t reply_endpoint, struct st
     size_t result = vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
 
     if (result == 0) {
-        memcpy(stat_buffer, &to_receive.buffer, sizeof(struct stat));
+        memcpy(stat_buffer, &to_receive.buffer[sizeof(size_t)], sizeof(struct stat));
     }
 
     return result;
@@ -212,6 +212,8 @@ static inline size_t fd_open(size_t fd_address, size_t reply_endpoint, size_t na
     return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
 }
 
+// TODO: figure out how the Fuck to do this, since in order to make it work there needs to be a way to get the badge of an endpoint if and only if a thread possesses
+// the endpoint it originated from
 static inline size_t fd_link(size_t fd_address, size_t reply_endpoint, size_t old_address, size_t new_address) {
     struct ipc_message to_send = {
         .buffer = {FD_LINK},
@@ -247,8 +249,8 @@ static inline size_t fd_unlink(size_t fd_address, size_t reply_endpoint, size_t 
 /// in order to read directory entries other than the first one, the `position` argument must be set to the value of `next_entry` as read from another valid
 /// directory entry (i.e. one which was also read with a valid position) in the same directory.
 ///
-/// if the position at which a directory entry is read is not 0 and has not come from the `next_entry` field of a valid directory entry in that same directory,
-/// the behavior of any `fd_read`/`fd_read_fast` calls at that position is undefined.
+/// if the position at which a directory entry is read is not 0 and has not come from the `next_entry` field of a valid directory entry in that same directory
+/// file descriptor, the behavior of any `fd_read`/`fd_read_fast` calls at that position is undefined.
 ///
 /// when reading a directory entry, each call to `fd_read`/`fd_read_fast` will fill up as much of the provided buffer as possible from that position,
 /// however unlike with files you cannot increment the position value to read more of the directory entry afterwards (since this would lead to undefined behavior).

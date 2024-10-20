@@ -51,6 +51,7 @@ void _start(void) {
         }
 
         // TODO: hand off received messages to worker threads with maybe some kind of timeout so they can be killed if a process or fs server is unresponsive
+        // TODO: permissions checks in open calls
 
         if (IPC_FLAGS(received.badge) == IPC_FLAG_IS_DIRECTORY) {
             // handle directory proxy calls
@@ -85,11 +86,10 @@ void _start(void) {
                 {
                     printf("mount (flags 0x%x)\n", received.buffer[1]);
 
-                    // TODO: return an error if can_modify_namespace is false
                     struct ipc_message message = {
                         .capabilities = {}
                     };
-                    *(size_t *) &message.buffer = mount(fs_id, received.capabilities[1].address, received.capabilities[2].address, received.buffer[1]);
+                    *(size_t *) &message.buffer = can_modify_namespace ? mount(fs_id, received.capabilities[1].address, received.capabilities[2].address, received.buffer[1]) : EPERM;
 
                     syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
                 }
