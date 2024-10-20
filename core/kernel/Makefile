@@ -1,4 +1,4 @@
-PROJECT_ROOT = ..
+PROJECT_ROOT = ../..
 
 CFLAGS += -O2
 BINARY = kernel

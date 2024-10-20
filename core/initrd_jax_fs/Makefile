@@ -1,8 +1,8 @@
-PROJECT_ROOT = ..
+PROJECT_ROOT = ../..
 
 CFLAGS += -fPIC -fPIE -msep-data -Os
 LDFLAGS += -Wl,-elf2flt -Wl,-move-rodata
-BINARY = service_manager
+BINARY = initrd_jax_fs
 
 .include <$(PROJECT_ROOT)/common-vars.mk>
 .include <$(PROJECT_ROOT)/binary.mk>

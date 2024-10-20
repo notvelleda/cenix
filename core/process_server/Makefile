@@ -1,4 +1,4 @@
-PROJECT_ROOT = ..
+PROJECT_ROOT = ../..
 
 CFLAGS += -fPIC -fPIE -msep-data -Os
 LDFLAGS += -Wl,-elf2flt -Wl,-move-rodata
@@ -6,7 +6,7 @@ BINARY = process_server
 
 .include <$(PROJECT_ROOT)/common-vars.mk>
 
-INITRD_DIR=../
+INITRD_DIR=$(PROJECT_ROOT)
 INITRD_FILE=initrd.jax
 INITRD_OBJECT=$(CWD)/src/initrd.o
 
