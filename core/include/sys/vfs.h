@@ -11,7 +11,7 @@
 // plan 9-like vfs operations
 // TODO: document this
 // TODO: should the function declarations here be moved into libc? are the optimization advantages worth it?
-// TODO: should the position argument (or next_entry_position in vfs_directory_entry) really be size_t? shouldn't it be uint32_t/uint64_t
+// TODO: should the position argument (or next_entry_position in vfs_directory_entry, or size in FD_TRUNCATE) really be size_t? shouldn't it be uint32_t/uint64_t
 // TODO: properly document that strings in untyped capabilities must be null terminated since the kernel doesn't guarantee that untyped objects will stay the same size
 // (though they should be bounds checked with untyped_sizeof anyway)
 
@@ -26,10 +26,21 @@
 /// if this flag is set, the new process will not be able to run mount/bind/unmount operations
 #define VFS_READ_ONLY_NAMESPACE 2
 
-#define MREPL 0
-#define MBEFORE 1
-#define MAFTER 2
-#define MCREATE 4
+#define MREPL 1
+#define MBEFORE 2
+#define MAFTER 4
+#define MCREATE 8
+// TODO: should MCACHE exist? is it worth caching things? how should caching even work here
+
+#define MODE_EXEC 1
+#define MODE_READ 2
+#define MODE_WRITE 4
+#define MODE_APPEND 8
+
+#define OPEN_CREATE 1
+#define OPEN_EXCLUSIVE 2
+#define OPEN_DIRECTORY 4
+#define OPEN_NO_FOLLOW 8
 
 static inline size_t vfs_call(size_t endpoint, size_t reply_endpoint, struct ipc_message *to_send, struct ipc_message *to_receive) {
     size_t result = syscall_invoke(endpoint, -1, ENDPOINT_SEND, (size_t) to_send);
@@ -94,6 +105,7 @@ static inline size_t vfs_unmount(size_t vfs_endpoint, size_t reply_endpoint, siz
 #define FD_OPEN 5
 #define FD_LINK 6
 #define FD_UNLINK 7
+#define FD_TRUNCATE 8
 // TODO: chmod, chown (could these be combined into one call?)
 
 static inline size_t fd_read(size_t fd_address, size_t reply_endpoint, size_t read_buffer, size_t size, size_t position) {
@@ -214,11 +226,11 @@ static inline size_t fd_open(size_t fd_address, size_t reply_endpoint, size_t na
 
 // TODO: figure out how the Fuck to do this, since in order to make it work there needs to be a way to get the badge of an endpoint if and only if a thread possesses
 // the endpoint it originated from
-static inline size_t fd_link(size_t fd_address, size_t reply_endpoint, size_t old_address, size_t new_address) {
+static inline size_t fd_link(size_t fd_address, size_t reply_endpoint, size_t fd_to_link, size_t name_address) {
     struct ipc_message to_send = {
         .buffer = {FD_LINK},
-        .capabilities = {{reply_endpoint, -1}, {old_address, -1}, {new_address, -1}},
-        .to_copy = 1 // TODO: should the old and new addresses be copied?
+        .capabilities = {{reply_endpoint, -1}, {fd_to_link, -1}, {name_address, -1}},
+        .to_copy = 1 // TODO: should the file descriptor to link and name be copied?
     };
     struct ipc_message to_receive = {
         .capabilities = {}
@@ -236,6 +248,21 @@ static inline size_t fd_unlink(size_t fd_address, size_t reply_endpoint, size_t 
     struct ipc_message to_receive = {
         .capabilities = {}
     };
+
+    return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
+}
+
+static inline size_t fd_truncate(size_t fd_address, size_t reply_endpoint, size_t size) {
+    struct ipc_message to_send = {
+        .buffer = {FD_TRUNCATE},
+        .capabilities = {{reply_endpoint, -1}},
+        .to_copy = 1
+    };
+    struct ipc_message to_receive = {
+        .capabilities = {}
+    };
+
+    *(size_t *) (&to_send.buffer + 1) = size;
 
     return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
 }

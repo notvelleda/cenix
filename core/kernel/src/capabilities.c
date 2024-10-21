@@ -819,6 +819,8 @@ size_t invoke_capability(size_t address, size_t depth, size_t handler_number, si
 
     if (!look_up_capability_relative(address, depth, &result)) {
         printk("invoke_capability: couldn't locate capability at 0x%x (%d bits) for invocation\n", address, depth);
+
+        // TODO: rethink how error values are returned here in order to prevent issues with untyped_lock invocations not returning NULL
         return ENOCAPABILITY;
     }
 
@@ -828,6 +830,8 @@ size_t invoke_capability(size_t address, size_t depth, size_t handler_number, si
     if (handlers == NULL || handler_number >= handlers->num_handlers) {
         printk("invoke_capability: invocation %d on capability 0x%x (%d bits) is invalid\n", handler_number, address, depth);
         unlock_looked_up_capability(&result);
+
+        // TODO: see above
         return ECAPINVAL;
     }
 

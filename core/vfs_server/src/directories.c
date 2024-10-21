@@ -75,23 +75,15 @@ struct directory_info {
 
 /// opens the requested file, then calls fd_stat on it to check if its inode matches that of a mount point. if it doesn't, the newly opened file
 /// is sent back to the calling process. if it does match, a new directory endpoint is created for the root directory of the new filesystem
-static void open_file(size_t thread_id, size_t directory_id, size_t endpoint_address, size_t temp_slot, struct ipc_message *message) {
-    size_t directory_address = DIRECTORY_ADDRESS(directory_id);
-    size_t directory_info_address = DIRECTORY_INFO_ADDRESS(directory_id);
+static size_t open_file(size_t thread_id, size_t fd_endpoint, size_t endpoint_address, size_t temp_slot, struct directory_info *info, struct ipc_message *message) {
     size_t reply_capability = message->capabilities[0].address;
-
-    struct directory_info *info = (struct directory_info *) syscall_invoke(directory_info_address, -1, UNTYPED_LOCK, 0);
-
-    if (info == NULL) {
-        return return_value(reply_capability, ENOMEM);
-    }
 
     size_t reply_endpoint_address = THREAD_STORAGE_SLOT(thread_id, 7);
     // TODO: send a version of the reply endpoint with access control that only allows for sending messages (should vfs.h be modified for that?),
     // though maybe that could be folded into a potential ENDPOINT_CALL invocation?
 
     struct open_fields fields = {
-        .fd_endpoint = directory_address,
+        .fd_endpoint = fd_endpoint,
         .reply_endpoint = reply_endpoint_address,
         .name_address = message->capabilities[1].address,
         .flags = message->buffer[1],
@@ -103,8 +95,7 @@ static void open_file(size_t thread_id, size_t directory_id, size_t endpoint_add
     size_t opened_file_address = find_slot_for(USED_DIRECTORY_IDS_SLOT, MAX_OPEN_DIRECTORIES, &fields, &open_file_callback);
 
     if (opened_file_address == -1) {
-        syscall_invoke(directory_info_address, -1, UNTYPED_UNLOCK, 0);
-        return return_value(reply_capability, ENOMEM);
+        return ENOMEM;
     }
 
     struct stat stat;
@@ -113,8 +104,7 @@ static void open_file(size_t thread_id, size_t directory_id, size_t endpoint_add
     if (result != 0) {
 idk_just_fucking_return:
         free_structure(USED_DIRECTORY_IDS_SLOT, DIRECTORY_NODE_SLOT, MAX_OPEN_DIRECTORIES, opened_file_address);
-        syscall_invoke(directory_info_address, -1, UNTYPED_UNLOCK, 0);
-        return return_value(reply_capability, result);
+        return result;
     }
 
     size_t mount_point_address = find_mount_point(info->fs_id, stat.st_ino, info->enclosing_filesystem);
@@ -154,8 +144,6 @@ idk_just_fucking_return:
 
             result = badge_and_send(thread_id, endpoint_address, temp_slot, IPC_BADGE(new_directory_id, IPC_FLAG_IS_MOUNT_POINT), reply_capability);
 
-            syscall_invoke(directory_info_address, -1, UNTYPED_UNLOCK, 0);
-
             if (result != 0) {
                 free_structure(USED_DIRECTORY_IDS_SLOT, DIRECTORY_NODE_SLOT, MAX_OPEN_DIRECTORIES, opened_file_address);
                 syscall_invoke(DIRECTORY_INFO_SLOT, INIT_NODE_DEPTH, NODE_DELETE, new_directory_id);
@@ -169,20 +157,16 @@ idk_just_fucking_return:
             syscall_invoke(reply_capability, -1, ENDPOINT_SEND, (size_t) &reply);
 
             free_structure(USED_DIRECTORY_IDS_SLOT, DIRECTORY_NODE_SLOT, MAX_OPEN_DIRECTORIES, opened_file_address);
-            syscall_invoke(directory_info_address, -1, UNTYPED_UNLOCK, 0);
-            return;
+            return 0;
         }
     } else {
         // badge the vfs endpoint with the mount point address and send it back to the caller
         result = badge_and_send(thread_id, endpoint_address, temp_slot, IPC_BADGE(mount_point_address, IPC_FLAG_IS_MOUNT_POINT), reply_capability);
 
         free_structure(USED_DIRECTORY_IDS_SLOT, DIRECTORY_NODE_SLOT, MAX_OPEN_DIRECTORIES, opened_file_address);
-        syscall_invoke(directory_info_address, -1, UNTYPED_UNLOCK, 0);
     }
 
-    if (result != 0) {
-        return_value(reply_capability, result);
-    }
+    return result;
 }
 
 void handle_directory_message(size_t thread_id, struct ipc_message *message, size_t endpoint_address, size_t temp_slot) {
@@ -213,13 +197,125 @@ void handle_directory_message(size_t thread_id, struct ipc_message *message, siz
 
         break;
     case FD_OPEN:
-        return open_file(thread_id, directory_id, endpoint_address, temp_slot, message);
+        {
+            size_t directory_address = DIRECTORY_ADDRESS(directory_id);
+            size_t directory_info_address = DIRECTORY_INFO_ADDRESS(directory_id);
+
+            struct directory_info *info = (struct directory_info *) syscall_invoke(directory_info_address, -1, UNTYPED_LOCK, 0);
+
+            if (info == NULL) {
+                return return_value(message->capabilities[0].address, ENOMEM);
+            }
+
+            size_t result = open_file(thread_id, directory_address, endpoint_address, temp_slot, info, message);
+
+            syscall_invoke(directory_info_address, -1, UNTYPED_UNLOCK, 0);
+
+            if (result != 0) {
+                return_value(message->capabilities[0].address, result);
+            }
+        }
+
+        break;
     case FD_WRITE:
     case FD_WRITE_FAST:
-        // writing is prohibited for directories
+    case FD_TRUNCATE:
+        // writing/truncating is prohibited for directories
         return return_value(message->capabilities[0].address, ENOTSUP);
     default:
         return return_value(message->capabilities[0].address, EBADMSG);
+    }
+}
+
+static size_t iterate_over_mount_point(size_t mount_point_address, void *data, bool (*fn)(void *, size_t, bool, size_t *)) {
+    // mount point lock is held throughout so that nothing wacky happens. not sure if the performance of this is especially Good but whatever
+    struct mount_point *mount_point = (struct mount_point *) syscall_invoke(mount_point_address, -1, UNTYPED_LOCK, 0);
+
+    if (mount_point == NULL) {
+        return ENOMEM;
+    }
+
+    struct mounted_list_info *list = (struct mounted_list_info *) syscall_invoke(mount_point->first_node, -1, UNTYPED_LOCK, 0);
+
+    if (list == NULL) {
+        syscall_invoke(mount_point_address, -1, UNTYPED_UNLOCK, 0);
+        return ENOMEM;
+    }
+
+    for (int i = 0; i < sizeof(size_t) * 8; i ++) {
+        if ((list->used_slots & (1 << i)) == 0) {
+            continue;
+        }
+
+        bool is_create_flagged = (list->create_flagged_slots & (1 << i)) != 0;
+        size_t address = (i << (INIT_NODE_DEPTH + MOUNTED_FS_BITS)) | (mount_point_address & ~((1 << INIT_NODE_DEPTH) - 1)) | MOUNTED_LIST_NODE_SLOT;
+        size_t result = 0;
+
+        if (!fn(data, address, is_create_flagged, &result)) {
+            syscall_invoke(mount_point->first_node, -1, UNTYPED_UNLOCK, 0);
+            syscall_invoke(mount_point_address, -1, UNTYPED_UNLOCK, 0);
+            return result;
+        }
+    }
+
+    syscall_invoke(mount_point->first_node, -1, UNTYPED_UNLOCK, 0);
+    syscall_invoke(mount_point_address, -1, UNTYPED_UNLOCK, 0);
+    return ENOENT;
+}
+
+struct link_args {
+    struct ipc_message to_send;
+    bool requires_create_flag;
+};
+
+/// handles FD_LINK/FD_UNLINK for mount points
+static bool link_callback(void *data, size_t directory_address, bool is_create_flagged, size_t *result_value) {
+    struct link_args *args = (struct link_args *) data;
+
+    if (!is_create_flagged && args->requires_create_flag) {
+        // FD_LINK in a union directory should only successfully link in directories marked with MCREATE
+        return true;
+    }
+
+    struct ipc_message to_receive = {
+        .capabilities = {}
+    };
+
+    // TODO: have a timeout on this
+    size_t result = vfs_call(directory_address, args->to_send.capabilities[0].address, &args->to_send, &to_receive);
+
+    if (result == 0) {
+        // if the link call succeeded, we're done
+        *result_value = 0;
+        return false;
+    } else {
+        return true;
+    }
+}
+
+struct open_args {
+    size_t thread_id;
+    size_t endpoint_address;
+    size_t temp_slot;
+    struct directory_info info;
+    struct ipc_message *message;
+    bool allow_create;
+};
+
+static bool open_callback(void *data, size_t directory_address, bool is_create_flagged, size_t *result_value) {
+    struct open_args *args = (struct open_args *) data;
+
+    if (is_create_flagged && !args->allow_create) {
+        return true;
+    }
+
+    size_t result = open_file(args->thread_id, directory_address, args->endpoint_address, args->temp_slot, &args->info, args->message);
+
+    if (result == 0) {
+        *result_value = 0;
+        return false;
+    } else {
+        return true;
     }
 }
 
@@ -231,10 +327,11 @@ void handle_mount_point_message(size_t thread_id, struct ipc_message *message, s
     switch (message->buffer[0]) {
     case FD_READ:
     case FD_READ_FAST:
-        // this one is a fucking Mess and idk really how to implement it well. all the calls should be intercepted so that the highest position value can be found
+        // TODO: this one is a fucking Mess and idk really how to implement it well. all the calls should be intercepted so that the highest position value can be found
         // for each directory in the mount point, so after the end of a directory is found an offset can be applied to the position values of the next directory
         // in the list. TODO: how should this be stored? what kind of offset should be used in order to allow for extra entries to be added to one of the directories
         // while the mount point is open?
+        return return_value(message->capabilities[0].address, ENOSYS);
     case FD_STAT:
         {
             struct ipc_message reply = {
@@ -249,7 +346,7 @@ void handle_mount_point_message(size_t thread_id, struct ipc_message *message, s
             stat->st_blksize = 0;
             stat->st_blocks = 0;
 
-            // TODO: stat the directory this mount point is contained within and preserve these values
+            // TODO: stat the directory this mount point is contained within and preserve these values (what's the most efficient way to do this?)
             stat->st_ino = 0;
             stat->st_mode = 0;
             stat->st_nlink = 0;
@@ -261,17 +358,86 @@ void handle_mount_point_message(size_t thread_id, struct ipc_message *message, s
 
             syscall_invoke(message->capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &reply);
         }
+
+        break;
     case FD_LINK:
+        {
+            struct link_args args = {
+                .to_send = {
+                    .buffer = {FD_LINK},
+                    .capabilities = {{THREAD_STORAGE_SLOT(thread_id, 7), -1}, message->capabilities[1], message->capabilities[2]},
+                    .to_copy = 7
+                },
+                .requires_create_flag = true
+            };
+            return_value(message->capabilities[0].address, iterate_over_mount_point(mount_point_address, &args, &link_callback));
+        }
+
+        break;
     case FD_UNLINK:
+        {
+            struct link_args args = {
+                .to_send = {
+                    .buffer = {FD_UNLINK},
+                    .capabilities = {{THREAD_STORAGE_SLOT(thread_id, 7), -1}, message->capabilities[1]},
+                    .to_copy = 3
+                },
+                .requires_create_flag = false
+            };
+            return_value(message->capabilities[0].address, iterate_over_mount_point(mount_point_address, &args, &link_callback));
+        }
+
+        break;
     case FD_OPEN:
-        // these can just be done by trying the call in every directory mounted on this endpoint until it works, and for open if none of them succeed then if
-        // creation is requested it can try in the directories marked with MCREATE (or all of them if none are)
-        // not sure how link should behave- should it only work for MCREATE flagged directories* or all of them? since it's really only useful for efficient move
-        // operations
-        // TODO: move open() logic into its own function
+        {
+            struct mount_point *mount_point = (struct mount_point *) syscall_invoke(mount_point_address, -1, UNTYPED_LOCK, 0);
+
+            if (mount_point == NULL) {
+                return_value(message->capabilities[0].address, ENOMEM);
+            }
+
+            struct open_args args = {
+                .thread_id = thread_id,
+                .endpoint_address = endpoint_address,
+                .temp_slot = temp_slot,
+                .info = {
+                    .fs_id = 0, // TODO: figure this out somehow lmao
+                    .enclosing_filesystem = mount_point->enclosing_filesystem
+                },
+                .message = message,
+                .allow_create = false
+            };
+            size_t result;
+
+            if ((message->buffer[1] & (OPEN_CREATE | OPEN_EXCLUSIVE)) == (OPEN_CREATE | OPEN_EXCLUSIVE)) {
+                // TODO: fail if a file with this name already exists
+                args.allow_create = true;
+                result = iterate_over_mount_point(mount_point_address, &args, &open_callback);
+            } else {
+                bool should_create = (message->buffer[1] & OPEN_CREATE) != 0;
+                message->buffer[1] &= ~OPEN_CREATE;
+
+                syscall_invoke(mount_point_address, -1, UNTYPED_UNLOCK, 0);
+
+                result = iterate_over_mount_point(mount_point_address, &args, &open_callback);
+
+                if (result != 0 && should_create) {
+                    args.allow_create = true;
+                    message->buffer[1] |= OPEN_CREATE;
+                    result = iterate_over_mount_point(mount_point_address, &args, &open_callback);
+                }
+            }
+
+            if (result != 0) {
+                return_value(message->capabilities[0].address, result);
+            }
+        }
+
+        break;
     case FD_WRITE:
     case FD_WRITE_FAST:
-        // writing is prohibited for directories
+    case FD_TRUNCATE:
+        // writing/truncating is prohibited for directories
         return return_value(message->capabilities[0].address, ENOTSUP);
     default:
         return return_value(message->capabilities[0].address, EBADMSG);

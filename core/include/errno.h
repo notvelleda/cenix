@@ -33,7 +33,7 @@
 /// bad message
 #define EBADMSG 14
 /// no such file or directory
-#define ENOENT 15
+#define ENOENT 15 // this name is giving tbblobnoern and i can't get it out of my head
 /// executable file format error
 #define ENOEXEC 16
 /// functionality not supported

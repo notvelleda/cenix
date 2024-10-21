@@ -28,7 +28,7 @@ cd initrd
 ../jax/jax -cvf ../initrd.jax *
 cd ..
 
-bmake -C core/process_server $MAKE_FLAGS DEBUG=y
+bmake -C core/process_server $MAKE_FLAGS DEBUG=n
 bmake -C core/kernel $MAKE_FLAGS DEBUG=y # disabling debug for the kernel saves like 11k
 
 cd tiny-mac-bootloader
