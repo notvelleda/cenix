@@ -21,6 +21,8 @@ struct heap_header {
     size_t size;
     /// flags describing what kind of header this is, among other things
     uint8_t flags;
+    /// padding value to ensure contents of memory regions are aligned to 16 bits
+    uint8_t padding;
     /// the address or handle that should be updated if the region this header controls is moved
     union {
         void **absolute_ptr;
