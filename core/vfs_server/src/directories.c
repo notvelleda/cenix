@@ -2,6 +2,7 @@
 #include "directories.h"
 #include "ipc.h"
 #include "namespaces.h"
+#include "paths.h"
 #include "structures.h"
 #include "sys/kernel.h"
 #include "sys/vfs.h"
@@ -77,6 +78,8 @@ struct directory_info {
 /// is sent back to the calling process. if it does match, a new directory endpoint is created for the root directory of the new filesystem
 static size_t open_file(size_t thread_id, size_t fd_endpoint, size_t endpoint_address, size_t temp_slot, struct directory_info *info, struct ipc_message *message) {
     size_t reply_capability = message->capabilities[0].address;
+
+    // TODO: have a special case for .. both in mount points and in directories 1 level above mount points to hopefully prevent any wackiness there
 
     size_t reply_endpoint_address = THREAD_STORAGE_SLOT(thread_id, 7);
     // TODO: send a version of the reply endpoint with access control that only allows for sending messages (should vfs.h be modified for that?),
@@ -331,6 +334,7 @@ void handle_mount_point_message(size_t thread_id, struct ipc_message *message, s
         // for each directory in the mount point, so after the end of a directory is found an offset can be applied to the position values of the next directory
         // in the list. TODO: how should this be stored? what kind of offset should be used in order to allow for extra entries to be added to one of the directories
         // while the mount point is open?
+        // . and .. directory entries will also need special handling, not sure how that should work either
         return return_value(message->capabilities[0].address, ENOSYS);
     case FD_STAT:
         {
@@ -442,4 +446,76 @@ void handle_mount_point_message(size_t thread_id, struct ipc_message *message, s
     default:
         return return_value(message->capabilities[0].address, EBADMSG);
     }
+}
+
+struct open_data {
+    size_t thread_id;
+    size_t temp_slot;
+    size_t endpoint_address;
+    size_t fs_id;
+    uint8_t flags;
+    uint8_t mode;
+    size_t new_directory_address;
+};
+
+static size_t open_callback(void *data, size_t string_length, const char *string) {
+    struct open_data *open_data = (struct open_data *) data;
+
+    // allocate memory to store this part of the path so it can be sent to other processes
+    struct alloc_args alloc_args = {
+        .type = TYPE_UNTYPED,
+        .size = string_length + 1,
+        .address = THREAD_STORAGE_SLOT(open_data->thread_id, open_data->temp_slot),
+        .depth = -1
+    };
+
+    size_t result = syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
+
+    if (result != 0) {
+        return result;
+    }
+
+    char *name = (char *) syscall_invoke(alloc_args.address, -1, UNTYPED_LOCK, 0);
+
+    if (name == NULL) {
+        syscall_invoke(THREAD_STORAGE_ADDRESS(open_data->thread_id), THREAD_STORAGE_DEPTH, NODE_DELETE, open_data->temp_slot);
+        return ENOMEM;
+    }
+
+    // copy the substring into the new capability and null terminate it
+    for (int i = 0; i < string_length; i ++) {
+        name[i] = string[i];
+    }
+    name[string_length] = 0;
+
+    syscall_invoke(alloc_args.address, -1, UNTYPED_UNLOCK, 0);
+
+    // ...
+
+    return 0;
+}
+
+static size_t open_callback_2(void *data, size_t slot) {
+    return (slot << INIT_NODE_DEPTH) | DIRECTORY_NODE_SLOT;
+}
+
+// TODO: does this belong here?
+void open(size_t thread_id, size_t fs_id, struct ipc_message *message, size_t endpoint_address, size_t temp_slot) {
+    struct open_data data = {
+        .thread_id = thread_id,
+        .temp_slot = temp_slot,
+        .endpoint_address = endpoint_address,
+        .fs_id = fs_id,
+        .flags = message->buffer[1],
+        .mode = message->buffer[2],
+        .directory_address = find_slot_for(USED_DIRECTORY_IDS_SLOT, MAX_OPEN_DIRECTORIES, NULL, &open_callback_2)
+    };
+
+    size_t result = traverse_path(message->capabilities[1].address, &data, &open_callback);
+
+    if (result != 0) {
+        return_value(message->capabilities[0].address, result);
+    }
+
+    // ...
 }

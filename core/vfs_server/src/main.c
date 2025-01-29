@@ -69,18 +69,7 @@ void _start(void) {
 
             switch (received.buffer[0]) {
             case VFS_OPEN:
-                {
-                    printf("open (flags 0x%x, mode 0x%x)\n", received.buffer[1], received.buffer[2]);
-
-                    // TODO: this
-                    struct ipc_message message = {
-                        .capabilities = {}
-                    };
-                    *(size_t *) &message.buffer = ENOSYS;
-
-                    syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
-                }
-
+                open(thread_id, fs_id, &received, endpoint_alloc_args.address, IPC_CAPABILITY_SLOTS + 1);
                 break;
             case VFS_MOUNT:
                 {
