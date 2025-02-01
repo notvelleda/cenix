@@ -356,19 +356,22 @@ static size_t node_revoke(size_t address, size_t depth, struct capability *slot,
         return ECAPINVAL;
     }
 
+    if (to_revoke->derivation == NULL) {
+        // no capabilities have been derived from this capability, so nothing needs to be done here :3
+        return 0;
+    }
+
     // delete all the capabilities that have been derived from this one.
     // derivation lists don't have to be merged here since they'll all be deleted anyways
-    if (to_revoke->derivation != NULL) {
-        LIST_ITER_NO_CONTAINER(struct capability, derivation_list, to_revoke->derivation, c) {
-            if ((c->flags & (CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED)) != 0 && c->derivation != NULL) {
-                // this capability has a second derivation tree level, walk it and delete those capabilities too
-                LIST_ITER_NO_CONTAINER(struct capability, derivation_list, c->derivation, d) {
-                    delete_capability(d);
-                }
+    LIST_ITER_NO_CONTAINER(struct capability, derivation_list, to_revoke->derivation, c) {
+        if ((c->flags & (CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED)) != 0 && c->derivation != NULL) {
+            // this capability has a second derivation tree level, walk it and delete those capabilities too
+            LIST_ITER_NO_CONTAINER(struct capability, derivation_list, c->derivation, d) {
+                delete_capability(d);
             }
-
-            delete_capability(c);
         }
+
+        delete_capability(c);
     }
 
     to_revoke->derivation = NULL;
