@@ -53,12 +53,14 @@ void _start(void) {
         // TODO: hand off received messages to worker threads with maybe some kind of timeout so they can be killed if a process or fs server is unresponsive
         // TODO: permissions checks in open calls
 
+        const size_t temp_slot = IPC_CAPABILITY_SLOTS + 1;
+
         if (IPC_FLAGS(received.badge) == IPC_FLAG_IS_DIRECTORY) {
             // handle directory proxy calls
-            handle_directory_message(thread_id, &received, endpoint_alloc_args.address, IPC_CAPABILITY_SLOTS + 1);
+            handle_directory_message(thread_id, &received, endpoint_alloc_args.address, temp_slot);
         } else if (IPC_FLAGS(received.badge) == IPC_FLAG_IS_MOUNT_POINT) {
             // handle mount point directory calls
-            handle_mount_point_message(thread_id, &received, endpoint_alloc_args.address, IPC_CAPABILITY_SLOTS + 1);
+            handle_mount_point_message(thread_id, &received, endpoint_alloc_args.address, temp_slot);
         } else {
             // handle vfs calls
 
@@ -67,34 +69,35 @@ void _start(void) {
 
             printf("vfs server: got message %d for fs %d (can modify: %s)!\n", received.buffer[0], fs_id, can_modify_namespace ? "true" : "false");
 
+            struct ipc_message reply = {
+                .capabilities = {}
+            };
+
             switch (received.buffer[0]) {
-            case VFS_OPEN:
-                open(thread_id, fs_id, &received, endpoint_alloc_args.address, IPC_CAPABILITY_SLOTS + 1);
+            case VFS_OPEN_ROOT:
+                printf("open root\n");
+
+                result = open_root(thread_id, &received, endpoint_alloc_args.address, temp_slot, fs_id);
+
+                if (result != 0) {
+                    printf("open_root failed with error %d\n", result);
+                    *(size_t *) &reply.buffer = ENOSYS;
+                    syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &reply);
+                }
+
                 break;
             case VFS_MOUNT:
-                {
-                    printf("mount (flags 0x%x)\n", received.buffer[1]);
+                printf("mount (flags 0x%x)\n", received.buffer[1]);
+                *(size_t *) &reply.buffer = can_modify_namespace ? mount(fs_id, received.capabilities[1].address, received.capabilities[2].address, received.buffer[1]) : EPERM;
+                syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &reply);
 
-                    struct ipc_message message = {
-                        .capabilities = {}
-                    };
-                    *(size_t *) &message.buffer = can_modify_namespace ? mount(fs_id, received.capabilities[1].address, received.capabilities[2].address, received.buffer[1]) : EPERM;
-
-                    syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
-                }
                 break;
             case VFS_UNMOUNT:
-                {
-                    printf("unmount\n");
+                printf("unmount\n");
 
-                    // TODO: this
-                    struct ipc_message message = {
-                        .capabilities = {}
-                    };
-                    *(size_t *) &message.buffer = ENOSYS;
-
-                    syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
-                }
+                // TODO: this
+                *(size_t *) &reply.buffer = ENOSYS;
+                syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &reply);
 
                 break;
             case VFS_NEW_PROCESS:
@@ -105,36 +108,29 @@ void _start(void) {
 
                     printf("new process (pid %d, creator %d, flags 0x%x)\n", new_pid, creator_pid, received.buffer[1]);
 
-                    size_t result = set_up_filesystem_for_process(
+                    result = set_up_filesystem_for_process(
                         creator_pid,
                         new_pid,
                         received.buffer[1],
                         received.capabilities[0].address,
                         endpoint_alloc_args.address,
                         thread_id,
-                        IPC_CAPABILITY_SLOTS + 1
+                        temp_slot
                     );
 
                     if (result != 0) {
                         printf("set_up_filesystem_for_process failed with error %d\n", result);
 
-                        struct ipc_message message = {
-                            .capabilities = {}
-                        };
-                        *(size_t *) &message.buffer = result;
+                        *(size_t *) &reply.buffer = result;
 
-                        syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
+                        syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &reply);
                     }
                 }
 
                 break;
             default:
-                struct ipc_message message = {
-                    .capabilities = {}
-                };
-                *(size_t *) &message.buffer = EBADMSG;
-
-                syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &message);
+                *(size_t *) &reply.buffer = EBADMSG;
+                syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &reply);
             }
         }
 

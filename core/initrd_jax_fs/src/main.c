@@ -38,6 +38,10 @@ void _start(void) {
 
     syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "got here\n");
 
+    vfs_open_root(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, 6);
+
+    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "got here 2\n");
+
     while (1) {
         syscall_yield();
     }

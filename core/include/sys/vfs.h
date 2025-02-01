@@ -15,7 +15,7 @@
 // TODO: properly document that strings in untyped capabilities must be null terminated since the kernel doesn't guarantee that untyped objects will stay the same size
 // (though they should be bounds checked with untyped_sizeof anyway)
 
-#define VFS_OPEN 0
+#define VFS_OPEN_ROOT 0
 #define VFS_MOUNT 1
 #define VFS_UNMOUNT 2
 
@@ -58,11 +58,11 @@ static inline size_t vfs_call(size_t endpoint, size_t reply_endpoint, struct ipc
     return *(size_t *) &to_receive->buffer;
 }
 
-static inline size_t vfs_open(size_t vfs_endpoint, size_t reply_endpoint, size_t path, size_t fd_slot, uint8_t flags, uint8_t mode) {
+static inline size_t vfs_open_root(size_t vfs_endpoint, size_t reply_endpoint, size_t fd_slot) {
     struct ipc_message to_send = {
-        .buffer = {VFS_OPEN, flags, mode},
-        .capabilities = {{reply_endpoint, -1}, {path, -1}},
-        .to_copy = 1 // copy the reply endpoint only (TODO: should this copy the path too? does it matter?)
+        .buffer = {VFS_OPEN_ROOT},
+        .capabilities = {{reply_endpoint, -1}},
+        .to_copy = 1
     };
     struct ipc_message to_receive = {
         .capabilities = {{fd_slot, -1}}
@@ -269,7 +269,7 @@ static inline size_t fd_truncate(size_t fd_address, size_t reply_endpoint, size_
 
 /// \brief describes the format of directory entries as returned by the VFS and all filesystem servers.
 ///
-/// directory entries are read by opening a directory (i.e. with `vfs_open`) and reading their contents similarly to a regular file.
+/// directory entries are read by opening a directory (i.e. with `vfs_open_root`/`fd_open`) and reading their contents similarly to a regular file.
 ///
 /// however, unlike with character streams, the `position` argument to `fd_read`/`fd_read_fast` is undefined but consistent, with the only defined value being
 /// 0 (which always means the first entry in the directory).

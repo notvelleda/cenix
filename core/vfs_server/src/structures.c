@@ -105,7 +105,7 @@ void init_vfs_structures(void) {
 
     const struct alloc_args thread_storage_node_alloc_args = {
         .type = TYPE_NODE,
-        .size = THREAD_STORAGE_BITS,
+        .size = THREAD_STORAGE_NODE_BITS,
         .address = THREAD_STORAGE_NODE_SLOT,
         .depth = -1
     };
@@ -123,7 +123,7 @@ void init_vfs_structures(void) {
         const struct alloc_args reply_endpoint_alloc_args = {
             .type = TYPE_ENDPOINT,
             .size = 0,
-            .address = (7 << (THREAD_STORAGE_BITS + INIT_NODE_DEPTH)) | node_alloc_args.address,
+            .address = (REPLY_ENDPOINT_SLOT << (THREAD_STORAGE_NODE_BITS + INIT_NODE_DEPTH)) | node_alloc_args.address,
             .depth = -1
         };
 

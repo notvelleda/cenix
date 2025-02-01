@@ -37,9 +37,9 @@
 #define MAX_OPEN_DIRECTORIES 256
 
 // should this be defined here?
-#define THREAD_STORAGE_BITS 3
+#define THREAD_STORAGE_BITS 3 // number of bits required to store IPC_CAPABILITY_SLOTS slots + 1
 #define MAX_WORKER_THREADS 8
-#define THREAD_STORAGE_NODE_BITS 3
+#define THREAD_STORAGE_NODE_BITS 3 // number of bits required to store MAX_WORKER_THREADS slots
 
 #define SIZE_BITS (sizeof(size_t) * 8)
 
@@ -47,6 +47,8 @@
 #define THREAD_STORAGE_DEPTH (THREAD_STORAGE_BITS + INIT_NODE_DEPTH)
 #define THREAD_STORAGE_SLOT(thread_id, slot) (((slot) << (THREAD_STORAGE_BITS + INIT_NODE_DEPTH)) | THREAD_STORAGE_ADDRESS(thread_id))
 #define THREAD_STORAGE_SLOT_DEPTH (THREAD_STORAGE_NODE_BITS + THREAD_STORAGE_DEPTH)
+
+#define REPLY_ENDPOINT_SLOT ((1 << THREAD_STORAGE_BITS) - 1) // the slot number of the reply endpoint to use when issuing ipc calls to filesystem servers
 
 /// structure that describes a mount/bind point in the virtual filesystem
 struct mount_point {
