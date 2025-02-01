@@ -1,19 +1,27 @@
 #!/bin/sh
 
+# TODO: this script should probably be replaced by a makefile or something eventually but it works fine for now
+
 set -e
 
 CROSS=m68k-unknown-elf-
 
 MAKE_FLAGS="CROSS=$CROSS CC=${CROSS}cc PLATFORM=mac-68000 $@"
 
-bmake -C jax -f Makefile.native $@
+make_in() {
+    echo ==== $1
+    bmake -C $@
+}
 
-bmake -C core/vfs_server $MAKE_FLAGS DEBUG=y
-bmake -C core/service_manager $MAKE_FLAGS
+make_in jax -f Makefile.native $@
 
-bmake -C core/debug_console $MAKE_FLAGS
-bmake -C core/initrd_jax_fs $MAKE_FLAGS
+make_in core/vfs_server $MAKE_FLAGS DEBUG=y
+make_in core/service_manager $MAKE_FLAGS
 
+make_in core/debug_console $MAKE_FLAGS
+make_in core/initrd_jax_fs $MAKE_FLAGS
+
+echo ==== \(initrd creation\)
 mkdir -p initrd/sbin
 cp core/vfs_server/vfs_server initrd/sbin/
 cp core/service_manager/service_manager initrd/sbin/
@@ -28,9 +36,10 @@ cd initrd
 ../jax/jax -cvf ../initrd.jax *
 cd ..
 
-bmake -C core/process_server $MAKE_FLAGS DEBUG=n
-bmake -C core/kernel $MAKE_FLAGS DEBUG=y # disabling debug for the kernel saves like 11k
+make_in core/process_server $MAKE_FLAGS DEBUG=n
+make_in core/kernel $MAKE_FLAGS DEBUG=y # disabling debug for the kernel saves like 11k
 
+echo ==== \(bootloader image creation\)
 cd tiny-mac-bootloader
 mkdir -p fs-contents
 cp ../core/kernel/kernel fs-contents/
