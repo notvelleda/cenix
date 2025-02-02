@@ -6,26 +6,16 @@
 #include "sys/kernel.h"
 #include "sys/vfs.h"
 
-struct open_fields {
-    size_t fd_endpoint;
-    size_t reply_endpoint;
-    size_t name_address;
-    uint8_t flags;
-    uint8_t mode;
+struct directory_info {
+    /// the id of the filesystem namespace this directory is in
+    size_t fs_id;
+    union {
+        /// the address of the filesystem that this directory is contained within
+        size_t enclosing_filesystem;
+        /// the address of the mount point this directory refers to
+        size_t mount_point_address;
+    };
 };
-
-static size_t open_file_callback(void *data, size_t slot) {
-    struct open_fields *fields = (struct open_fields *) data;
-    size_t fd_address = (slot << INIT_NODE_DEPTH) | DIRECTORY_NODE_SLOT;
-
-    size_t result = fd_open(fields->fd_endpoint, fields->reply_endpoint, fields->name_address, fd_address, fields->flags, fields->mode);
-
-    if (result == 0) {
-        return fd_address;
-    } else {
-        return -1;
-    }
-}
 
 /// badges the vfs endpoint with the given badge and sends the new endpoint back to the caller process
 static size_t badge_and_send(size_t thread_id, size_t vfs_endpoint_address, size_t temp_slot, size_t badge, size_t reply_endpoint_address) {
@@ -65,10 +55,26 @@ static void return_value(size_t reply_capability, size_t error_code) {
     syscall_invoke(reply_capability, -1, ENDPOINT_SEND, (size_t) &reply);
 }
 
-struct directory_info {
-    size_t fs_id;
-    size_t enclosing_filesystem;
+struct open_fields {
+    size_t fd_endpoint;
+    size_t reply_endpoint;
+    size_t name_address;
+    uint8_t flags;
+    uint8_t mode;
 };
+
+static size_t open_file_callback(void *data, size_t slot) {
+    struct open_fields *fields = (struct open_fields *) data;
+    size_t fd_address = (slot << INIT_NODE_DEPTH) | DIRECTORY_NODE_SLOT;
+
+    size_t result = fd_open(fields->fd_endpoint, fields->reply_endpoint, fields->name_address, fd_address, fields->flags, fields->mode);
+
+    if (result == 0) {
+        return fd_address;
+    } else {
+        return -1;
+    }
+}
 
 #define DIRECTORY_ADDRESS(id) (((id) << INIT_NODE_DEPTH) | DIRECTORY_NODE_SLOT)
 #define DIRECTORY_INFO_ADDRESS(id) (((id) << INIT_NODE_DEPTH) | DIRECTORY_INFO_SLOT)
@@ -112,62 +118,101 @@ idk_just_fucking_return:
     size_t mount_point_address = find_mount_point(info->fs_id, stat.st_ino, info->enclosing_filesystem);
 
     if (mount_point_address != -1) {
-        // badge the vfs endpoint with the mount point address and send it back to the caller
-        result = badge_and_send(thread_id, endpoint_address, temp_slot, IPC_BADGE(mount_point_address, IPC_FLAG_IS_MOUNT_POINT), reply_capability);
-        goto idk_just_fucking_return;
-    }
+        // this directory is a mount point, so it needs to be handled accordingly
 
-    if (!S_ISDIR(stat.st_mode)) {
-        // if this isn't a directory then just reply with the newly opened capability, as directories are the only things proxied
+        size_t opened_file_slot = opened_file_address >> INIT_NODE_DEPTH;
+        size_t info_address = DIRECTORY_INFO_ADDRESS(opened_file_slot);
 
-        struct ipc_message reply = {
-            .capabilities = {{opened_file_address, -1}}
+        // allocate memory for the directory info structure
+        const struct alloc_args alloc_args = {
+            .type = TYPE_UNTYPED,
+            .size = sizeof(struct directory_info),
+            .address = info_address,
+            .depth = -1
         };
-        *(size_t *) &reply.buffer = 0;
+        result = syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
 
-        syscall_invoke(reply_capability, -1, ENDPOINT_SEND, (size_t) &reply);
+        if (result != 0) {
+            goto idk_just_fucking_return;
+        }
 
-        //result = 0;
-        goto idk_just_fucking_return; // result should be 0 here since it's not modified since the last time it's checked
+        // delete this capability since it's not needed
+        syscall_invoke(DIRECTORY_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, opened_file_slot);
+
+        struct directory_info *new_info = (struct directory_info *) syscall_invoke(info_address, -1, UNTYPED_LOCK, 0);
+
+        if (new_info == NULL) {
+            free_structure(USED_DIRECTORY_IDS_SLOT, DIRECTORY_INFO_SLOT, MAX_OPEN_DIRECTORIES, opened_file_address);
+            return ENOMEM;
+        }
+
+        new_info->fs_id = info->fs_id;
+        new_info->mount_point_address = mount_point_address;
+
+        syscall_invoke(info_address, -1, UNTYPED_UNLOCK, 0);
+
+        // badge the vfs endpoint with the address of the directory info structure and send it back to the caller
+        size_t result = badge_and_send(thread_id, endpoint_address, temp_slot, IPC_BADGE(info_address, IPC_FLAG_IS_MOUNT_POINT), reply_capability);
+
+        if (result != 0) {
+            free_structure(USED_DIRECTORY_IDS_SLOT, DIRECTORY_INFO_SLOT, MAX_OPEN_DIRECTORIES, opened_file_address);
+            return result;
+        }
+
+        return result;
+    } else {
+        if (!S_ISDIR(stat.st_mode)) {
+            // this isn't a directory, so just reply with the newly opened capability as directories are the only things proxied
+
+            struct ipc_message reply = {
+                .capabilities = {{opened_file_address, -1}}
+            };
+            *(size_t *) &reply.buffer = 0;
+
+            syscall_invoke(reply_capability, -1, ENDPOINT_SEND, (size_t) &reply);
+
+            //result = 0;
+            goto idk_just_fucking_return; // result should be 0 here since it's not modified since the last time it's checked
+        }
+
+        // since this is a directory and it's not a mount point, a new directory_info struct is created to go along with the directory endpoint
+        // before badging the directory id and sending an endpoint with it back to the caller
+
+        size_t new_directory_id = opened_file_address >> INIT_NODE_DEPTH;
+
+        const struct alloc_args alloc_args = {
+            .type = TYPE_UNTYPED,
+            .size = sizeof(struct directory_info),
+            .address = (new_directory_id << INIT_NODE_DEPTH) | DIRECTORY_INFO_SLOT,
+            .depth = -1
+        };
+
+        result = syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
+
+        if (result != 0) {
+            goto idk_just_fucking_return; // i am So Tired of not having destructors (or even just defer). i long for the crab
+        }
+
+        struct directory_info *new_directory_info = (struct directory_info *) syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_LOCK, 0);
+
+        if (new_directory_info == NULL) {
+            syscall_invoke(DIRECTORY_INFO_SLOT, INIT_NODE_DEPTH, NODE_DELETE, new_directory_id);
+            goto idk_just_fucking_return;
+        }
+
+        *new_directory_info = *info; // this will be the same as the parent directory's directory_info since they're both on the same filesystem
+
+        syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_UNLOCK, 0);
+
+        result = badge_and_send(thread_id, endpoint_address, temp_slot, IPC_BADGE(new_directory_id, IPC_FLAG_IS_MOUNT_POINT), reply_capability);
+
+        if (result != 0) {
+            free_structure(USED_DIRECTORY_IDS_SLOT, DIRECTORY_NODE_SLOT, MAX_OPEN_DIRECTORIES, opened_file_address);
+            syscall_invoke(DIRECTORY_INFO_SLOT, INIT_NODE_DEPTH, NODE_DELETE, new_directory_id);
+        }
+
+        return result;
     }
-
-    // since this is a directory and it's not a mount point, a new directory_info struct is created to go along with the directory endpoint
-    // before badging the directory id and sending an endpoint with it back to the caller
-
-    size_t new_directory_id = opened_file_address >> INIT_NODE_DEPTH;
-
-    const struct alloc_args alloc_args = {
-        .type = TYPE_UNTYPED,
-        .size = sizeof(struct directory_info),
-        .address = (new_directory_id << INIT_NODE_DEPTH) | DIRECTORY_INFO_SLOT,
-        .depth = -1
-    };
-
-    result = syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
-
-    if (result != 0) {
-        goto idk_just_fucking_return; // i am So Tired of not having destructors (or even just defer). i long for the crab
-    }
-
-    struct directory_info *new_directory_info = (struct directory_info *) syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_LOCK, 0);
-
-    if (new_directory_info == NULL) {
-        syscall_invoke(DIRECTORY_INFO_SLOT, INIT_NODE_DEPTH, NODE_DELETE, new_directory_id);
-        goto idk_just_fucking_return;
-    }
-
-    *new_directory_info = *info; // this will be the same as the parent directory's directory_info since they're both on the same filesystem
-
-    syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_UNLOCK, 0);
-
-    result = badge_and_send(thread_id, endpoint_address, temp_slot, IPC_BADGE(new_directory_id, IPC_FLAG_IS_MOUNT_POINT), reply_capability);
-
-    if (result != 0) {
-        free_structure(USED_DIRECTORY_IDS_SLOT, DIRECTORY_NODE_SLOT, MAX_OPEN_DIRECTORIES, opened_file_address);
-        syscall_invoke(DIRECTORY_INFO_SLOT, INIT_NODE_DEPTH, NODE_DELETE, new_directory_id);
-    }
-
-    return result;
 }
 
 void handle_directory_message(size_t thread_id, struct ipc_message *message, size_t endpoint_address, size_t temp_slot) {
@@ -321,9 +366,16 @@ static bool open_callback(void *data, size_t directory_address, bool is_create_f
 }
 
 void handle_mount_point_message(size_t thread_id, struct ipc_message *message, size_t endpoint_address, size_t temp_slot) {
-    size_t mount_point_address = IPC_ID(message->badge); // TODO: should this not just contain the slot number of the structure instead of its full address?
+    size_t info_address = IPC_ID(message->badge); // TODO: should this not just contain the slot number of the structure instead of its full address?
 
-    printf("vfs server: got message %d for mount point %d!\n", message->buffer[0], mount_point_address >> INIT_NODE_DEPTH);
+    struct directory_info *info = (struct directory_info *) syscall_invoke(info_address, -1, UNTYPED_LOCK, 0);
+
+    if (info == NULL) {
+        return_value(message->capabilities[0].address, ENOMEM);
+        return;
+    }
+
+    printf("vfs server: got message %d for mount point %d!\n", message->buffer[0], info->mount_point_address >> INIT_NODE_DEPTH);
 
     switch (message->buffer[0]) {
     case FD_READ:
@@ -333,7 +385,8 @@ void handle_mount_point_message(size_t thread_id, struct ipc_message *message, s
         // in the list. TODO: how should this be stored? what kind of offset should be used in order to allow for extra entries to be added to one of the directories
         // while the mount point is open?
         // . and .. directory entries will also need special handling, not sure how that should work either
-        return return_value(message->capabilities[0].address, ENOSYS);
+        return_value(message->capabilities[0].address, ENOSYS);
+        break;
     case FD_STAT:
         {
             struct ipc_message reply = {
@@ -342,7 +395,7 @@ void handle_mount_point_message(size_t thread_id, struct ipc_message *message, s
             *(size_t *) &reply.buffer = 0;
 
             struct stat *stat = (struct stat *) &reply.buffer[sizeof(size_t)];
-            stat->st_dev = mount_point_address;
+            stat->st_dev = info->mount_point_address;
             stat->st_rdev = 0;
             stat->st_size = 0;
             stat->st_blksize = 0;
@@ -372,7 +425,7 @@ void handle_mount_point_message(size_t thread_id, struct ipc_message *message, s
                 },
                 .requires_create_flag = true
             };
-            return_value(message->capabilities[0].address, iterate_over_mount_point(mount_point_address, &args, &link_callback));
+            return_value(message->capabilities[0].address, iterate_over_mount_point(info->mount_point_address, &args, &link_callback));
         }
 
         break;
@@ -386,13 +439,13 @@ void handle_mount_point_message(size_t thread_id, struct ipc_message *message, s
                 },
                 .requires_create_flag = false
             };
-            return_value(message->capabilities[0].address, iterate_over_mount_point(mount_point_address, &args, &link_callback));
+            return_value(message->capabilities[0].address, iterate_over_mount_point(info->mount_point_address, &args, &link_callback));
         }
 
         break;
     case FD_OPEN:
         {
-            struct mount_point *mount_point = (struct mount_point *) syscall_invoke(mount_point_address, -1, UNTYPED_LOCK, 0);
+            struct mount_point *mount_point = (struct mount_point *) syscall_invoke(info->mount_point_address, -1, UNTYPED_LOCK, 0);
 
             if (mount_point == NULL) {
                 return_value(message->capabilities[0].address, ENOMEM);
@@ -403,7 +456,7 @@ void handle_mount_point_message(size_t thread_id, struct ipc_message *message, s
                 .endpoint_address = endpoint_address,
                 .temp_slot = temp_slot,
                 .info = {
-                    .fs_id = 0, // TODO: figure this out somehow lmao
+                    .fs_id = info->fs_id,
                     .enclosing_filesystem = mount_point->enclosing_filesystem
                 },
                 .message = message,
@@ -414,19 +467,19 @@ void handle_mount_point_message(size_t thread_id, struct ipc_message *message, s
             if ((message->buffer[1] & (OPEN_CREATE | OPEN_EXCLUSIVE)) == (OPEN_CREATE | OPEN_EXCLUSIVE)) {
                 // TODO: fail if a file with this name already exists
                 args.allow_create = true;
-                result = iterate_over_mount_point(mount_point_address, &args, &open_callback);
+                result = iterate_over_mount_point(info->mount_point_address, &args, &open_callback);
             } else {
                 bool should_create = (message->buffer[1] & OPEN_CREATE) != 0;
                 message->buffer[1] &= ~OPEN_CREATE;
 
-                syscall_invoke(mount_point_address, -1, UNTYPED_UNLOCK, 0);
+                syscall_invoke(info->mount_point_address, -1, UNTYPED_UNLOCK, 0);
 
-                result = iterate_over_mount_point(mount_point_address, &args, &open_callback);
+                result = iterate_over_mount_point(info->mount_point_address, &args, &open_callback);
 
                 if (result != 0 && should_create) {
                     args.allow_create = true;
                     message->buffer[1] |= OPEN_CREATE;
-                    result = iterate_over_mount_point(mount_point_address, &args, &open_callback);
+                    result = iterate_over_mount_point(info->mount_point_address, &args, &open_callback);
                 }
             }
 
@@ -440,10 +493,14 @@ void handle_mount_point_message(size_t thread_id, struct ipc_message *message, s
     case FD_WRITE_FAST:
     case FD_TRUNCATE:
         // writing/truncating is prohibited for directories
-        return return_value(message->capabilities[0].address, ENOTSUP);
+        return_value(message->capabilities[0].address, ENOTSUP);
+        break;
     default:
-        return return_value(message->capabilities[0].address, EBADMSG);
+        return_value(message->capabilities[0].address, EBADMSG);
+        break;
     }
+
+    syscall_invoke(info_address, -1, UNTYPED_UNLOCK, 0);
 }
 
 size_t open_root(size_t thread_id, struct ipc_message *message, size_t endpoint_address, size_t temp_slot, size_t fs_id) {
@@ -457,10 +514,32 @@ size_t open_root(size_t thread_id, struct ipc_message *message, size_t endpoint_
         return ENOMEM;
     }
 
-    // badge the vfs endpoint with the root mount point address for this namespace and send it back to the caller
-    size_t result = badge_and_send(thread_id, endpoint_address, temp_slot, IPC_BADGE(namespace->root_address, IPC_FLAG_IS_MOUNT_POINT), reply_capability);
+    // allocate a structure to store the namespace id and root mount point address
+    size_t info_address = alloc_structure(USED_DIRECTORY_IDS_SLOT, DIRECTORY_INFO_SLOT, MAX_OPEN_DIRECTORIES, sizeof(struct directory_info));
 
-    // TODO: there needs to be some way to save fs_id here since it'll be lost otherwise, and that info is needed for fd_open to work
+    if (info_address == -1) {
+        return ENOMEM;
+    }
+
+    struct directory_info *info = (struct directory_info *) syscall_invoke(info_address, -1, UNTYPED_LOCK, 0);
+
+    if (info == NULL) {
+        free_structure(USED_DIRECTORY_IDS_SLOT, DIRECTORY_INFO_SLOT, MAX_OPEN_DIRECTORIES, info_address);
+        return ENOMEM;
+    }
+
+    info->fs_id = fs_id;
+    info->mount_point_address = namespace->root_address;
+
+    syscall_invoke(info_address, -1, UNTYPED_UNLOCK, 0);
+
+    // badge the vfs endpoint with the address of the directory info structure and send it back to the caller
+    size_t result = badge_and_send(thread_id, endpoint_address, temp_slot, IPC_BADGE(info_address, IPC_FLAG_IS_MOUNT_POINT), reply_capability);
+
+    if (result != 0) {
+        free_structure(USED_DIRECTORY_IDS_SLOT, DIRECTORY_INFO_SLOT, MAX_OPEN_DIRECTORIES, info_address);
+        return result;
+    }
 
     syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0); // lock is held throughout, not sure if this is the right call (a race condition here would be fine tbh) but it is what it is
 
