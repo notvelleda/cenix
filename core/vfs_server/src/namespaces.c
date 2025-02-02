@@ -190,12 +190,12 @@ size_t set_up_filesystem_for_process(pid_t creator_pid, pid_t new_pid, uint8_t f
     return 0;
 }
 
-size_t mount(size_t fs_id, size_t path, size_t directory_fd, uint8_t flags) {
+size_t mount(size_t namespace_id, size_t path, size_t directory_fd, uint8_t flags) {
     // TODO: properly walk the filesystem tree to find the containing inode
     ino_t inode = 0;
     bool is_root = true;
 
-    size_t namespace_address = (fs_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
+    size_t namespace_address = (namespace_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
     struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(namespace_address, -1, UNTYPED_LOCK, 0);
 
     if (namespace == NULL) {
@@ -269,8 +269,8 @@ size_t mount(size_t fs_id, size_t path, size_t directory_fd, uint8_t flags) {
     return 0;
 }
 
-size_t find_mount_point(size_t fs_id, ino_t inode, size_t enclosing_filesystem) {
-    size_t namespace_address = (fs_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
+size_t find_mount_point(size_t namespace_id, ino_t inode, size_t enclosing_filesystem) {
+    size_t namespace_address = (namespace_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
     struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(namespace_address, -1, UNTYPED_LOCK, 0);
 
     if (namespace == NULL) {

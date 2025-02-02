@@ -8,7 +8,7 @@
 
 struct directory_info {
     /// the id of the filesystem namespace this directory is in
-    size_t fs_id;
+    size_t namespace_id;
     union {
         /// the address of the filesystem that this directory is contained within
         size_t enclosing_filesystem;
@@ -115,7 +115,7 @@ idk_just_fucking_return:
         return result;
     }
 
-    size_t mount_point_address = find_mount_point(info->fs_id, stat.st_ino, info->enclosing_filesystem);
+    size_t mount_point_address = find_mount_point(info->namespace_id, stat.st_ino, info->enclosing_filesystem);
 
     if (mount_point_address != -1) {
         // this directory is a mount point, so it needs to be handled accordingly
@@ -146,7 +146,7 @@ idk_just_fucking_return:
             return ENOMEM;
         }
 
-        new_info->fs_id = info->fs_id;
+        new_info->namespace_id = info->namespace_id;
         new_info->mount_point_address = mount_point_address;
 
         syscall_invoke(info_address, -1, UNTYPED_UNLOCK, 0);
@@ -456,7 +456,7 @@ void handle_mount_point_message(size_t thread_id, struct ipc_message *message, s
                 .endpoint_address = endpoint_address,
                 .temp_slot = temp_slot,
                 .info = {
-                    .fs_id = info->fs_id,
+                    .namespace_id = info->namespace_id,
                     .enclosing_filesystem = mount_point->enclosing_filesystem
                 },
                 .message = message,
@@ -503,11 +503,11 @@ void handle_mount_point_message(size_t thread_id, struct ipc_message *message, s
     syscall_invoke(info_address, -1, UNTYPED_UNLOCK, 0);
 }
 
-size_t open_root(size_t thread_id, struct ipc_message *message, size_t endpoint_address, size_t temp_slot, size_t fs_id) {
+size_t open_root(size_t thread_id, struct ipc_message *message, size_t endpoint_address, size_t temp_slot, size_t namespace_id) {
     size_t reply_capability = message->capabilities[0].address;
 
-    // get the namespace from the fs id
-    size_t namespace_address = (fs_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
+    // get the namespace object from the namespace id
+    size_t namespace_address = (namespace_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
     struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(namespace_address, -1, UNTYPED_LOCK, 0);
 
     if (namespace == NULL) {
@@ -528,7 +528,7 @@ size_t open_root(size_t thread_id, struct ipc_message *message, size_t endpoint_
         return ENOMEM;
     }
 
-    info->fs_id = fs_id;
+    info->namespace_id = namespace_id;
     info->mount_point_address = namespace->root_address;
 
     syscall_invoke(info_address, -1, UNTYPED_UNLOCK, 0);

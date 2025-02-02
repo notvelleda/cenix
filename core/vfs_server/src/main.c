@@ -64,10 +64,10 @@ void _start(void) {
         } else {
             // handle vfs calls
 
-            size_t fs_id = IPC_ID(received.badge);
+            size_t namespace_id = IPC_ID(received.badge);
             bool can_modify_namespace = IPC_FLAGS(received.badge) == IPC_FLAG_CAN_MODIFY;
 
-            printf("vfs server: got message %d for fs %d (can modify: %s)!\n", received.buffer[0], fs_id, can_modify_namespace ? "true" : "false");
+            printf("vfs server: got message %d for fs %d (can modify: %s)!\n", received.buffer[0], namespace_id, can_modify_namespace ? "true" : "false");
 
             struct ipc_message reply = {
                 .capabilities = {}
@@ -77,7 +77,7 @@ void _start(void) {
             case VFS_OPEN_ROOT:
                 printf("open root\n");
 
-                result = open_root(thread_id, &received, endpoint_alloc_args.address, temp_slot, fs_id);
+                result = open_root(thread_id, &received, endpoint_alloc_args.address, temp_slot, namespace_id);
 
                 if (result != 0) {
                     printf("open_root failed with error %d\n", result);
@@ -88,7 +88,7 @@ void _start(void) {
                 break;
             case VFS_MOUNT:
                 printf("mount (flags 0x%x)\n", received.buffer[1]);
-                *(size_t *) &reply.buffer = can_modify_namespace ? mount(fs_id, received.capabilities[1].address, received.capabilities[2].address, received.buffer[1]) : EPERM;
+                *(size_t *) &reply.buffer = can_modify_namespace ? mount(namespace_id, received.capabilities[1].address, received.capabilities[2].address, received.buffer[1]) : EPERM;
                 syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &reply);
 
                 break;
