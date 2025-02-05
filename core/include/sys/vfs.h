@@ -40,7 +40,6 @@
 #define OPEN_CREATE 1
 #define OPEN_EXCLUSIVE 2
 #define OPEN_DIRECTORY 4
-#define OPEN_NO_FOLLOW 8
 
 static inline size_t vfs_call(size_t endpoint, size_t reply_endpoint, struct ipc_message *to_send, struct ipc_message *to_receive) {
     size_t result = syscall_invoke(endpoint, -1, ENDPOINT_SEND, (size_t) to_send);
