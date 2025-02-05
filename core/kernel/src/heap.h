@@ -80,7 +80,8 @@ void heap_lock_existing_region(struct heap *heap, void *start, void *end);
 /// allocates a region of memory, returning a pointer to it. the newly allocated region of memory is set as locked (immovable)
 void *heap_alloc(struct heap *heap, size_t actual_size);
 
-// TODO: add heap_realloc so things like capability nodes can have their slots allocated on-demand
+// TODO: add heap_realloc so things like capability nodes can have their slots allocated on-demand (which will drastically reduce memory usage and increase performance)
+// for best performance, realloc should ideally make a new allocation if the cost of copying any overlapping allocations is greater than the cost of copying the existing data (when allocation is optimized that is)
 
 /// \brief locks an allocated region of memory in place, allowing for any pointers to it to remain valid
 ///

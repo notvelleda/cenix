@@ -195,6 +195,9 @@ void *heap_alloc(struct heap *heap, size_t actual_size) {
 #endif
 
     // search for a series of consecutive movable or available blocks big enough to fit the allocation
+    // TODO: optimize this by storing available blocks in an ordered linked list, then traverse that linked list to find a big enough free block (to avoid potentially expensive copies).
+    // that should be paired with occasional heap defrag passes (maybe while system isn't under load?) and allocations that are expected to be locked for their entire runtimes (i.e. program code/data)
+    // should always use the existing algorithm to hopefully reduce fragmentation
 
     struct heap_header *start_header = heap->heap_base;
     struct heap_header *end_header = heap->heap_base;

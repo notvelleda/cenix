@@ -94,6 +94,7 @@ void _start(void) {
     syscall_invoke(message.capabilities[0].address, message.capabilities[0].depth, ENDPOINT_SEND, (size_t) &message2);*/
 
     // TODO: start initrd_jax_fs to mount initrd as root directory, mount /proc, start debug_console for initial stdout (/dev/debug_console?), start service manager
+    // TODO: ensure initrd_jax_fs starts in this address space on systems with multiple (when support is added)
 
     printf("starting initrd_jax_fs...\n");
 
