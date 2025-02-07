@@ -9,7 +9,7 @@ static void print_number(size_t number) {
 }
 
 void _start(size_t initrd_start, size_t initrd_end) {
-    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "hellorld from initrd_jax_fs!\n");
+    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "hellorld from initrd_fs!\n");
 
     syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd is at ");
     print_number(initrd_start);

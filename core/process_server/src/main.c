@@ -104,12 +104,12 @@ void _start(void) {
     syscall_invoke(message.capabilities[0].address, message.capabilities[0].depth, ENDPOINT_SEND, (size_t) &message2);
     syscall_invoke(message.capabilities[0].address, message.capabilities[0].depth, ENDPOINT_SEND, (size_t) &message2);*/
 
-    // TODO: start initrd_jax_fs to mount initrd as root directory, mount /proc, start debug_console for initial stdout (/dev/debug_console?), start service manager
-    // TODO: ensure initrd_jax_fs starts in this address space on systems with multiple (when support is added)
+    // TODO: start initrd_fs to mount initrd as root directory, mount /proc, start debug_console for initial stdout (/dev/debug_console?), start service manager
+    // TODO: ensure initrd_fs starts in this address space on systems with multiple (when support is added)
 
-    printf("starting initrd_jax_fs...\n");
+    printf("starting initrd_fs...\n");
 
-    pid_t initrd_jax_fs_pid = allocate_pid();
+    pid_t initrd_fs_pid = allocate_pid();
 
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &root_alloc_args);
     syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &alloc_copy_args);
@@ -121,7 +121,7 @@ void _start(void) {
         .buffer = {
             VFS_NEW_PROCESS,
             VFS_SHARE_NAMESPACE,
-            initrd_jax_fs_pid >> 8, initrd_jax_fs_pid & 0xff,
+            initrd_fs_pid >> 8, initrd_fs_pid & 0xff,
             0, 1
         },
         .capabilities = {{endpoint_alloc_args.address, -1}},
@@ -136,9 +136,9 @@ void _start(void) {
     open_jax(&iter, &_binary_initrd_jax_start, &_binary_initrd_jax_end);
 
     size_t addresses[2] = {(size_t) &_binary_initrd_jax_start, (size_t) &_binary_initrd_jax_end};
-    exec_from_initrd(initrd_jax_fs_pid, &iter, "/sbin/initrd_jax_fs", root_alloc_args.address, root_alloc_args.depth, initrd_fs_registers_callback, &addresses);
+    exec_from_initrd(initrd_fs_pid, &iter, "/sbin/initrd_fs", root_alloc_args.address, root_alloc_args.depth, initrd_fs_registers_callback, &addresses);
 
-    printf("done! (pid %d)\n", initrd_jax_fs_pid);
+    printf("done! (pid %d)\n", initrd_fs_pid);
 
     while (1) {
         syscall_yield();

@@ -19,7 +19,7 @@ make_in core/vfs_server $MAKE_FLAGS DEBUG=y
 make_in core/service_manager $MAKE_FLAGS
 
 make_in core/debug_console $MAKE_FLAGS
-make_in core/initrd_jax_fs $MAKE_FLAGS
+make_in core/initrd_fs $MAKE_FLAGS
 
 echo ==== \(initrd creation\)
 mkdir -p initrd/sbin
@@ -30,7 +30,7 @@ mkdir -p initrd/proc
 mkdir -p initrd/dev
 
 cp core/debug_console/debug_console initrd/sbin/debug_console
-cp core/initrd_jax_fs/initrd_jax_fs initrd/sbin/initrd_jax_fs
+cp core/initrd_fs/initrd_fs initrd/sbin/initrd_fs
 
 cd initrd
 ../jax/jax -cvf ../initrd.jax *
