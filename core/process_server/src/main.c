@@ -12,6 +12,17 @@ extern const uint8_t _binary_initrd_jax_end;
 
 #define VFS_ENDPOINT_SLOT 8
 
+static size_t initrd_fs_registers_callback(struct thread_registers *registers, void *data) {
+    size_t *addresses = (size_t *) data;
+    struct arguments_data arguments_data;
+
+    start_arguments(&arguments_data, registers, 2, sizeof(size_t) * 2);
+    add_argument(&arguments_data, registers, addresses[0], sizeof(size_t));
+    add_argument(&arguments_data, registers, addresses[1], sizeof(size_t));
+
+    return 0;
+}
+
 void _start(void) {
     printf("hellorld from process server!\n");
 
@@ -76,7 +87,7 @@ void _start(void) {
     struct jax_iterator iter;
     open_jax(&iter, &_binary_initrd_jax_start, &_binary_initrd_jax_end);
 
-    exec_from_initrd(vfs_pid, &iter, "/sbin/vfs_server", root_alloc_args.address, root_alloc_args.depth);
+    exec_from_initrd(vfs_pid, &iter, "/sbin/vfs_server", root_alloc_args.address, root_alloc_args.depth, NULL, NULL);
 
     printf("done! (pid %d)\n", vfs_pid);
 
@@ -123,7 +134,9 @@ void _start(void) {
     vfs_call(VFS_ENDPOINT_SLOT, endpoint_alloc_args.address, &to_send, &to_receive);
 
     open_jax(&iter, &_binary_initrd_jax_start, &_binary_initrd_jax_end);
-    exec_from_initrd(initrd_jax_fs_pid, &iter, "/sbin/initrd_jax_fs", root_alloc_args.address, root_alloc_args.depth);
+
+    size_t addresses[2] = {(size_t) &_binary_initrd_jax_start, (size_t) &_binary_initrd_jax_end};
+    exec_from_initrd(initrd_jax_fs_pid, &iter, "/sbin/initrd_jax_fs", root_alloc_args.address, root_alloc_args.depth, initrd_fs_registers_callback, &addresses);
 
     printf("done! (pid %d)\n", initrd_jax_fs_pid);
 

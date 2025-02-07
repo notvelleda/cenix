@@ -188,3 +188,18 @@ void set_stack_pointer(struct thread_registers *registers, size_t stack_pointer)
 /// it's entirely architecture-dependent whether this function is implemented or not,
 /// and it may not be usable after the thread whose registers it'll update has started
 void set_got_pointer(struct thread_registers *registers, size_t got_pointer);
+
+/// \brief starts pushing arguments onto the stack (or the equivalent) for the current architecture's C calling convention
+///
+/// the stack pointer value of the given registers struct must be valid and pointing to a valid stack (i.e. not overlapping any areas of memory that shouldn't be written to in that manner),
+/// otherwise behavior is invalid.
+///
+/// the arguments `arguments_count` and `arguments_size_bytes` refer to the number of arguments that will be passed and the total size of those arguments in bytes, respectively
+void start_arguments(struct arguments_data *data, struct thread_registers *registers, size_t arguments_count, size_t arguments_size_bytes);
+
+/// \brief pushes arguments onto the stack (or the equivalent) for the current architecture's C calling convention
+///
+/// must be called after a call to `start_arguments` and must be called in the order the arguments appear in the function declaration left to right.
+///
+/// the same safety requirements for the stack pointer as with `start_arguments` apply here
+void add_argument(struct arguments_data *data, struct thread_registers *registers, size_t argument, uint8_t argument_size_bytes);

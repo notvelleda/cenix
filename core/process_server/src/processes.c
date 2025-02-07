@@ -97,7 +97,15 @@ void release_pid(pid_t pid) {
     syscall_invoke(PID_SET_SLOT, -1, UNTYPED_UNLOCK, 0);
 }
 
-size_t exec_from_initrd(pid_t pid, struct jax_iterator *iter, const char *filename, size_t root_node_address, size_t root_node_depth) {
+size_t exec_from_initrd(
+    pid_t pid,
+    struct jax_iterator *iter,
+    const char *filename,
+    size_t root_node_address,
+    size_t root_node_depth,
+    size_t (*registers_callback)(struct thread_registers *, void *),
+    void *callback_data
+) {
     const char *file_data;
     size_t file_size;
     if (!jax_find(iter, filename, TYPE_REGULAR, &file_data, &file_size)) {
@@ -153,6 +161,16 @@ size_t exec_from_initrd(pid_t pid, struct jax_iterator *iter, const char *filena
 
     struct thread_registers registers;
     bflt_load(header, data, &registers);
+
+    size_t callback_result = registers_callback == NULL ? 0 : registers_callback(&registers, callback_data);
+
+    if (callback_result != 0) {
+        printf("exec_from_initrd: registers_callback failed with code %d\n", callback_result);
+
+        syscall_invoke(PID_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, pid);
+        syscall_invoke(PID_THREAD_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, pid);
+        return ENOMEM;
+    }
 
     struct read_write_register_args register_write_args = {
         .address = &registers,

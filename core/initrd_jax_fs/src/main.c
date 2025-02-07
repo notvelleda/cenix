@@ -3,8 +3,19 @@
 
 #define VFS_ENDPOINT_ADDRESS 2
 
-void _start(void) {
+static void print_number(size_t number) {
+    // what can i say, i like writing fucked up for loops sometimes :3
+    for (int i = sizeof(size_t) * 2 - 1; syscall_invoke(1, -1, DEBUG_PRINT, (size_t) &"0\0001\0002\0003\0004\0005\0006\0007\0008\0009\000a\000b\000c\000d\000e\000f"[((number >> (i * 4)) & 15) * 2]), i > 0; i --);
+}
+
+void _start(size_t initrd_start, size_t initrd_end) {
     syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "hellorld from initrd_jax_fs!\n");
+
+    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd is at ");
+    print_number(initrd_start);
+    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) " to ");
+    print_number(initrd_end);
+    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
 
     struct alloc_args endpoint_alloc_args = {
         .type = TYPE_ENDPOINT,
@@ -41,6 +52,8 @@ void _start(void) {
     vfs_open_root(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, 6);
 
     syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "got here 2\n");
+
+    // TODO: start actually running a filesystem server
 
     while (1) {
         syscall_yield();

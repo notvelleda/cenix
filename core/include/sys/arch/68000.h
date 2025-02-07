@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "string.h"
 
 #define SYSCALL_YIELD 0
 #define SYSCALL_INVOKE 1
@@ -41,4 +42,18 @@ static inline void set_stack_pointer(struct thread_registers *registers, size_t 
 
 static inline void set_got_pointer(struct thread_registers *registers, size_t got_pointer) {
     registers->address[5] = (uint32_t) got_pointer;
+}
+
+struct arguments_data {
+    size_t arguments_increment;
+};
+
+static inline void start_arguments(struct arguments_data *data, struct thread_registers *registers, size_t arguments_count, size_t arguments_size_bytes) {
+    registers->stack_pointer -= arguments_size_bytes + 4;
+    data->arguments_increment = 4;
+}
+
+static inline void add_argument(struct arguments_data *data, struct thread_registers *registers, size_t argument, uint8_t argument_size_bytes) {
+    memcpy((void *) (registers->stack_pointer + data->arguments_increment), &argument, argument_size_bytes);
+    data->arguments_increment += argument_size_bytes;
 }
