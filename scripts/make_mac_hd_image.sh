@@ -36,8 +36,8 @@ cd initrd
 ../jax/jax -cvf ../initrd.jax *
 cd ..
 
-make_in core/process_server $MAKE_FLAGS DEBUG=n
-make_in core/kernel $MAKE_FLAGS DEBUG=y # disabling debug for the kernel saves like 11k
+make_in core/process_server $MAKE_FLAGS DEBUG=y
+make_in core/kernel $MAKE_FLAGS DEBUG=y # disabling debug for the kernel saves like 9-10k
 
 echo ==== \(bootloader image creation\)
 cd tiny-mac-bootloader

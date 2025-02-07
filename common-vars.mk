@@ -11,7 +11,8 @@ DEBUG_FLAG != [ "$(DEBUG)" = y ] && echo "-DDEBUG" || echo ""
 
 CFLAGS += -Isrc -Iinclude -I$(PROJECT_ROOT)/core/include -I$(PROJECT_ROOT)/core/common -I$(PROJECT_ROOT)/core/printf
 CFLAGS += -fomit-frame-pointer -nolibc -nostartfiles -fno-builtin -ffreestanding -fno-stack-protector -static -Wall
-CFLAGS += -DPRINTF_DISABLE_SUPPORT_FLOAT -DPLATFORM="$(PLATFORM)" $(DEBUG_FLAG) -DARCH_$(ARCH)
+CFLAGS += -DPRINTF_DISABLE_SUPPORT_FLOAT -DPRINTF_DISABLE_SUPPORT_EXPONENTIAL -DPRINTF_DISABLE_SUPPORT_LONG_LONG
+CFLAGS += -DPLATFORM="$(PLATFORM)" $(DEBUG_FLAG) -DARCH_$(ARCH)
 
 ARCH_PATH = src/arch/$(ARCH)
 PLATFORM_PATH = src/platform/$(PLATFORM)
