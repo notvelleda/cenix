@@ -19,6 +19,10 @@
 #define VFS_MOUNT 1
 #define VFS_UNMOUNT 2
 
+// TODO: replace the vfs call endpoint with a root directory endpoint, replace vfs_mount/vfs_unmount with fd_mount/fd_unmount so path parsing isn't required in the vfs server
+// this will likely require optimization to speed up path traversal, maybe a flag could be passed to fd_open to have it open in place? this should be easily doable, would get rid of a decent chunk of overhead,
+// and would greatly simplify path traversal in libc
+
 #define VFS_NEW_PROCESS 255
 
 /// if this flag is set, the new process will share its filesystem namespace with its creator
@@ -106,8 +110,20 @@ static inline size_t vfs_unmount(size_t vfs_endpoint, size_t reply_endpoint, siz
 #define FD_UNLINK 7
 #define FD_TRUNCATE 8
 // TODO: chmod, chown (could these be combined into one call?)
+// TODO: fd_mount, fd_unmount (vfs layer specific calls, behavior is undefined when called on a directory file descriptor not originating from the vfs)
 
-static inline size_t fd_read(size_t fd_address, size_t reply_endpoint, size_t read_buffer, size_t size, size_t position) {
+/// gets a number corresponding to which operation was requested on a file descriptor when given an IPC message
+#define FD_CALL_NUMBER(message) ((message).buffer[0])
+
+#define FD_RETURN_VALUE(message) (*(size_t *) (&(message).buffer))
+#define FD_REPLY_ENDPOINT(message) ((message).capabilities[0])
+
+#define FD_READ_BUFFER(message) ((message).capabilities[1])
+#define FD_READ_SIZE(message) (((size_t *) (&(message).buffer + 1))[0])
+#define FD_READ_POSITION(message) (((size_t *) (&(message).buffer + 1))[1])
+#define FD_READ_BYTES_READ(message) (*(size_t *) ((message).buffer + sizeof(size_t)))
+
+static inline size_t fd_read(size_t fd_address, size_t reply_endpoint, size_t read_buffer, size_t size, size_t position, size_t *bytes_read) {
     struct ipc_message to_send = {
         .buffer = {FD_READ},
         .capabilities = {{reply_endpoint, -1}, {read_buffer, -1}},
@@ -117,21 +133,29 @@ static inline size_t fd_read(size_t fd_address, size_t reply_endpoint, size_t re
         .capabilities = {}
     };
 
-    // TODO: make sure this works
-    size_t *buffer = (size_t *) (&to_send.buffer + 1);
-    buffer[0] = size;
-    buffer[1] = position;
+    FD_READ_SIZE(to_send) = size;
+    FD_READ_POSITION(to_send) = position;
 
-    return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
+    size_t result = vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
+
+    *bytes_read = FD_READ_BYTES_READ(to_receive);
+
+    return result;
 }
 
-static inline size_t fd_read_fast(size_t fd_address, size_t reply_endpoint, uint8_t *read_buffer, size_t size, size_t position) {
-    if (size > IPC_BUFFER_SIZE - sizeof(size_t)) {
+#define FD_READ_FAST_DATA(message) (&(message).buffer + sizeof(size_t) * 2)
+#define FD_READ_FAST_SIZE(message) ((message).buffer[1])
+#define FD_READ_FAST_MAX_SIZE (IPC_BUFFER_SIZE - sizeof(size_t) * 2)
+#define FD_READ_FAST_POSITION(message) (*(size_t *) (&(message).buffer + 2))
+#define FD_READ_FAST_BYTES_READ(message) (*(size_t *) ((message).buffer + sizeof(size_t)))
+
+static inline size_t fd_read_fast(size_t fd_address, size_t reply_endpoint, uint8_t *read_buffer, size_t size, size_t position, size_t *bytes_read) {
+    if (size > FD_READ_FAST_MAX_SIZE) {
         return EINVAL;
     }
 
     struct ipc_message to_send = {
-        .buffer = {FD_READ_FAST},
+        .buffer = {FD_READ_FAST, (uint8_t) size},
         .capabilities = {{reply_endpoint, -1}},
         .to_copy = 1
     };
@@ -139,7 +163,7 @@ static inline size_t fd_read_fast(size_t fd_address, size_t reply_endpoint, uint
         .capabilities = {}
     };
 
-    *(size_t *) (&to_send.buffer + 1) = position;
+    FD_READ_FAST_POSITION(to_send) = position;
 
     size_t result = vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
 
@@ -147,12 +171,19 @@ static inline size_t fd_read_fast(size_t fd_address, size_t reply_endpoint, uint
         return result;
     }
 
-    memcpy(read_buffer, &to_receive.buffer + sizeof(size_t), size);
+    *bytes_read = FD_READ_FAST_BYTES_READ(to_receive);
+
+    memcpy(read_buffer, FD_READ_FAST_DATA(to_receive), size > *bytes_read ? *bytes_read : size);
 
     return 0;
 }
 
-static inline size_t fd_write(size_t fd_address, size_t reply_endpoint, size_t write_buffer, size_t size, size_t position) {
+#define FD_WRITE_BUFFER(message) ((message).capabilities[1])
+#define FD_WRITE_SIZE(message) (((size_t *) (&(message).buffer + 1))[0])
+#define FD_WRITE_POSITION(message) (((size_t *) (&(message).buffer + 1))[1])
+#define FD_WRITE_BYTES_WRITTEN(message) (*(size_t *) ((message).buffer + sizeof(size_t)))
+
+static inline size_t fd_write(size_t fd_address, size_t reply_endpoint, size_t write_buffer, size_t size, size_t position, size_t *bytes_written) {
     struct ipc_message to_send = {
         .buffer = {FD_WRITE},
         .capabilities = {{reply_endpoint, -1}, {write_buffer, -1}},
@@ -162,21 +193,29 @@ static inline size_t fd_write(size_t fd_address, size_t reply_endpoint, size_t w
         .capabilities = {}
     };
 
-    // TODO: make sure this works
-    size_t *buffer = (size_t *) (&to_send.buffer + 1);
-    buffer[0] = size;
-    buffer[1] = position;
+    FD_WRITE_SIZE(to_send) = size;
+    FD_WRITE_POSITION(to_send) = position;
 
-    return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
+    size_t result = vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
+
+    *bytes_written = FD_WRITE_BYTES_WRITTEN(to_receive);
+
+    return result;
 }
 
-static inline size_t fd_write_fast(size_t fd_address, size_t reply_endpoint, const uint8_t *write_buffer, size_t size, size_t position) {
-    if (size > IPC_BUFFER_SIZE - 1 - sizeof(size_t)) {
+#define FD_WRITE_FAST_DATA(message) (&(message).buffer + 2 + sizeof(size_t))
+#define FD_WRITE_FAST_SIZE(message) ((message).buffer[1])
+#define FD_WRITE_FAST_MAX_SIZE (IPC_BUFFER_SIZE - 2 - sizeof(size_t))
+#define FD_WRITE_FAST_POSITION(message) (*(size_t *) (&(message).buffer + 2))
+#define FD_WRITE_FAST_BYTES_WRITTEN(message) (*(size_t *) ((message).buffer + sizeof(size_t)))
+
+static inline size_t fd_write_fast(size_t fd_address, size_t reply_endpoint, const uint8_t *write_buffer, size_t size, size_t position, size_t *bytes_written) {
+    if (size > FD_WRITE_FAST_MAX_SIZE) {
         return EINVAL;
     }
 
     struct ipc_message to_send = {
-        .buffer = {FD_WRITE_FAST},
+        .buffer = {FD_WRITE_FAST, (uint8_t) size},
         .capabilities = {{reply_endpoint, -1}},
         .to_copy = 1
     };
@@ -184,12 +223,16 @@ static inline size_t fd_write_fast(size_t fd_address, size_t reply_endpoint, con
         .capabilities = {}
     };
 
-    *(size_t *) (&to_send.buffer + 1) = position;
+    FD_WRITE_FAST_POSITION(to_send) = position;
 
-    memcpy(&to_send.buffer + 1 + sizeof(size_t), write_buffer, size);
+    memcpy(FD_WRITE_FAST_DATA(to_send), write_buffer, size);
+
+    *bytes_written = FD_WRITE_FAST_BYTES_WRITTEN(to_receive);
 
     return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
 }
+
+#define FD_STAT_STRUCT(message) (*(struct stat *) ((message).buffer + sizeof(size_t)))
 
 static inline size_t fd_stat(size_t fd_address, size_t reply_endpoint, struct stat *stat_buffer) {
     struct ipc_message to_send = {
@@ -204,11 +247,16 @@ static inline size_t fd_stat(size_t fd_address, size_t reply_endpoint, struct st
     size_t result = vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
 
     if (result == 0) {
-        memcpy(stat_buffer, &to_receive.buffer[sizeof(size_t)], sizeof(struct stat));
+        memcpy(stat_buffer, &FD_STAT_STRUCT(to_receive), sizeof(struct stat));
     }
 
     return result;
 }
+
+#define FD_OPEN_FLAGS(message) ((message).buffer[1])
+#define FD_OPEN_MODE(message) ((message).buffer[2])
+#define FD_OPEN_NAME_ADDRESS(message) ((message).capabilities[1])
+#define FD_OPEN_REPLY_FD(message) ((message).capabilities[0])
 
 static inline size_t fd_open(size_t fd_address, size_t reply_endpoint, size_t name_address, size_t fd_slot, uint8_t flags, uint8_t mode) {
     struct ipc_message to_send = {
@@ -222,6 +270,9 @@ static inline size_t fd_open(size_t fd_address, size_t reply_endpoint, size_t na
 
     return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
 }
+
+#define FD_LINK_FD(message) ((message).capabilities[1])
+#define FD_LINK_NAME_ADDRESS(message) ((message).capabilities[2])
 
 // TODO: figure out how the Fuck to do this, since in order to make it work there needs to be a way to get the badge of an endpoint if and only if a thread possesses
 // the endpoint it originated from
@@ -238,6 +289,8 @@ static inline size_t fd_link(size_t fd_address, size_t reply_endpoint, size_t fd
     return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
 }
 
+#define FD_UNLINK_NAME_ADDRESS(message) ((message).capabilities[1])
+
 static inline size_t fd_unlink(size_t fd_address, size_t reply_endpoint, size_t name_address) {
     struct ipc_message to_send = {
         .buffer = {FD_UNLINK},
@@ -251,6 +304,8 @@ static inline size_t fd_unlink(size_t fd_address, size_t reply_endpoint, size_t 
     return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
 }
 
+#define FD_TRUNCATE_SIZE(message) (*(size_t *) (&(message).buffer + 1))
+
 static inline size_t fd_truncate(size_t fd_address, size_t reply_endpoint, size_t size) {
     struct ipc_message to_send = {
         .buffer = {FD_TRUNCATE},
@@ -261,7 +316,7 @@ static inline size_t fd_truncate(size_t fd_address, size_t reply_endpoint, size_
         .capabilities = {}
     };
 
-    *(size_t *) (&to_send.buffer + 1) = size;
+    FD_TRUNCATE_SIZE(to_send) = size;
 
     return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
 }
@@ -288,7 +343,7 @@ struct vfs_directory_entry {
     /// this must be a unique (to this filesystem) ID corresponding to the file with the name in this directory entry in the directory being read.
     /// hard-linked files (i.e. files sharing an inode) are allowed to share the same ID number.
     ///
-    /// this field is effectively meaningless to most programs since the user-facing filesystem API exclusively uses filenames and paths, however
+    /// this field is effectively meaningless to most programs since the user-facing filesystem API exclusively uses filenames, however
     /// it's crucial to making the VFS layer work properly so it's required.
     ino_t inode;
     /// \brief the position at which to read the next directory entry in this directory.
@@ -298,6 +353,10 @@ struct vfs_directory_entry {
     size_t next_entry_position;
     /// \brief the length of the name of this directory entry.
     ///
-    /// the filename is located immediately after this field and must be the length stored in this field without a null terminator at the end.
+    /// this describes how long the `name` field immediately following this is in bytes.
     uint16_t name_length;
+    /// \brief the name of this directory entry.
+    ///
+    /// this must be the length stored in the `name_length` field without a null terminator.
+    uint8_t name[];
 };

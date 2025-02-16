@@ -67,13 +67,13 @@ void _start(void) {
             size_t namespace_id = IPC_ID(received.badge);
             bool can_modify_namespace = IPC_FLAGS(received.badge) == IPC_FLAG_CAN_MODIFY;
 
-            printf("vfs server: got message %d for fs %d (can modify: %s)!\n", received.buffer[0], namespace_id, can_modify_namespace ? "true" : "false");
+            printf("vfs server: got message %d for fs %d (can modify: %s)!\n", FD_CALL_NUMBER(received), namespace_id, can_modify_namespace ? "true" : "false");
 
             struct ipc_message reply = {
                 .capabilities = {}
             };
 
-            switch (received.buffer[0]) {
+            switch (FD_CALL_NUMBER(received)) {
             case VFS_OPEN_ROOT:
                 printf("open root\n");
 
@@ -81,23 +81,23 @@ void _start(void) {
 
                 if (result != 0) {
                     printf("open_root failed with error %d\n", result);
-                    *(size_t *) &reply.buffer = ENOSYS;
-                    syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &reply);
+                    FD_RETURN_VALUE(reply) = ENOSYS;
+                    syscall_invoke(FD_REPLY_ENDPOINT(received).address, -1, ENDPOINT_SEND, (size_t) &reply);
                 }
 
                 break;
             case VFS_MOUNT:
                 printf("mount (flags 0x%x)\n", received.buffer[1]);
-                *(size_t *) &reply.buffer = can_modify_namespace ? mount(namespace_id, received.capabilities[1].address, received.capabilities[2].address, received.buffer[1]) : EPERM;
-                syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &reply);
+                FD_RETURN_VALUE(reply) = can_modify_namespace ? mount(namespace_id, received.capabilities[1].address, received.capabilities[2].address, received.buffer[1]) : EPERM;
+                syscall_invoke(FD_REPLY_ENDPOINT(received).address, -1, ENDPOINT_SEND, (size_t) &reply);
 
                 break;
             case VFS_UNMOUNT:
                 printf("unmount\n");
 
                 // TODO: this
-                *(size_t *) &reply.buffer = ENOSYS;
-                syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &reply);
+                FD_RETURN_VALUE(reply) = ENOSYS;
+                syscall_invoke(FD_REPLY_ENDPOINT(received).address, -1, ENDPOINT_SEND, (size_t) &reply);
 
                 break;
             case VFS_NEW_PROCESS:
@@ -112,7 +112,7 @@ void _start(void) {
                         creator_pid,
                         new_pid,
                         received.buffer[1],
-                        received.capabilities[0].address,
+                        FD_REPLY_ENDPOINT(received).address,
                         endpoint_alloc_args.address,
                         thread_id,
                         temp_slot
@@ -121,16 +121,16 @@ void _start(void) {
                     if (result != 0) {
                         printf("set_up_filesystem_for_process failed with error %d\n", result);
 
-                        *(size_t *) &reply.buffer = result;
+                        FD_RETURN_VALUE(reply) = result;
 
-                        syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &reply);
+                        syscall_invoke(FD_REPLY_ENDPOINT(received).address, -1, ENDPOINT_SEND, (size_t) &reply);
                     }
                 }
 
                 break;
             default:
-                *(size_t *) &reply.buffer = EBADMSG;
-                syscall_invoke(received.capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &reply);
+                FD_RETURN_VALUE(reply) = EBADMSG;
+                syscall_invoke(FD_REPLY_ENDPOINT(received).address, -1, ENDPOINT_SEND, (size_t) &reply);
             }
         }
 
@@ -140,9 +140,5 @@ void _start(void) {
                 syscall_invoke(THREAD_STORAGE_ADDRESS(thread_id), THREAD_STORAGE_DEPTH, NODE_DELETE, i);
             }
         }
-    }
-
-    while (1) {
-        syscall_yield();
     }
 }

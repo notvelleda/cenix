@@ -36,7 +36,8 @@ struct node_copy_args {
     access_flags_t access_rights;
     /// the badge of the new capability
     size_t badge;
-    /// if this is set to a non-zero value, the new capability will have its badge set. if not, its badge will remain unchanged.
+    /// \brief if this is set to a non-zero value, the new capability will have its badge set. if not, its badge will remain unchanged.
+    ///
     /// badges can only be set on original capabilities (capabilities that have not been derived from other capabilities).
     /// if an attempt is made to set the badge on a non-original capability, the copy invocation will fail
     uint8_t should_set_badge;
@@ -157,7 +158,7 @@ struct ipc_message {
     ///
     /// when sending a message, any of these fields with a depth of greater than 0 will be moved
     /// to the corresponding slot address in the structure provided to a receive call
-    struct {
+    struct ipc_capability {
         /// the address of the capability or available slot
         size_t address;
         /// how many bits of the address field are valid and should be used to search
