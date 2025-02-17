@@ -13,7 +13,7 @@ make_in() {
     bmake -C $@
 }
 
-make_in jax -f Makefile.native $@
+make_in utils/jax -f Makefile.native $@
 
 make_in core/vfs_server $MAKE_FLAGS DEBUG=y
 make_in core/service_manager $MAKE_FLAGS
@@ -33,7 +33,7 @@ cp core/debug_console/debug_console initrd/sbin/debug_console
 cp core/initrd_fs/initrd_fs initrd/sbin/initrd_fs
 
 cd initrd
-../jax/jax -cvf ../initrd.jax *
+../utils/jax/jax -cvf ../initrd.jax *
 cd ..
 
 make_in core/process_server $MAKE_FLAGS DEBUG=y

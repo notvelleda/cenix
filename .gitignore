@@ -42,7 +42,7 @@ core/service_manager/service_manager
 core/vfs_server/vfs_server
 core/debug_console/debug_console
 core/initrd_fs/initrd_fs
-jax/jax
+utils/jax/jax
 
 initrd
 initrd.jax
