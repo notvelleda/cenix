@@ -1,3 +1,5 @@
+.include <$(PROJECT_ROOT)/makefiles/out-of-source.mk>
+
 .PHONY: clean
 
 .c.o:

@@ -9,13 +9,13 @@ ARCH = $(ARCH_68000)
 
 DEBUG_FLAG != [ "$(DEBUG)" = y ] && echo "-DDEBUG" || echo ""
 
-CFLAGS += -Isrc -Iinclude -I$(PROJECT_ROOT)/core/include -I$(PROJECT_ROOT)/core/common -I$(PROJECT_ROOT)/core/printf
+CFLAGS += -I$(CWD) -I$(PROJECT_ROOT)/core/include -I$(PROJECT_ROOT)/core/common -I$(PROJECT_ROOT)/core/printf
 CFLAGS += -fomit-frame-pointer -nolibc -nostartfiles -fno-builtin -ffreestanding -fno-stack-protector -static -Wall -Wstack-usage=256
 CFLAGS += -DPRINTF_DISABLE_SUPPORT_FLOAT -DPRINTF_DISABLE_SUPPORT_EXPONENTIAL -DPRINTF_DISABLE_SUPPORT_LONG_LONG
 CFLAGS += -DPLATFORM="$(PLATFORM)" $(DEBUG_FLAG) -DARCH_$(ARCH)
 
-ARCH_PATH = src/arch/$(ARCH)
-PLATFORM_PATH = src/platform/$(PLATFORM)
+ARCH_PATH = arch/$(ARCH)
+PLATFORM_PATH = platform/$(PLATFORM)
 
 # architecture-specific cc flags
 68000_CFLAGS != [ -n "`echo $(PLATFORM) | grep -e '.*-68000'`" ] && echo "-m68000" || echo ""
@@ -27,10 +27,12 @@ BINARY_FORMAT = $(BINARY_68000)
 
 ARCH_SOURCES != find $(ARCH_PATH) -name "*.c" -o -name "*.S" 2>/dev/null || true
 PLATFORM_SOURCES != find $(PLATFORM_PATH) -name "*.c" -o -name "*.S" 2>/dev/null || true
-COMMON_SOURCES != find src -maxdepth 1 -name "*.c" 2>/dev/null || true
+COMMON_SOURCES != find * -maxdepth 1 -name "*.c" 2>/dev/null || true
 SOURCE_FILES = $(COMMON_SOURCES) $(PLATFORM_SOURCES) $(ARCH_SOURCES) $(ADDITIONAL_SOURCES)
 
 DEBUG_OBJECTS_COND != [ "$(DEBUG)" = y ] && echo $(DEBUG_OBJECTS) || echo ""
 
 C_OBJECTS = $(SOURCE_FILES:.c=.o) $(DEBUG_OBJECTS_COND)
 OBJECTS += $(C_OBJECTS:.S=.o)
+
+.include <$(PROJECT_ROOT)/makefiles/out-of-source.mk>

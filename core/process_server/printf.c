@@ -1,5 +1,5 @@
 #ifdef DEBUG
-#include "../../printf/printf.c"
+#include "../printf/printf.c"
 #include "sys/kernel.h"
 
 void _putchar(char c) {
