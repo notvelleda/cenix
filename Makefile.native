@@ -1,0 +1,11 @@
+# small makefile for building native utilities required for building cenix for a given target, intended to be invoked by the top level makefile
+
+DIRECTORIES = utils
+
+.PHONY: all $(DIRECTORIES)
+
+all: $(DIRECTORIES)
+
+# rule for building subdirectories
+$(DIRECTORIES):
+	$(MAKE) -C $@ -f Makefile.native PROJECT_ROOT=..
