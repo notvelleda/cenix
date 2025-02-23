@@ -15,4 +15,4 @@ mac-floppy: core
 	${CROSS}strip tiny-mac-bootloader/fs-contents/kernel
 	touch tiny-mac-bootloader/fs-contents/cmdline
 	rm tiny-mac-bootloader/floppy.img || true
-	$(MAKE) -C tiny-mac-bootloader CROSS="$CROSS" AS="$(CROSS)as" LD="$(CROSS)ld" floppy.img
+	$(MAKE) -C tiny-mac-bootloader CROSS="$(CROSS)" AS="$(CROSS)as" LD="$(CROSS)ld" floppy.img

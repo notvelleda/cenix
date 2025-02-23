@@ -20,9 +20,9 @@ DEBUG ?= n
 # list of directories to cross compile
 DIRECTORIES = core
 
-.PHONY: all native $(CROSS_DIRECTORIES) clean
+.PHONY: all native $(DIRECTORIES) clean
 
-all: $(CROSS_DIRECTORIES)
+all: $(DIRECTORIES)
 
 # rule for building native utilities as specified in `Makefile.native`
 native:
@@ -33,7 +33,7 @@ $(DIRECTORIES): native
 	$(MAKE) -C $@ -f Makefile PROJECT_ROOT=.. CROSS="$(CROSS)" PLATFORM="$(PLATFORM)" DEBUG="$(DEBUG)"
 
 clean:
-	rm -r build
+	-rm -r build
 
 # include special rules for this platform if any exist
 .if exists(makefiles/platform/$(PLATFORM).mk)
