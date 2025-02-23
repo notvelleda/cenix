@@ -1,8 +1,6 @@
-PROJECT_ROOT = ../..
-
 CFLAGS = -O2
 SOURCE_FILES != find . -name "*.c" 2>/dev/null
 OBJECTS = $(SOURCE_FILES:.c=.o)
 BINARY = jax
 
-.include <$(PROJECT_ROOT)/makefiles/binary.mk>
+.include "$(PROJECT_ROOT)/makefiles/binary.mk"

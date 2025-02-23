@@ -1,4 +1,4 @@
-.include <$(PROJECT_ROOT)/makefiles/out-of-source.mk>
+.include "$(PROJECT_ROOT)/makefiles/out-of-source.mk"
 
 .PHONY: clean
 

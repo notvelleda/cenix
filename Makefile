@@ -8,8 +8,8 @@ CROSS ?= m68k-unknown-elf-
 # this variable can be overrided by passing it as an argument to make, as in `make PLATFORM=platform-here`
 PLATFORM ?= mac-68000
 
-# this variable specifies whether debug mode should be enabled for the build or not, which will enable Cool Things like debug messages and the like.
-# however, this comes at a cost, as it may increase the size of some programs by a lot, which may not be desirable on particularly memory constrained machines.
+# this variable specifies whether debug mode should be enabled for the build or not, which will enable Cool Things like debug messages.
+# however this comes at a cost, as it may increase the size of some programs by a lot which may not be desirable on particularly memory constrained machines.
 # this variable can be overrided by passing it as an argument to make, as in `make DEBUG=y`
 DEBUG ?= n
 
@@ -37,5 +37,5 @@ clean:
 
 # include special rules for this platform if any exist
 .if exists(makefiles/platform/$(PLATFORM).mk)
-.include <makefiles/platform/$(PLATFORM).mk>
+.include "makefiles/platform/$(PLATFORM).mk"
 .endif

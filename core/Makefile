@@ -22,4 +22,4 @@ $(INITRD_PATH): $(SBIN_CONTENTS)
 	@# create the archive file
 	cd $(INITRD_DIR_PATH) && $(PWD)/$(BUILD_DIRECTORY)/jax/jax -cf $(PWD)/$@ *
 
-.include <$(PROJECT_ROOT)/makefiles/build-subdirectories.mk>
+.include "$(PROJECT_ROOT)/makefiles/build-subdirectories.mk"

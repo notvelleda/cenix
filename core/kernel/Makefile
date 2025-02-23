@@ -1,7 +1,7 @@
 CFLAGS += -O2
 BINARY = kernel
 
-.include <$(PROJECT_ROOT)/makefiles/common-vars.mk>
+.include "$(PROJECT_ROOT)/makefiles/common-vars.mk"
 
 # platform-specific ld flags
 # these are used for things like specifying a linker script to be used if something other than the default is required
@@ -14,7 +14,7 @@ PROCESS_SERVER_OBJECT=$(PROJECT_ROOT)/build/kernel/process_server.o
 
 OBJECTS += $(PROCESS_SERVER_OBJECT)
 
-.include <$(PROJECT_ROOT)/makefiles/binary.mk>
+.include "$(PROJECT_ROOT)/makefiles/binary.mk"
 
 OBJCOPY_FLAGS = -I binary -O $(BINARY_FORMAT) --rename-section .data=.rodata,alloc,load,readonly,data,contents
 

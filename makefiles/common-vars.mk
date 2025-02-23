@@ -1,4 +1,3 @@
-CROSS ?= m68k-unknown-elf-
 CC = $(CROSS)cc
 AR = $(CROSS)ar
 
@@ -35,4 +34,4 @@ DEBUG_OBJECTS_COND != [ "$(DEBUG)" = y ] && echo $(DEBUG_OBJECTS) || echo ""
 C_OBJECTS = $(SOURCE_FILES:.c=.o) $(DEBUG_OBJECTS_COND)
 OBJECTS += $(C_OBJECTS:.S=.o)
 
-.include <$(PROJECT_ROOT)/makefiles/out-of-source.mk>
+.include "$(PROJECT_ROOT)/makefiles/out-of-source.mk"
