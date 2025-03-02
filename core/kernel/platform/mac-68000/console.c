@@ -1,4 +1,5 @@
 #include "console.h"
+#include "debug.h"
 #include "font.h"
 #include "heap.h"
 #include <stdint.h>

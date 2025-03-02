@@ -1,8 +1,8 @@
-OUTPUT = $(LIBRARY)
+OUTPUT = lib$(LIBRARY).a
 
-all: $(LIBRARY)
+all: $(OUTPUT)
 
-$(LIBRARY): $(OBJECTS)
-	$(AR) $(ARFLAGS) $(LIBRARY) $(OBJECTS)
+$(OUTPUT): $(OBJECTS)
+	$(AR) $(ARFLAGS) $(OUTPUT) $(OBJECTS)
 
 .include "$(PROJECT_ROOT)/makefiles/common-targets.mk"

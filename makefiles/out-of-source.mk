@@ -7,7 +7,7 @@ TARGET != [ "${BINARY}" ] && echo "${BINARY}" || echo "${LIBRARY}"
 
 # https://www.reddit.com/r/BSD/comments/1gjnqe5/comment/lwtoh41/
 
-MAKEOBJDIR ?= $(PROJECT_ROOT)/build/$(TARGET)
+MAKEOBJDIR ?= $(PROJECT_ROOT)/build/$(OBJ_DIR_PREFIX)$(TARGET)
 
 .if ${.OBJDIR} != ${MAKEOBJDIR}
 .if !exists(${MAKEOBJDIR})

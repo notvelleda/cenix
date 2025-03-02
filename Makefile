@@ -20,13 +20,17 @@ DEBUG ?= n
 # list of directories to cross compile
 DIRECTORIES = core
 
-.PHONY: all native $(DIRECTORIES) clean
+.PHONY: all native test $(DIRECTORIES) clean
 
 all: $(DIRECTORIES)
 
 # rule for building native utilities as specified in `Makefile.native`
 native:
 	$(MAKE) -f Makefile.native
+
+# rule for building and running unit tests as specified in `Makefile.test`
+test: native
+	$(MAKE) -f Makefile.test
 
 # rule for building subdirectories
 $(DIRECTORIES): native

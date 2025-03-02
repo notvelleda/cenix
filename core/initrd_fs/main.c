@@ -8,7 +8,14 @@
 #include "sys/vfs.h"
 
 #define VFS_ENDPOINT_ADDRESS 2
-#define DEBUG
+
+// TODO: these really should be checked with an assert in release builds but i haven't bothered
+#ifdef UNDER_TEST
+#include "unity.h"
+#define INVOKE_ASSERT(...) TEST_ASSERT(syscall_invoke(__VA_ARGS__) == 0)
+#else
+#define INVOKE_ASSERT(...) syscall_invoke(__VA_ARGS__)
+#endif
 
 static void print_number(size_t number) {
     // what can i say, i like writing fucked up for loops sometimes :3
@@ -266,23 +273,29 @@ static void handle_fd_message(
 
 void _start(size_t initrd_start, size_t initrd_end) {
 #ifdef DEBUG
-    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "hellorld from initrd_fs!\n");
+    INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "hellorld from initrd_fs!\n");
 
-    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: initrd is at ");
+    INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: initrd is at ");
     print_number(initrd_start);
-    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) " to ");
+    INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) " to ");
     print_number(initrd_end);
-    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
+    INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "\n");
 #endif
 
     struct jax_iterator iterator;
 
     if (!open_jax(&iterator, (const uint8_t *) initrd_start, (const uint8_t *) initrd_end)) {
-        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: fatal: initrd format is invalid");
+        INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: fatal: initrd format is invalid\n");
 
+#ifdef UNDER_TEST
+        // provides a way to exit this function if this error condition is hit
+        syscall_yield();
+        return;
+#else
         while (true) {
             syscall_yield();
         }
+#endif
     }
 
     struct alloc_args endpoint_alloc_args = {
@@ -291,7 +304,7 @@ void _start(size_t initrd_start, size_t initrd_end) {
         .address = 3,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
+    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
 
     struct alloc_args path_alloc_args = {
         .type = TYPE_UNTYPED,
@@ -299,11 +312,11 @@ void _start(size_t initrd_start, size_t initrd_end) {
         .address = 4,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &path_alloc_args);
+    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &path_alloc_args);
 
     char *pointer = (char *) syscall_invoke(path_alloc_args.address, path_alloc_args.depth, UNTYPED_LOCK, 0);
     *pointer = '/';
-    syscall_invoke(path_alloc_args.address, path_alloc_args.depth, UNTYPED_UNLOCK, 0);
+    INVOKE_ASSERT(path_alloc_args.address, path_alloc_args.depth, UNTYPED_UNLOCK, 0);
 
     struct alloc_args fd_alloc_args = {
         .type = TYPE_ENDPOINT,
@@ -311,15 +324,15 @@ void _start(size_t initrd_start, size_t initrd_end) {
         .address = 5,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args);
+    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args);
 
     vfs_mount(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, path_alloc_args.address, fd_alloc_args.address, MREPL);
 #ifdef DEBUG
-    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got here (after mount call)\n");
+    INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got here (after mount call)\n");
 #endif
 
     /*vfs_open_root(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, 6);
-    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "got here 2\n");*/
+    INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "got here 2\n");*/
 
     // allocate a capability node to store received capabilities and temporary data
     struct alloc_args node_alloc_args = {
@@ -328,7 +341,7 @@ void _start(size_t initrd_start, size_t initrd_end) {
         .address = 6,
         .depth = INIT_NODE_DEPTH
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args);
+    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args);
 
     struct ipc_message received = {
         .capabilities = {
@@ -344,18 +357,23 @@ void _start(size_t initrd_start, size_t initrd_end) {
         size_t result = syscall_invoke(endpoint_alloc_args.address, endpoint_alloc_args.depth, ENDPOINT_RECEIVE, (size_t) &received);
 
         if (result != 0) {
-            syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: endpoint_receive failed with code ");
+#ifdef UNDER_TEST
+            // there needs to be a way to exit the main loop if this program is being tested, hence the break here
+            break;
+#else
+            INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: endpoint_receive failed with code ");
             print_number(result);
-            syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
+            INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "\n");
             continue;
+#endif
         }
 
 #ifdef DEBUG
-        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got fd call ");
+        INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got fd call ");
         print_number(FD_CALL_NUMBER(received));
-        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) " with badge ");
+        INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) " with badge ");
         print_number(received.badge);
-        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
+        INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "\n");
 #endif
 
         struct ipc_message reply = {
@@ -408,7 +426,7 @@ void _start(size_t initrd_start, size_t initrd_end) {
             );
         }
 
-        syscall_invoke(FD_REPLY_ENDPOINT(received).address, -1, ENDPOINT_SEND, (size_t) &reply);
+        INVOKE_ASSERT(FD_REPLY_ENDPOINT(received).address, -1, ENDPOINT_SEND, (size_t) &reply);
 
         // delete any leftover capabilities that were transferred and temporary capabilities not sent
         for (size_t i = 0; i <= IPC_CAPABILITY_SLOTS; i ++) {

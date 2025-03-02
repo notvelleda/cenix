@@ -1,5 +1,7 @@
 #include "capabilities.h"
+#include "debug.h"
 #include "errno.h"
+#include "heap.h"
 #include "ipc.h"
 #include "linked_list.h"
 #include "scheduler.h"
@@ -91,7 +93,9 @@ void delete_capability(struct capability *to_delete) {
             to_delete->handlers->destructor(to_delete);
         }
 
-        heap_free(to_delete->heap, to_delete->resource);
+        if (to_delete->resource != NULL) {
+            heap_free(to_delete->heap, to_delete->resource);
+        }
     }
 
     to_delete->handlers = NULL;
@@ -392,8 +396,8 @@ static void on_node_moved(void *resource) {
 
 static void node_destructor(struct capability *node) {
     const struct capability_node_header *header = (struct capability_node_header *) node->resource;
+    struct capability *slot = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header));
 
-    struct capability *slot = (struct capability *) ((uint8_t *) node + sizeof(struct capability_node_header));
     for (int i = 0; i < (1 << header->slot_bits); i ++, slot ++) {
         if (slot->handlers != NULL) {
             merge_derivation_lists(slot);

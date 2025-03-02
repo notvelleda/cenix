@@ -26,7 +26,7 @@ BINARY_FORMAT = $(BINARY_68000)
 
 ARCH_SOURCES != find $(ARCH_PATH) -name "*.c" -o -name "*.S" 2>/dev/null || true
 PLATFORM_SOURCES != find $(PLATFORM_PATH) -name "*.c" -o -name "*.S" 2>/dev/null || true
-COMMON_SOURCES != find * -maxdepth 0 -name "*.c" 2>/dev/null || true
+COMMON_SOURCES != find * -maxdepth 0 -name "*.c" -not \( -name "test*" \) 2>/dev/null || true # files starting with "test" are ignored, so that unit test files aren't included in regular builds
 SOURCE_FILES = $(COMMON_SOURCES) $(PLATFORM_SOURCES) $(ARCH_SOURCES) $(ADDITIONAL_SOURCES)
 
 DEBUG_OBJECTS_COND != [ "$(DEBUG)" = y ] && echo $(DEBUG_OBJECTS) || echo ""

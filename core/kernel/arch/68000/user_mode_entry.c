@@ -1,5 +1,6 @@
 #include "user_mode_entry.h"
 #include "arch.h"
+#include "debug.h"
 #include "scheduler.h"
 
 void enter_user_mode(void *stack_pointer_origin) {

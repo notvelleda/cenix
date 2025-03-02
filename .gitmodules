@@ -4,3 +4,9 @@
 [submodule "kernel/printf"]
 	path = core/printf
 	url = https://github.com/mpaland/printf.git
+[submodule "test/unity"]
+	path = test/unity
+	url = https://github.com/ThrowTheSwitch/Unity.git
+[submodule "test/fff"]
+	path = test/fff
+	url = https://github.com/meekrosoft/fff.git

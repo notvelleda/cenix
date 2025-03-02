@@ -1,0 +1,11 @@
+# small makefile for running unit tests, intended to be invoked by the top level makefile
+
+DIRECTORIES = core
+
+.PHONY: all $(DIRECTORIES)
+
+all: $(DIRECTORIES)
+
+# rule for building subdirectories
+$(DIRECTORIES):
+	$(MAKE) -C $@ -f Makefile.test PROJECT_ROOT=..

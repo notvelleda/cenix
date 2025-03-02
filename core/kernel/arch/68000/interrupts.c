@@ -1,5 +1,6 @@
 #include "./arch.h"
 #include "capabilities.h"
+#include "debug.h"
 #include "scheduler.h"
 #include "sys/kernel.h"
 

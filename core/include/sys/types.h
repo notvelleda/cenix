@@ -1,5 +1,9 @@
 #pragma once
 
+#ifdef UNDER_TEST
+#include "/usr/include/sys/types.h"
+#else
+
 #include <stdint.h>
 #include <stddef.h>
 
@@ -16,3 +20,5 @@ typedef uint32_t off_t;
 typedef uint16_t pid_t;
 typedef uint16_t uid_t;
 typedef int64_t time_t;
+
+#endif

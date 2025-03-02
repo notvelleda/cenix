@@ -3,18 +3,27 @@
 #include <stdint.h>
 #include <stddef.h>
 
+struct arguments_data;
+
 #if defined(__m68k__) || defined(M68000) || defined(__MC68K__)
 #include "./arch/68000.h"
 #endif
 
+// if this program is being tested, the syscall functions will be defined in the test harness instead of in a file included here
+#ifdef UNDER_TEST
+#define __SYSCALL_PREFIX
+#else
+#define __SYSCALL_PREFIX static inline
+#endif
+
 /// yields the time slice of the current thread, allowing other threads the opportunity to execute instead
-static inline void syscall_yield(void);
+__SYSCALL_PREFIX void syscall_yield(void);
 
 /// \brief invokes the function corresponding to the provided handler number on a capability and returns the result
 ///
 /// if the capability is not able to be located or if the given handler number is invalid, 0 will be returned
 /// and no operation will be performed. otherwise, the return value depends on the specific invocation made
-static inline size_t syscall_invoke(size_t address, size_t depth, size_t handler_number, size_t argument);
+__SYSCALL_PREFIX size_t syscall_invoke(size_t address, size_t depth, size_t handler_number, size_t argument);
 
 /// flags that describe the access rights for a given capability
 typedef uint8_t access_flags_t;

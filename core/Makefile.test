@@ -1,0 +1,2 @@
+MAKEFILE_NAME = Makefile.test
+.include "$(PROJECT_ROOT)/makefiles/build-subdirectories.mk"

@@ -4,7 +4,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "debug.h"
 #include "sys/kernel.h"
 #include "linked_list.h"
 
@@ -163,8 +162,6 @@ extern struct invocation_handlers untyped_handlers;
 
 /// in-kernel equivalent of syscall_invoke()
 size_t invoke_capability(size_t address, size_t depth, size_t handler_number, size_t argument);
-
-#include "heap.h"
 
 /// the value of size_bits for the kernel's root capability node
 #define ROOT_CAP_SLOT_BITS 4
