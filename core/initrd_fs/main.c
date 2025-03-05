@@ -309,20 +309,29 @@ void _start(size_t initrd_start, size_t initrd_end) {
         }
     }
 
+    // allocate a capability node to store received capabilities and temporary data
+    const struct alloc_args node_alloc_args = {
+        .type = TYPE_NODE,
+        .size = 3,
+        .address = 3,
+        .depth = INIT_NODE_DEPTH
+    };
+    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args);
+
     // allocate the reply endpoint
-    struct alloc_args endpoint_alloc_args = {
+    const struct alloc_args endpoint_alloc_args = {
         .type = TYPE_ENDPOINT,
         .size = 0,
-        .address = 3,
+        .address = 4,
         .depth = -1
     };
     INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
 
     // allocate the path
-    struct alloc_args path_alloc_args = {
+    const struct alloc_args path_alloc_args = {
         .type = TYPE_UNTYPED,
         .size = 1,
-        .address = 4,
+        .address = 5,
         .depth = -1
     };
     INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &path_alloc_args);
@@ -332,30 +341,32 @@ void _start(size_t initrd_start, size_t initrd_end) {
     INVOKE_ASSERT(path_alloc_args.address, path_alloc_args.depth, UNTYPED_UNLOCK, 0);
 
     // allocate the file descriptor endpoint
-    struct alloc_args fd_alloc_args = {
+    const struct alloc_args fd_alloc_args = {
         .type = TYPE_ENDPOINT,
         .size = 0,
-        .address = 5,
+        .address = 6,
         .depth = -1
     };
     INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args);
 
-    vfs_mount(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, path_alloc_args.address, fd_alloc_args.address, MREPL);
+    // copy the file descriptor endpoint 
+    const struct node_copy_args fd_copy_args = {
+        .source_address = fd_alloc_args.address,
+        .source_depth = fd_alloc_args.depth,
+        .dest_slot = IPC_CAPABILITY_SLOTS + 1,
+        .access_rights = -1,
+        .badge = 0,
+        .should_set_badge = 1
+    };
+    INVOKE_ASSERT(node_alloc_args.address, node_alloc_args.depth, NODE_COPY, (size_t) &fd_copy_args);
+
+    vfs_mount(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, path_alloc_args.address, (fd_copy_args.dest_slot << INIT_NODE_DEPTH) | node_alloc_args.address, MREPL);
 #ifdef DEBUG
     syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got here (after mount call)\n");
 #endif
 
     /*vfs_open_root(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, 6);
     INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "got here 2\n");*/
-
-    // allocate a capability node to store received capabilities and temporary data
-    struct alloc_args node_alloc_args = {
-        .type = TYPE_NODE,
-        .size = 3,
-        .address = 6,
-        .depth = INIT_NODE_DEPTH
-    };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args);
 
     struct ipc_message received = {
         .capabilities = {
@@ -377,7 +388,7 @@ void _start(size_t initrd_start, size_t initrd_end) {
 
     while (1) {
         received.badge = 0;
-        size_t result = syscall_invoke(fd_alloc_args.address, fd_alloc_args.depth, ENDPOINT_RECEIVE, (size_t) &received);
+        size_t result = syscall_invoke(state.endpoint.address, state.endpoint.depth, ENDPOINT_RECEIVE, (size_t) &received);
 
         if (result != 0) {
 #ifdef UNDER_TEST
@@ -387,7 +398,7 @@ void _start(size_t initrd_start, size_t initrd_end) {
             syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: endpoint_receive failed with code ");
             print_number(result);
             syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
-            continue;
+            continue; // TODO: should this really continue? is this actually correct behavior?
 #endif
         }
 
