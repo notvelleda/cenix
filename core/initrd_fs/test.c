@@ -1,3 +1,4 @@
+#include "errno.h"
 #include "fff.h"
 #include "jax.h"
 #include "main.h"
@@ -31,7 +32,7 @@ void custom_setup(void) {
 
     FFF_RESET_HISTORY();
 
-    struct alloc_args fd_alloc_args = {
+    const struct alloc_args fd_alloc_args = {
         .type = TYPE_ENDPOINT,
         .size = 0,
         .address = ENDPOINT_ADDRESS,
@@ -39,7 +40,7 @@ void custom_setup(void) {
     };
     INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args);
 
-    struct alloc_args node_alloc_args = {
+    const struct alloc_args node_alloc_args = {
         .type = TYPE_NODE,
         .size = 3,
         .address = NODE_ADDRESS,
@@ -139,9 +140,9 @@ static void list_directory(struct ipc_message *received, struct ipc_message *rep
     }
 }
 
-static size_t open(struct ipc_message *received, struct ipc_message *reply, size_t badge, const char *name) {
+static size_t open(struct ipc_message *received, struct ipc_message *reply, size_t badge, const char *name, size_t *new_badge) {
     // allocate a capability to store the name
-    struct alloc_args alloc_args = {
+    const struct alloc_args alloc_args = {
         .type = TYPE_UNTYPED,
         .size = strlen(name) + 1,
         .address = ((IPC_CAPABILITY_SLOTS + 2) << INIT_NODE_DEPTH) | NODE_ADDRESS,
@@ -165,24 +166,25 @@ static size_t open(struct ipc_message *received, struct ipc_message *reply, size
 
     handle_ipc_message(&state, received, reply);
 
-    TEST_ASSERT(FD_RETURN_VALUE(*reply) == 0);
+    size_t result = FD_RETURN_VALUE(*reply);
 
-    // make sure directory entries match up
-    size_t new_badge;
-    TEST_ASSERT(read_badge(FD_OPEN_REPLY_FD(*reply).address, FD_OPEN_REPLY_FD(*reply).depth, &new_badge) == 0);
+    if (result == 0) {
+        // get the badge of the new endpoint
+        TEST_ASSERT(read_badge(FD_OPEN_REPLY_FD(*reply).address, FD_OPEN_REPLY_FD(*reply).depth, new_badge) == 0);
+    }
 
     // delete capabilities so that this function can be called again
-    INVOKE_ASSERT(NODE_ADDRESS, INIT_NODE_DEPTH, NODE_DELETE, IPC_CAPABILITY_SLOTS + 1); // used in handle_open()
+    syscall_invoke(NODE_ADDRESS, INIT_NODE_DEPTH, NODE_DELETE, IPC_CAPABILITY_SLOTS + 1); // used in handle_open()
     INVOKE_ASSERT(NODE_ADDRESS, INIT_NODE_DEPTH, NODE_DELETE, IPC_CAPABILITY_SLOTS + 2);
 
-    return new_badge;
+    return result;
 }
 
-static void read_file(struct ipc_message *received, struct ipc_message *reply, size_t badge, const char *contents) {
+static void read_file_fast(struct ipc_message *received, struct ipc_message *reply, size_t badge, size_t position, size_t size, const char *contents) {
     received->badge = badge;
     FD_CALL_NUMBER(*received) = FD_READ_FAST;
-    FD_READ_FAST_SIZE(*received) = FD_READ_FAST_MAX_SIZE;
-    FD_READ_FAST_POSITION(*received) = 0;
+    FD_READ_FAST_SIZE(*received) = size > FD_READ_FAST_MAX_SIZE ? FD_READ_FAST_MAX_SIZE : size;
+    FD_READ_FAST_POSITION(*received) = position;
 
     handle_ipc_message(&state, received, reply);
 
@@ -193,10 +195,73 @@ static void read_file(struct ipc_message *received, struct ipc_message *reply, s
     buffer[FD_READ_FAST_BYTES_READ(*reply)] = 0;
 
 #ifdef DEBUG
-    printf("file contents: \"%s\"\n", buffer);
+    printf("file contents (FD_READ_FAST): \"%s\"\n", buffer);
 #endif
 
     TEST_ASSERT(strcmp(buffer, contents) == 0);
+}
+
+static void read_file_slow(struct ipc_message *received, struct ipc_message *reply, size_t badge, size_t position, size_t size, const char *contents) {
+    size_t contents_length = strlen(contents);
+
+    // allocate a capability for memory to be read into
+    const struct alloc_args alloc_args = {
+        .type = TYPE_UNTYPED,
+        .size = size > contents_length ? size : size + 1, // makes sure memory is allocated for the null terminator
+        .address = ((IPC_CAPABILITY_SLOTS + 2) << INIT_NODE_DEPTH) | NODE_ADDRESS,
+        .depth = -1
+    };
+    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
+
+    // fill the buffer with a set value to check nothing extra was read (this could be its own test but it's easier to just slap it onto all the existing cases)
+    uint8_t *buffer = (uint8_t *) syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_LOCK, 0);
+    TEST_ASSERT(buffer != NULL);
+
+    const uint8_t fill_value = 0xaa;
+    memset(buffer, fill_value, alloc_args.size);
+
+    INVOKE_ASSERT(alloc_args.address, alloc_args.depth, UNTYPED_UNLOCK, 0);
+
+    // do the fd call
+    received->badge = badge;
+    FD_CALL_NUMBER(*received) = FD_READ;
+    FD_READ_SIZE(*received) = size;
+    FD_READ_POSITION(*received) = position;
+    FD_READ_BUFFER(*received) = (struct ipc_capability) {alloc_args.address, alloc_args.depth};
+
+    handle_ipc_message(&state, received, reply);
+
+    TEST_ASSERT(FD_RETURN_VALUE(*reply) == 0);
+
+    // check that the buffer is correct
+    buffer = (uint8_t *) syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_LOCK, 0);
+    TEST_ASSERT(buffer != NULL);
+
+    TEST_ASSERT(FD_READ_BYTES_READ(*reply) == contents_length);
+
+    TEST_ASSERT(buffer[FD_READ_BYTES_READ(*reply)] == fill_value); // check that the byte that'll be overwritten with a null terminator is correct
+    buffer[FD_READ_BYTES_READ(*reply)] = 0;
+
+    for (size_t i = FD_READ_BYTES_READ(*reply) + 1; i < alloc_args.size; i ++) {
+        TEST_ASSERT(buffer[i] == fill_value);
+    }
+
+#ifdef DEBUG
+    printf("file contents (FD_READ): \"%s\"\n", buffer);
+#endif
+
+    TEST_ASSERT(strcmp(buffer, contents) == 0);
+
+    INVOKE_ASSERT(alloc_args.address, alloc_args.depth, UNTYPED_UNLOCK, 0);
+
+    // delete the read buffer
+    INVOKE_ASSERT(NODE_ADDRESS, INIT_NODE_DEPTH, NODE_DELETE, IPC_CAPABILITY_SLOTS + 2);
+}
+
+// convenient wrapper to test both FD_READ and FD_READ_FAST
+static void read_file(struct ipc_message *received, struct ipc_message *reply, size_t badge, size_t position, size_t size, const char *contents) {
+    read_file_slow(received, reply, badge, position, size, contents);
+    read_file_fast(received, reply, badge, position, size, contents);
 }
 
 // fs api tests
@@ -212,33 +277,103 @@ const char *subdirectory_names[] = {"test.txt"};
 
 void list_subdirectory(void) {
     struct ipc_message received, reply;
-    size_t badge = open(&received, &reply, 0, "directory1");
+    size_t badge;
+    TEST_ASSERT(open(&received, &reply, 0, "directory1", &badge) == 0);
 
     list_directory(&received, &reply, badge, subdirectory_names, sizeof(subdirectory_names) / sizeof(subdirectory_names[0]));
 }
 
 void read_file_in_root(void) {
     struct ipc_message received, reply;
-    size_t badge = open(&received, &reply, 0, "testing.txt");
+    size_t badge;
+    TEST_ASSERT(open(&received, &reply, 0, "testing.txt", &badge) == 0);
 
-    read_file(&received, &reply, badge, "this is yet another test.\n");
+    read_file(&received, &reply, badge, 0, 1024, "this is yet another test.\n");
 }
 
 void read_file_in_subdirectory(void) {
     struct ipc_message received, reply;
-    size_t badge = open(&received, &reply, 0, "directory1");
-    badge = open(&received, &reply, badge, "test.txt");
+    size_t badge;
+    TEST_ASSERT(open(&received, &reply, 0, "directory1", &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "test.txt", &badge) == 0);
 
-    read_file(&received, &reply, badge, "this is a test.\n");
+    read_file(&received, &reply, badge, 0, 1024, "this is a test.\n");
+
+    TEST_ASSERT(open(&received, &reply, 0, "directory3", &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "uiop", &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "owo.txt", &badge) == 0);
+
+    read_file(&received, &reply, badge, 0, 1024, "OwO\n");
 }
 
-void read_file_in_subdirectory_2(void) {
+void open_nonexistent_file(void) {
     struct ipc_message received, reply;
-    size_t badge = open(&received, &reply, 0, "directory3");
-    badge = open(&received, &reply, badge, "uiop");
-    badge = open(&received, &reply, badge, "owo.txt");
+    size_t badge;
+    TEST_ASSERT(open(&received, &reply, 0, "thisdoesntexist", &badge) == ENOENT);
+    TEST_ASSERT(open(&received, &reply, 0, "directory4", &badge) == ENOENT);
+}
 
-    read_file(&received, &reply, badge, "OwO\n");
+void open_nonexistent_file_in_subdirectory(void) {
+    struct ipc_message received, reply;
+    size_t badge;
+    TEST_ASSERT(open(&received, &reply, 0, "directory2", &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "thisdoesntexist", &badge) == ENOENT);
+}
+
+void read_position(void) {
+    struct ipc_message received, reply;
+    size_t badge;
+    TEST_ASSERT(open(&received, &reply, 0, "directory3", &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "uwu.txt", &badge) == 0);
+
+    read_file(&received, &reply, badge, 0, 1024, "UwU\n");
+    read_file(&received, &reply, badge, 1, 1024, "wU\n");
+    read_file(&received, &reply, badge, 2, 1024, "U\n");
+    read_file(&received, &reply, badge, 3, 1024, "\n");
+    read_file(&received, &reply, badge, 4, 1024, "");
+    read_file(&received, &reply, badge, 1234567890, 1024, "");
+    read_file(&received, &reply, badge, 0xdeadbeef, 1024, "");
+    read_file(&received, &reply, badge, -1, 1024, "");
+}
+
+void read_less_than_full_file(void) {
+    struct ipc_message received, reply;
+    size_t badge;
+    TEST_ASSERT(open(&received, &reply, 0, "directory1", &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "test.txt", &badge) == 0);
+
+    read_file(&received, &reply, badge, 0, 16, "this is a test.\n");
+    read_file(&received, &reply, badge, 0, 15, "this is a test.");
+    read_file(&received, &reply, badge, 0, 14, "this is a test");
+    read_file(&received, &reply, badge, 0, 13, "this is a tes");
+    read_file(&received, &reply, badge, 0, 12, "this is a te");
+    read_file(&received, &reply, badge, 0, 11, "this is a t");
+    read_file(&received, &reply, badge, 0, 10, "this is a ");
+    read_file(&received, &reply, badge, 0, 9, "this is a");
+    read_file(&received, &reply, badge, 0, 8, "this is ");
+    read_file(&received, &reply, badge, 0, 7, "this is");
+    read_file(&received, &reply, badge, 0, 6, "this i");
+    read_file(&received, &reply, badge, 0, 5, "this ");
+    read_file(&received, &reply, badge, 0, 4, "this");
+    read_file(&received, &reply, badge, 0, 3, "thi");
+    read_file(&received, &reply, badge, 0, 2, "th");
+    read_file(&received, &reply, badge, 0, 1, "t");
+    read_file(&received, &reply, badge, 0, 0, "");
+
+    TEST_ASSERT(open(&received, &reply, 0, "directory3", &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "uiop", &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "owo.txt", &badge) == 0);
+
+    read_file(&received, &reply, badge, 0, 4, "OwO\n");
+    read_file(&received, &reply, badge, 0, 3, "OwO");
+    read_file(&received, &reply, badge, 0, 2, "Ow");
+    read_file(&received, &reply, badge, 0, 1, "O");
+    read_file(&received, &reply, badge, 0, 0, "");
+
+    read_file(&received, &reply, badge, 1, 3, "wO\n");
+    read_file(&received, &reply, badge, 2, 2, "O\n");
+    read_file(&received, &reply, badge, 3, 1, "\n");
+    read_file(&received, &reply, badge, 4, 0, "");
 }
 
 int main(void) {
@@ -251,6 +386,9 @@ int main(void) {
     RUN_TEST(list_subdirectory);
     RUN_TEST(read_file_in_root);
     RUN_TEST(read_file_in_subdirectory);
-    RUN_TEST(read_file_in_subdirectory_2);
+    RUN_TEST(open_nonexistent_file);
+    RUN_TEST(open_nonexistent_file_in_subdirectory);
+    RUN_TEST(read_position);
+    RUN_TEST(read_less_than_full_file);
     return UNITY_END();
 }

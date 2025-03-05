@@ -195,10 +195,13 @@ static void handle_fd_message(const struct state *state, struct ipc_message *rec
 
             if (data == NULL) {
                 FD_RETURN_VALUE(*reply) = ENOMEM;
-            } else {
-                FD_READ_BYTES_READ(*reply) = handle_read(state, received, reply, file, FD_READ_POSITION(*received), FD_READ_SIZE(*received), data);
-                syscall_invoke(FD_READ_BUFFER(*received).address, FD_READ_BUFFER(*received).depth, UNTYPED_UNLOCK, 0);
+                break;
             }
+
+            size_t size = syscall_invoke(FD_READ_BUFFER(*received).address, FD_READ_BUFFER(*received).depth, UNTYPED_SIZEOF, 0);
+
+            FD_READ_BYTES_READ(*reply) = handle_read(state, received, reply, file, FD_READ_POSITION(*received), FD_READ_SIZE(*received) > size ? size : FD_READ_SIZE(*received), data);
+            syscall_invoke(FD_READ_BUFFER(*received).address, FD_READ_BUFFER(*received).depth, UNTYPED_UNLOCK, 0);
 
             break;
         }
