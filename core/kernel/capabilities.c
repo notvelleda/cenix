@@ -835,7 +835,7 @@ size_t invoke_capability(size_t address, size_t depth, size_t handler_number, si
 
     // TODO: add guard value to invocation numbers so you can't accidentally run a different invocation than was intended
     if (handlers == NULL || handler_number >= handlers->num_handlers) {
-        printk("invoke_capability: invocation %d on capability 0x%x (%d bits) is invalid\n", handler_number, address, depth);
+        printk("invoke_capability: invocation %d on capability 0x%x (%d bits, type %s) is invalid\n", handler_number, address, depth, handlers_to_name(handlers));
         unlock_looked_up_capability(&result);
 
         // TODO: see above

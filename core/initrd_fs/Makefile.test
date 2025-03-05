@@ -2,3 +2,22 @@ BINARY = initrd_fs
 TEST_HARNESS = userland_low_level
 
 .include "$(PROJECT_ROOT)/makefiles/test.mk"
+
+CFLAGS += "-DTEST_JAX_LOCATION=$(PWD)/test.jax"
+
+test: test.jax
+
+test.jax:
+	mkdir directory1
+	mkdir -p directory2/directory1
+	mkdir -p directory2/directory2
+	mkdir -p directory3/qwerty
+	mkdir -p directory3/uiop
+	mkdir -p directory3/asdfghjkl
+	mkdir -p another_directory/directory1
+	echo "this is a test." > directory1/test.txt
+	echo "this is another test." > directory2/directory2/test.txt
+	echo "UwU" > directory3/uwu.txt
+	echo "OwO" > directory3/uiop/owo.txt
+	echo "this is yet another test." > testing.txt
+	$(CWD)/$(PROJECT_ROOT)/build/jax/jax -cf test.jax directory1 directory2 directory3 another_directory testing.txt

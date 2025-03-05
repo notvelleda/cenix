@@ -1,4 +1,5 @@
 #include "jax.h"
+#include "main.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -6,16 +7,9 @@
 #include "sys/kernel.h"
 #include "sys/stat.h"
 #include "sys/vfs.h"
+#include "test_macros.h"
 
 #define VFS_ENDPOINT_ADDRESS 2
-
-// TODO: these really should be checked with an assert in release builds but i haven't bothered
-#ifdef UNDER_TEST
-#include "unity.h"
-#define INVOKE_ASSERT(...) TEST_ASSERT(syscall_invoke(__VA_ARGS__) == 0)
-#else
-#define INVOKE_ASSERT(...) syscall_invoke(__VA_ARGS__)
-#endif
 
 static void print_number(size_t number) {
     // what can i say, i like writing fucked up for loops sometimes :3
@@ -86,7 +80,7 @@ static const void *next_file_in_dir(struct jax_file *dir_file, const void *addre
 }
 
 /// handles a fd_read/fd_read_fast call
-static size_t handle_read(size_t initrd_start, size_t initrd_end, struct ipc_message *received, struct ipc_message *reply, struct jax_file *file, size_t position, size_t read_size, void *read_data) {
+static size_t handle_read(const struct state *state, struct ipc_message *received, struct ipc_message *reply, struct jax_file *file, size_t position, size_t read_size, void *read_data) {
     if (file->type == TYPE_DIRECTORY) {
         // read a directory entry from this directory
 
@@ -101,12 +95,12 @@ static size_t handle_read(size_t initrd_start, size_t initrd_end, struct ipc_mes
         // if this is the first file in the directory, use the address of the directory itself so it'll find the first subsequent directory entry if there is any
         const void *read_address = position == 0 ? (const void *) received->badge : (const void *) position;
 
-        const void *next = next_file_in_dir(file, read_address, (const void *) initrd_start, (const void *) initrd_end, &current_file, &current_file_pointer);
+        const void *next = next_file_in_dir(file, read_address, (const void *) state->initrd_start, (const void *) state->initrd_end, &current_file, &current_file_pointer);
 
         // TODO: make this emit . and .. directory entries, how would that work here?
 
         // this is done to make sure there'll be a next file after this directory entry
-        if (next_file_in_dir(file, next, (const void *) initrd_start, (const void *) initrd_end, &temp_file, &temp_file_pointer) == NULL) {
+        if (next_file_in_dir(file, next, (const void *) state->initrd_start, (const void *) state->initrd_end, &temp_file, &temp_file_pointer) == NULL) {
             entry->next_entry_position = 0;
         } else {
             entry->next_entry_position = (size_t) next;
@@ -136,16 +130,7 @@ static size_t handle_read(size_t initrd_start, size_t initrd_end, struct ipc_mes
     return read_size;
 }
 
-static void handle_open(
-    size_t initrd_start,
-    size_t initrd_end,
-    struct ipc_capability *endpoint,
-    struct ipc_capability *node,
-    struct ipc_message *received,
-    struct ipc_message *reply,
-    struct jax_file *file,
-    const void *next
-) {
+static void handle_open(const struct state *state, struct ipc_message *received, struct ipc_message *reply, struct jax_file *file, const void *next) {
     if (file->type != TYPE_DIRECTORY) {
         FD_RETURN_VALUE(*reply) = ENOTSUP;
         return;
@@ -162,7 +147,7 @@ static void handle_open(
     }
 
     // find a file in this directory that matches the given filename
-    while ((next = next_file_in_dir(file, next, (const void *) initrd_start, (const void *) initrd_end, &current_file, &current_file_pointer)) != NULL) {
+    while ((next = next_file_in_dir(file, next, (const void *) state->initrd_start, (const void *) state->initrd_end, &current_file, &current_file_pointer)) != NULL) {
         int i, j;
 
         for ((i = file->name_length == 0 ? 0 : (file->name_length + 1)), j = 0; i < current_file.name_length && current_file.name[i] == filename[j]; i ++, j ++);
@@ -175,20 +160,20 @@ static void handle_open(
 
         // badge the endpoint with the raw address of the file
         const struct node_copy_args copy_args = {
-            .source_address = endpoint->address,
-            .source_depth = endpoint->depth,
+            .source_address = state->endpoint.address,
+            .source_depth = state->endpoint.depth,
             .dest_slot = IPC_CAPABILITY_SLOTS + 1,
             .access_rights = -1, // TODO: set access rights so that other processes can't listen on this endpoint
             .badge = (size_t) current_file_pointer,
             .should_set_badge = 1
         };
-        size_t result = syscall_invoke(node->address, node->depth, NODE_COPY, (size_t) &copy_args);
+        size_t result = syscall_invoke(state->node.address, state->node.depth, NODE_COPY, (size_t) &copy_args);
 
         FD_RETURN_VALUE(*reply) = result;
 
         if (result == 0) {
             // send the newly badged endpoint back to the caller
-            FD_OPEN_REPLY_FD(*reply).address = ((IPC_CAPABILITY_SLOTS + 1) << INIT_NODE_DEPTH) | node->address;
+            FD_OPEN_REPLY_FD(*reply).address = ((IPC_CAPABILITY_SLOTS + 1) << INIT_NODE_DEPTH) | state->node.address;
             FD_OPEN_REPLY_FD(*reply).depth = -1;
             FD_RETURN_VALUE(*reply) = 0;
         }
@@ -202,16 +187,7 @@ static void handle_open(
     syscall_invoke(FD_OPEN_NAME_ADDRESS(*received).address, FD_OPEN_NAME_ADDRESS(*received).depth, UNTYPED_UNLOCK, 0);
 }
 
-static void handle_fd_message(
-    size_t initrd_start,
-    size_t initrd_end,
-    struct ipc_capability endpoint,
-    struct ipc_capability node,
-    struct ipc_message *received,
-    struct ipc_message *reply,
-    struct jax_file *file,
-    const void *next
-) {
+static void handle_fd_message(const struct state *state, struct ipc_message *received, struct ipc_message *reply, struct jax_file *file, const void *next) {
     switch (FD_CALL_NUMBER(*received)) {
     case FD_READ:
         {
@@ -220,7 +196,7 @@ static void handle_fd_message(
             if (data == NULL) {
                 FD_RETURN_VALUE(*reply) = ENOMEM;
             } else {
-                FD_READ_BYTES_READ(*reply) = handle_read(initrd_start, initrd_end, received, reply, file, FD_READ_POSITION(*received), FD_READ_SIZE(*received), data);
+                FD_READ_BYTES_READ(*reply) = handle_read(state, received, reply, file, FD_READ_POSITION(*received), FD_READ_SIZE(*received), data);
                 syscall_invoke(FD_READ_BUFFER(*received).address, FD_READ_BUFFER(*received).depth, UNTYPED_UNLOCK, 0);
             }
 
@@ -228,8 +204,7 @@ static void handle_fd_message(
         }
     case FD_READ_FAST:
         FD_READ_FAST_BYTES_READ(*reply) = handle_read(
-            initrd_start,
-            initrd_end,
+            state,
             received,
             reply,
             file,
@@ -259,7 +234,7 @@ static void handle_fd_message(
             break;
         }
     case FD_OPEN:
-        handle_open(initrd_start, initrd_end, &endpoint, &node, received, reply, file, next);
+        handle_open(state, received, reply, file, next);
         break;
     case FD_WRITE:
     case FD_WRITE_FAST:
@@ -271,33 +246,70 @@ static void handle_fd_message(
     }
 }
 
+STATIC_TESTABLE void handle_ipc_message(const struct state *state, struct ipc_message *received, struct ipc_message *reply) {
+    if (received->badge == 0) {
+        // handle root directory case
+
+        struct jax_file file = {
+            .type = TYPE_DIRECTORY,
+            .name_length = 0,
+            .name = "",
+            .description_length = 0,
+            .description = "",
+            .timestamp = 0,
+            .mode = 0b101101101,
+            .owner = 0,
+            .group = 0,
+            .size = 0,
+            .data = NULL,
+        };
+        received->badge = (size_t) state->iterator.start;
+
+        handle_fd_message(
+            state,
+            received,
+            reply,
+            &file,
+            (const void *) state->iterator.start
+        );
+    } else {
+        // handle non root directory case
+
+        struct jax_file file;
+        const void *next = next_file((const void *) received->badge, (const void *) state->initrd_end, &file);
+
+        handle_fd_message(
+            state,
+            received,
+            reply,
+            &file,
+            next
+        );
+    }
+}
+
 void _start(size_t initrd_start, size_t initrd_end) {
 #ifdef DEBUG
-    INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "hellorld from initrd_fs!\n");
+    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "hellorld from initrd_fs!\n");
 
-    INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: initrd is at ");
+    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: initrd is at ");
     print_number(initrd_start);
-    INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) " to ");
+    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) " to ");
     print_number(initrd_end);
-    INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "\n");
+    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
 #endif
 
     struct jax_iterator iterator;
 
     if (!open_jax(&iterator, (const uint8_t *) initrd_start, (const uint8_t *) initrd_end)) {
-        INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: fatal: initrd format is invalid\n");
+        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: fatal: initrd format is invalid\n");
 
-#ifdef UNDER_TEST
-        // provides a way to exit this function if this error condition is hit
-        syscall_yield();
-        return;
-#else
         while (true) {
             syscall_yield();
         }
-#endif
     }
 
+    // allocate the reply endpoint
     struct alloc_args endpoint_alloc_args = {
         .type = TYPE_ENDPOINT,
         .size = 0,
@@ -306,6 +318,7 @@ void _start(size_t initrd_start, size_t initrd_end) {
     };
     INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
 
+    // allocate the path
     struct alloc_args path_alloc_args = {
         .type = TYPE_UNTYPED,
         .size = 1,
@@ -318,6 +331,7 @@ void _start(size_t initrd_start, size_t initrd_end) {
     *pointer = '/';
     INVOKE_ASSERT(path_alloc_args.address, path_alloc_args.depth, UNTYPED_UNLOCK, 0);
 
+    // allocate the file descriptor endpoint
     struct alloc_args fd_alloc_args = {
         .type = TYPE_ENDPOINT,
         .size = 0,
@@ -328,7 +342,7 @@ void _start(size_t initrd_start, size_t initrd_end) {
 
     vfs_mount(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, path_alloc_args.address, fd_alloc_args.address, MREPL);
 #ifdef DEBUG
-    INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got here (after mount call)\n");
+    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got here (after mount call)\n");
 #endif
 
     /*vfs_open_root(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, 6);
@@ -352,84 +366,48 @@ void _start(size_t initrd_start, size_t initrd_end) {
         }
     };
 
+    // this is used so that passing state around to the various functions here that use it is a lot cleaner
+    const struct state state = {
+        .initrd_start = initrd_start,
+        .initrd_start = initrd_end,
+        .iterator = iterator,
+        .endpoint = (struct ipc_capability) {fd_alloc_args.address, fd_alloc_args.depth},
+        .node = (struct ipc_capability) {node_alloc_args.address, node_alloc_args.depth}
+    };
+
     while (1) {
         received.badge = 0;
-        size_t result = syscall_invoke(endpoint_alloc_args.address, endpoint_alloc_args.depth, ENDPOINT_RECEIVE, (size_t) &received);
+        size_t result = syscall_invoke(fd_alloc_args.address, fd_alloc_args.depth, ENDPOINT_RECEIVE, (size_t) &received);
 
         if (result != 0) {
 #ifdef UNDER_TEST
             // there needs to be a way to exit the main loop if this program is being tested, hence the break here
             break;
 #else
-            INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: endpoint_receive failed with code ");
+            syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: endpoint_receive failed with code ");
             print_number(result);
-            INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "\n");
+            syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
             continue;
 #endif
         }
 
 #ifdef DEBUG
-        INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got fd call ");
+        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got fd call ");
         print_number(FD_CALL_NUMBER(received));
-        INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) " with badge ");
+        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) " with badge ");
         print_number(received.badge);
-        INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "\n");
+        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
 #endif
 
         struct ipc_message reply = {
             .capabilities = {}
         };
 
-        if (received.badge == 0) {
-            // handle root directory case
-
-            struct jax_file file = {
-                .type = TYPE_DIRECTORY,
-                .name_length = 0,
-                .name = "",
-                .description_length = 0,
-                .description = "",
-                .timestamp = 0,
-                .mode = 0b101101101,
-                .owner = 0,
-                .group = 0,
-                .size = 0,
-                .data = NULL,
-            };
-            received.badge = (size_t) iterator.start;
-
-            handle_fd_message(
-                initrd_start,
-                initrd_end,
-                (struct ipc_capability) {endpoint_alloc_args.address, endpoint_alloc_args.depth},
-                (struct ipc_capability) {node_alloc_args.address, node_alloc_args.depth},
-                &received,
-                &reply,
-                &file,
-                (const void *) iterator.start
-            );
-        } else {
-            // handle non root directory case
-
-            struct jax_file file;
-            const void *next = next_file((const void *) received.badge, (const void *) initrd_end, &file);
-
-            handle_fd_message(
-                initrd_start,
-                initrd_end,
-                (struct ipc_capability) {endpoint_alloc_args.address, endpoint_alloc_args.depth},
-                (struct ipc_capability) {node_alloc_args.address, node_alloc_args.depth},
-                &received,
-                &reply,
-                &file,
-                next
-            );
-        }
-
-        INVOKE_ASSERT(FD_REPLY_ENDPOINT(received).address, -1, ENDPOINT_SEND, (size_t) &reply);
+        handle_ipc_message(&state, &received, &reply);
+        syscall_invoke(FD_REPLY_ENDPOINT(received).address, -1, ENDPOINT_SEND, (size_t) &reply); // return value is ignored here since it doesn't matter if the reply fails to send
 
         // delete any leftover capabilities that were transferred and temporary capabilities not sent
-        for (size_t i = 0; i <= IPC_CAPABILITY_SLOTS; i ++) {
+        for (size_t i = 0; i < IPC_CAPABILITY_SLOTS + 1; i ++) {
             if ((received.transferred_capabilities & (1 << i)) != 0) {
                 syscall_invoke(node_alloc_args.address, node_alloc_args.depth, NODE_DELETE, i);
             }

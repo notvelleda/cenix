@@ -65,6 +65,17 @@ size_t syscall_invoke(size_t address, size_t depth, size_t handler_number, size_
     return invoke_capability(address, depth, handler_number, argument);
 }
 
+size_t read_badge(size_t address, size_t depth, size_t *badge) {
+    struct look_up_result result;
+
+    if (!look_up_capability_relative(address, depth, &result)) {
+        return ENOCAPABILITY;
+    }
+
+    *badge = result.slot->badge;
+    return 0;
+}
+
 /// called by unity before each test runs, used to set up the capability space for the program under test
 void setUp(void) {
     struct thread_capability *thread = heap_alloc(NULL, sizeof(struct thread_capability));
@@ -104,9 +115,9 @@ void setUp(void) {
 
     heap_unlock(thread);
 
-    /*struct address_space_capability *address_space_resource = heap_alloc(NULL, sizeof(struct address_space_capability));
+    struct address_space_capability *address_space_resource = heap_alloc(NULL, sizeof(struct address_space_capability));
     address_space_resource->heap_pointer = NULL;
-    populate_capability_slot(NULL, 0, ROOT_CAP_SLOT_BITS, address_space_resource, &address_space_handlers, CAP_FLAG_IS_HEAP_MANAGED);*/
+    populate_capability_slot(NULL, 0, ROOT_CAP_SLOT_BITS, address_space_resource, &address_space_handlers, CAP_FLAG_IS_HEAP_MANAGED);
 
     // add debug capability to thread's root node
     populate_capability_slot(NULL, 1, ROOT_CAP_SLOT_BITS, NULL, &debug_handlers, 0);
