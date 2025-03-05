@@ -34,7 +34,7 @@ test: native
 
 # rule for building subdirectories
 $(DIRECTORIES): native
-	$(MAKE) -C $@ -f Makefile PROJECT_ROOT=.. CROSS="$(CROSS)" PLATFORM="$(PLATFORM)" DEBUG="$(DEBUG)"
+	$(MAKE) -C $@ -f Makefile PROJECT_ROOT="$(PWD)" CROSS="$(CROSS)" PLATFORM="$(PLATFORM)" DEBUG="$(DEBUG)"
 
 clean:
 	-rm -r build

@@ -20,4 +20,4 @@ test.jax:
 	echo "UwU" > directory3/uwu.txt
 	echo "OwO" > directory3/uiop/owo.txt
 	echo "this is yet another test." > testing.txt
-	$(CWD)/$(PROJECT_ROOT)/build/jax/jax -cf test.jax directory1 directory2 directory3 another_directory testing.txt
+	$(PROJECT_ROOT)/build/jax/jax -cf test.jax directory1 directory2 directory3 another_directory testing.txt

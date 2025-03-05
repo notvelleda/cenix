@@ -8,4 +8,4 @@ all: $(DIRECTORIES)
 
 # rule for building subdirectories
 $(DIRECTORIES):
-	$(MAKE) -C $@ -f Makefile.native PROJECT_ROOT=..
+	$(MAKE) -C $@ -f Makefile.native PROJECT_ROOT="$(PWD)"

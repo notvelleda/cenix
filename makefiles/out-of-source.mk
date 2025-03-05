@@ -2,7 +2,6 @@
 __OUT_OF_SOURCE = yeag # :3
 
 CWD != pwd
-PROJECT_ROOT != echo ${CWD}/${PROJECT_ROOT}
 TARGET != [ "${BINARY}" ] && echo "${BINARY}" || echo "${LIBRARY}"
 
 # https://www.reddit.com/r/BSD/comments/1gjnqe5/comment/lwtoh41/

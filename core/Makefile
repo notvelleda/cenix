@@ -20,6 +20,6 @@ $(INITRD_PATH): $(SBIN_CONTENTS)
 	cp $(BUILD_DIRECTORY)/$(file)/$(file) $(INITRD_DIR_PATH)/sbin/
 .endfor
 	@# create the archive file
-	cd $(INITRD_DIR_PATH) && $(PWD)/$(BUILD_DIRECTORY)/jax/jax -cf $(PWD)/$@ *
+	cd $(INITRD_DIR_PATH) && $(BUILD_DIRECTORY)/jax/jax -cf $@ *
 
 .include "$(PROJECT_ROOT)/makefiles/build-subdirectories.mk"
