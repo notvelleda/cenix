@@ -108,12 +108,12 @@ static size_t handle_read(const struct state *state, struct ipc_message *receive
 
         entry->inode = (ino_t) current_file_pointer;
 
-        size_t name_length = current_file.name_length - file->name_length - 1;
+        size_t name_length = current_file.name_length - (file->name_length == 0 ? 0 : file->name_length - 1);
         entry->name_length = (read_size - sizeof(struct vfs_directory_entry)) < name_length ? read_size - sizeof(struct vfs_directory_entry) : name_length;
 
         read_size = entry->name_length + sizeof(struct vfs_directory_entry);
 
-        memcpy(entry->name, current_file.name + file->name_length + 1, entry->name_length);
+        memcpy(entry->name, current_file.name + (file->name_length == 0 ? 0 : file->name_length + 1), entry->name_length);
     } else {
         // read from the file
 
