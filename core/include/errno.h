@@ -40,6 +40,8 @@
 #define ENOSYS 17
 /// operation not permitted
 #define EPERM 18
+/// read-only filesystem
+#define EROFS 19
 
 // TODO: should more posix errno values be supported?
 

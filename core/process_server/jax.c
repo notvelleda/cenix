@@ -38,9 +38,17 @@ bool jax_next_file(struct jax_iterator *iter, struct jax_file *file) {
     file->name = (const char *) iter->start + 3;
     iter->start += file->name_length + 3;
 
+    if (iter->start >= iter->end) {
+        return false;
+    }
+
     file->description_length = u16_to_ne(iter->start);
     file->description = (const char *) iter->start + 2;
     iter->start += file->description_length + 2;
+
+    if (iter->start >= iter->end) {
+        return false;
+    }
 
     file->timestamp = i64_to_ne(iter->start);
     file->mode = u16_to_ne(iter->start + 8);
@@ -50,7 +58,7 @@ bool jax_next_file(struct jax_iterator *iter, struct jax_file *file) {
     file->data = (const char *) iter->start + 22;
     iter->start += file->size + 22;
 
-    return true;
+    return iter->start <= iter->end;
 }
 
 bool jax_find(struct jax_iterator *iter, const char *to_find, char type, const char **data, size_t *size) {

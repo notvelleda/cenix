@@ -95,7 +95,19 @@ static size_t handle_read(const struct state *state, struct ipc_message *receive
         // if this is the first file in the directory, use the address of the directory itself so it'll find the first subsequent directory entry if there is any
         const void *read_address = position == 0 ? (const void *) received->badge : (const void *) position;
 
+        // make sure the read address isn't before the start of the initrd, the check for it being after the end is done in jax_next_file() and handled below
+        if (read_address < state->iterator.start && read_address != 0) {
+            FD_RETURN_VALUE(*reply) = EINVAL;
+            return 0;
+        }
+
         const void *next = next_file_in_dir(file, read_address, (const void *) state->initrd_start, (const void *) state->initrd_end, &current_file, &current_file_pointer);
+
+        if (next == NULL) {
+            // this file isn't valid (likely is just garbage data at the end of the initrd)
+            FD_RETURN_VALUE(*reply) = EINVAL;
+            return 0;
+        }
 
         // TODO: make this emit . and .. directory entries, how would that work here?
 
@@ -133,6 +145,11 @@ static size_t handle_read(const struct state *state, struct ipc_message *receive
 static void handle_open(const struct state *state, struct ipc_message *received, struct ipc_message *reply, struct jax_file *file, const void *next) {
     if (file->type != TYPE_DIRECTORY) {
         FD_RETURN_VALUE(*reply) = ENOTSUP;
+        return;
+    }
+
+    if ((FD_OPEN_FLAGS(*received) & OPEN_EXCLUSIVE) != 0 || (FD_OPEN_MODE(*received) & (MODE_WRITE | MODE_APPEND)) != 0) {
+        FD_RETURN_VALUE(*reply) = EROFS;
         return;
     }
 
@@ -183,7 +200,7 @@ static void handle_open(const struct state *state, struct ipc_message *received,
     }
 
     // no file was found :(
-    FD_RETURN_VALUE(*reply) = ENOENT;
+    FD_RETURN_VALUE(*reply) = (FD_OPEN_FLAGS(*received) & OPEN_CREATE) != 0 ? EROFS : ENOENT;
     syscall_invoke(FD_OPEN_NAME_ADDRESS(*received).address, FD_OPEN_NAME_ADDRESS(*received).depth, UNTYPED_UNLOCK, 0);
 }
 
@@ -340,6 +357,7 @@ void _start(size_t initrd_start, size_t initrd_end) {
     INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &path_alloc_args);
 
     char *pointer = (char *) syscall_invoke(path_alloc_args.address, path_alloc_args.depth, UNTYPED_LOCK, 0);
+    ASSERT_IF_TEST(pointer != NULL);
     *pointer = '/';
     INVOKE_ASSERT(path_alloc_args.address, path_alloc_args.depth, UNTYPED_UNLOCK, 0);
 
@@ -363,7 +381,9 @@ void _start(size_t initrd_start, size_t initrd_end) {
     };
     INVOKE_ASSERT(node_alloc_args.address, node_alloc_args.depth, NODE_COPY, (size_t) &fd_copy_args);
 
-    vfs_mount(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, path_alloc_args.address, (fd_copy_args.dest_slot << INIT_NODE_DEPTH) | node_alloc_args.address, MREPL);
+    size_t mount_result = vfs_mount(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, path_alloc_args.address, (fd_copy_args.dest_slot << INIT_NODE_DEPTH) | node_alloc_args.address, MREPL);
+    ASSERT_IF_TEST(mount_result == 0);
+
 #ifdef DEBUG
     syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got here (after mount call)\n");
 #endif
@@ -383,7 +403,7 @@ void _start(size_t initrd_start, size_t initrd_end) {
     // this is used so that passing state around to the various functions here that use it is a lot cleaner
     const struct state state = {
         .initrd_start = initrd_start,
-        .initrd_start = initrd_end,
+        .initrd_end = initrd_end,
         .iterator = iterator,
         .endpoint = (struct ipc_capability) {fd_alloc_args.address, fd_alloc_args.depth},
         .node = (struct ipc_capability) {node_alloc_args.address, node_alloc_args.depth}
@@ -422,9 +442,7 @@ void _start(size_t initrd_start, size_t initrd_end) {
 
         // delete any leftover capabilities that were transferred and temporary capabilities not sent
         for (size_t i = 0; i < IPC_CAPABILITY_SLOTS + 1; i ++) {
-            if ((received.transferred_capabilities & (1 << i)) != 0) {
-                syscall_invoke(node_alloc_args.address, node_alloc_args.depth, NODE_DELETE, i);
-            }
+            syscall_invoke(node_alloc_args.address, node_alloc_args.depth, NODE_DELETE, i);
         }
     }
 }

@@ -14,13 +14,13 @@
 
 DEFINE_FFF_GLOBALS;
 
-FAKE_VOID_FUNC(syscall_yield);
+FAKE_VALUE_FUNC(size_t, endpoint_send, size_t, size_t, struct capability *, size_t);
+FAKE_VALUE_FUNC(size_t, endpoint_receive, size_t, size_t, struct capability *, size_t);
 
 void entry_point(size_t initrd_start, size_t initrd_end);
 
-#define ENDPOINT_ADDRESS 3
-#define NODE_ADDRESS 4
-#define FREE_SLOTS_START 4
+#define ENDPOINT_ADDRESS 10
+#define NODE_ADDRESS 11
 
 #define _STRINGIFY(s) #s
 #define STRINGIFY(s) _STRINGIFY(s)
@@ -28,7 +28,8 @@ void entry_point(size_t initrd_start, size_t initrd_end);
 struct state state;
 
 void custom_setup(void) {
-    RESET_FAKE(syscall_yield);
+    RESET_FAKE(endpoint_send);
+    RESET_FAKE(endpoint_receive);
 
     FFF_RESET_HISTORY();
 
@@ -140,7 +141,7 @@ static void list_directory(struct ipc_message *received, struct ipc_message *rep
     }
 }
 
-static size_t open(struct ipc_message *received, struct ipc_message *reply, size_t badge, const char *name, size_t *new_badge) {
+static size_t open(struct ipc_message *received, struct ipc_message *reply, size_t badge, const char *name, uint8_t mode, uint8_t flags, size_t *new_badge) {
     // allocate a capability to store the name
     const struct alloc_args alloc_args = {
         .type = TYPE_UNTYPED,
@@ -161,7 +162,8 @@ static size_t open(struct ipc_message *received, struct ipc_message *reply, size
     // call fd_open
     received->badge = badge;
     FD_CALL_NUMBER(*received) = FD_OPEN;
-    FD_OPEN_MODE(*received) = MODE_READ;
+    FD_OPEN_MODE(*received) = mode;
+    FD_OPEN_FLAGS(*received) = flags;
     FD_OPEN_NAME_ADDRESS(*received) = (struct ipc_capability) {alloc_args.address, alloc_args.depth};
 
     handle_ipc_message(&state, received, reply);
@@ -171,6 +173,10 @@ static size_t open(struct ipc_message *received, struct ipc_message *reply, size
     if (result == 0) {
         // get the badge of the new endpoint
         TEST_ASSERT(read_badge(FD_OPEN_REPLY_FD(*reply).address, FD_OPEN_REPLY_FD(*reply).depth, new_badge) == 0);
+
+#ifdef DEBUG
+        printf("got badge %d\n", *new_badge);
+#endif
     }
 
     // delete capabilities so that this function can be called again
@@ -264,6 +270,14 @@ static void read_file(struct ipc_message *received, struct ipc_message *reply, s
     read_file_fast(received, reply, badge, position, size, contents);
 }
 
+static void stat(struct ipc_message *received, struct ipc_message *reply, size_t badge, struct stat *stat_ptr) {
+    received->badge = badge;
+    FD_CALL_NUMBER(*received) = FD_STAT;
+    handle_ipc_message(&state, received, reply);
+    TEST_ASSERT(FD_RETURN_VALUE(*reply) == 0);
+    memcpy(stat_ptr, &FD_STAT_STRUCT(*reply), sizeof(struct stat));
+}
+
 // fs api tests
 
 const char *root_directory_names[] = {"directory1", "directory2", "directory3", "another_directory", "testing.txt"};
@@ -278,7 +292,7 @@ const char *subdirectory_names[] = {"test.txt"};
 void list_subdirectory(void) {
     struct ipc_message received, reply;
     size_t badge;
-    TEST_ASSERT(open(&received, &reply, 0, "directory1", &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, 0, "directory1", MODE_READ, 0, &badge) == 0);
 
     list_directory(&received, &reply, badge, subdirectory_names, sizeof(subdirectory_names) / sizeof(subdirectory_names[0]));
 }
@@ -286,7 +300,7 @@ void list_subdirectory(void) {
 void read_file_in_root(void) {
     struct ipc_message received, reply;
     size_t badge;
-    TEST_ASSERT(open(&received, &reply, 0, "testing.txt", &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, 0, "testing.txt", MODE_READ, 0, &badge) == 0);
 
     read_file(&received, &reply, badge, 0, 1024, "this is yet another test.\n");
 }
@@ -294,37 +308,23 @@ void read_file_in_root(void) {
 void read_file_in_subdirectory(void) {
     struct ipc_message received, reply;
     size_t badge;
-    TEST_ASSERT(open(&received, &reply, 0, "directory1", &badge) == 0);
-    TEST_ASSERT(open(&received, &reply, badge, "test.txt", &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, 0, "directory1", MODE_READ, 0, &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "test.txt", MODE_READ, 0, &badge) == 0);
 
     read_file(&received, &reply, badge, 0, 1024, "this is a test.\n");
 
-    TEST_ASSERT(open(&received, &reply, 0, "directory3", &badge) == 0);
-    TEST_ASSERT(open(&received, &reply, badge, "uiop", &badge) == 0);
-    TEST_ASSERT(open(&received, &reply, badge, "owo.txt", &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, 0, "directory3", MODE_READ, 0, &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "uiop", MODE_READ, 0, &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "owo.txt", MODE_READ, 0, &badge) == 0);
 
     read_file(&received, &reply, badge, 0, 1024, "OwO\n");
-}
-
-void open_nonexistent_file(void) {
-    struct ipc_message received, reply;
-    size_t badge;
-    TEST_ASSERT(open(&received, &reply, 0, "thisdoesntexist", &badge) == ENOENT);
-    TEST_ASSERT(open(&received, &reply, 0, "directory4", &badge) == ENOENT);
-}
-
-void open_nonexistent_file_in_subdirectory(void) {
-    struct ipc_message received, reply;
-    size_t badge;
-    TEST_ASSERT(open(&received, &reply, 0, "directory2", &badge) == 0);
-    TEST_ASSERT(open(&received, &reply, badge, "thisdoesntexist", &badge) == ENOENT);
 }
 
 void read_position(void) {
     struct ipc_message received, reply;
     size_t badge;
-    TEST_ASSERT(open(&received, &reply, 0, "directory3", &badge) == 0);
-    TEST_ASSERT(open(&received, &reply, badge, "uwu.txt", &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, 0, "directory3", MODE_READ, 0, &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "uwu.txt", MODE_READ, 0, &badge) == 0);
 
     read_file(&received, &reply, badge, 0, 1024, "UwU\n");
     read_file(&received, &reply, badge, 1, 1024, "wU\n");
@@ -339,8 +339,9 @@ void read_position(void) {
 void read_less_than_full_file(void) {
     struct ipc_message received, reply;
     size_t badge;
-    TEST_ASSERT(open(&received, &reply, 0, "directory1", &badge) == 0);
-    TEST_ASSERT(open(&received, &reply, badge, "test.txt", &badge) == 0);
+
+    TEST_ASSERT(open(&received, &reply, 0, "directory1", MODE_READ, 0, &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "test.txt", MODE_READ, 0, &badge) == 0);
 
     read_file(&received, &reply, badge, 0, 16, "this is a test.\n");
     read_file(&received, &reply, badge, 0, 15, "this is a test.");
@@ -360,9 +361,9 @@ void read_less_than_full_file(void) {
     read_file(&received, &reply, badge, 0, 1, "t");
     read_file(&received, &reply, badge, 0, 0, "");
 
-    TEST_ASSERT(open(&received, &reply, 0, "directory3", &badge) == 0);
-    TEST_ASSERT(open(&received, &reply, badge, "uiop", &badge) == 0);
-    TEST_ASSERT(open(&received, &reply, badge, "owo.txt", &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, 0, "directory3", MODE_READ, 0, &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "uiop", MODE_READ, 0, &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "owo.txt", MODE_READ, 0, &badge) == 0);
 
     read_file(&received, &reply, badge, 0, 4, "OwO\n");
     read_file(&received, &reply, badge, 0, 3, "OwO");
@@ -376,6 +377,246 @@ void read_less_than_full_file(void) {
     read_file(&received, &reply, badge, 4, 0, "");
 }
 
+void read_invalid_directory_entry(void) {
+    struct ipc_message received, reply;
+
+    received.badge = 0;
+    FD_CALL_NUMBER(received) = FD_READ_FAST;
+    FD_READ_FAST_SIZE(received) = FD_READ_FAST_MAX_SIZE;
+    FD_READ_FAST_POSITION(received) = 1;
+    handle_ipc_message(&state, &received, &reply);
+    TEST_ASSERT(FD_RETURN_VALUE(reply) == EINVAL);
+
+    received.badge = 0;
+    FD_CALL_NUMBER(received) = FD_READ_FAST;
+    FD_READ_FAST_SIZE(received) = FD_READ_FAST_MAX_SIZE;
+    FD_READ_FAST_POSITION(received) = 1234567890;
+    handle_ipc_message(&state, &received, &reply);
+    TEST_ASSERT(FD_RETURN_VALUE(reply) == EINVAL);
+
+    received.badge = 0;
+    FD_CALL_NUMBER(received) = FD_READ_FAST;
+    FD_READ_FAST_SIZE(received) = FD_READ_FAST_MAX_SIZE;
+    FD_READ_FAST_POSITION(received) = -1;
+    handle_ipc_message(&state, &received, &reply);
+    TEST_ASSERT(FD_RETURN_VALUE(reply) == EINVAL);
+
+    received.badge = 0;
+    FD_CALL_NUMBER(received) = FD_READ_FAST;
+    FD_READ_FAST_SIZE(received) = FD_READ_FAST_MAX_SIZE;
+    FD_READ_FAST_POSITION(received) = state.initrd_start;
+    handle_ipc_message(&state, &received, &reply);
+    TEST_ASSERT(FD_RETURN_VALUE(reply) == EINVAL);
+
+    received.badge = 0;
+    FD_CALL_NUMBER(received) = FD_READ_FAST;
+    FD_READ_FAST_SIZE(received) = FD_READ_FAST_MAX_SIZE;
+    FD_READ_FAST_POSITION(received) = state.initrd_end;
+    handle_ipc_message(&state, &received, &reply);
+    TEST_ASSERT(FD_RETURN_VALUE(reply) == EINVAL);
+
+    received.badge = 0;
+    FD_CALL_NUMBER(received) = FD_READ_FAST;
+    FD_READ_FAST_SIZE(received) = FD_READ_FAST_MAX_SIZE;
+    FD_READ_FAST_POSITION(received) = state.initrd_end - 1;
+    handle_ipc_message(&state, &received, &reply);
+    TEST_ASSERT(FD_RETURN_VALUE(reply) == EINVAL);
+}
+
+void open_nonexistent_file(void) {
+    struct ipc_message received, reply;
+    size_t badge;
+    TEST_ASSERT(open(&received, &reply, 0, "thisdoesntexist", MODE_READ, 0, &badge) == ENOENT);
+    TEST_ASSERT(open(&received, &reply, 0, "directory4", MODE_READ, 0, &badge) == ENOENT);
+}
+
+void open_nonexistent_file_in_subdirectory(void) {
+    struct ipc_message received, reply;
+    size_t badge;
+    TEST_ASSERT(open(&received, &reply, 0, "directory2", MODE_READ, 0, &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, badge, "thisdoesntexist", MODE_READ, 0, &badge) == ENOENT);
+}
+
+void open_with_write(void) {
+    struct ipc_message received, reply;
+    size_t badge;
+    TEST_ASSERT(open(&received, &reply, 0, "testing.txt", MODE_WRITE, 0, &badge) == EROFS);
+    TEST_ASSERT(open(&received, &reply, 0, "testing.txt", MODE_READ | MODE_WRITE, 0, &badge) == EROFS);
+}
+
+void open_with_append(void) {
+    struct ipc_message received, reply;
+    size_t badge;
+    TEST_ASSERT(open(&received, &reply, 0, "testing.txt", MODE_APPEND, 0, &badge) == EROFS);
+}
+
+void open_with_create(void) {
+    struct ipc_message received, reply;
+    size_t badge;
+    TEST_ASSERT(open(&received, &reply, 0, "testing.txt", MODE_READ, OPEN_CREATE, &badge) == 0);
+    TEST_ASSERT(open(&received, &reply, 0, "this-file-does-not-exist.txt", MODE_READ, OPEN_CREATE, &badge) == EROFS);
+}
+
+void open_with_exclusive(void) {
+    struct ipc_message received, reply;
+    size_t badge;
+    TEST_ASSERT(open(&received, &reply, 0, "testing.txt", MODE_READ, OPEN_CREATE | OPEN_EXCLUSIVE, &badge) == EROFS);
+}
+
+// stat would be tested here but due to native libc types being different it won't work
+
+// function mockups for the ipc interface test
+
+size_t fd_open_badge;
+
+size_t endpoint_success_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    struct ipc_message *message = (struct ipc_message *) argument;
+
+    // just hardcoded to delete this endpoint since it isn't copied
+    syscall_invoke(3, INIT_NODE_DEPTH, NODE_DELETE, IPC_CAPABILITY_SLOTS + 1);
+
+    return 0;
+}
+
+size_t endpoint_error_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    return EUNKNOWN;
+}
+
+size_t vfs_call_success_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    struct ipc_message *message = (struct ipc_message *) argument;
+
+    message->transferred_capabilities = 0;
+    FD_RETURN_VALUE(*message) = 0;
+
+    return endpoint_success_fake(address, depth, slot, argument);
+}
+
+size_t fd_open_request_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    struct ipc_message *message = (struct ipc_message *) argument;
+
+    message->badge = 0;
+    FD_CALL_NUMBER(*message) = FD_OPEN;
+    FD_OPEN_MODE(*message) = MODE_READ;
+    FD_OPEN_FLAGS(*message) = 0;
+    const char *name = "testing.txt";
+
+    // allocate the reply endpoint
+    const struct alloc_args reply_alloc_args = {
+        .type = TYPE_ENDPOINT,
+        .size = 0,
+        .address = FD_REPLY_ENDPOINT(*message).address,
+        .depth = FD_REPLY_ENDPOINT(*message).depth
+    };
+    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args);
+
+    // allocate a capability to store the name
+    const struct alloc_args name_alloc_args = {
+        .type = TYPE_UNTYPED,
+        .size = strlen(name) + 1,
+        .address = FD_OPEN_NAME_ADDRESS(*message).address,
+        .depth = FD_OPEN_NAME_ADDRESS(*message).depth
+    };
+    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &name_alloc_args);
+
+    // copy the name into it
+    char *buffer = (char *) syscall_invoke(name_alloc_args.address, name_alloc_args.depth, UNTYPED_LOCK, 0);
+    TEST_ASSERT(buffer != NULL);
+
+    memcpy(buffer, name, name_alloc_args.size);
+
+    INVOKE_ASSERT(name_alloc_args.address, name_alloc_args.depth, UNTYPED_UNLOCK, 0);
+
+    message->transferred_capabilities = 3;
+
+    return 0;
+}
+
+size_t fd_open_response_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    struct ipc_message *message = (struct ipc_message *) argument;
+
+    TEST_ASSERT(FD_RETURN_VALUE(*message) == 0);
+
+    TEST_ASSERT(read_badge(FD_OPEN_REPLY_FD(*message).address, FD_OPEN_REPLY_FD(*message).depth, &fd_open_badge) == 0);
+
+#ifdef DEBUG
+    printf("got badge %d\n", fd_open_badge);
+#endif
+
+    return 0;
+}
+
+size_t fd_read_request_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    struct ipc_message *message = (struct ipc_message *) argument;
+
+    message->badge = fd_open_badge;
+    FD_CALL_NUMBER(*message) = FD_READ_FAST;
+    FD_READ_FAST_SIZE(*message) = FD_READ_FAST_MAX_SIZE;
+    FD_READ_FAST_POSITION(*message) = 0;
+
+    // allocate the reply endpoint
+    const struct alloc_args reply_alloc_args = {
+        .type = TYPE_ENDPOINT,
+        .size = 0,
+        .address = FD_REPLY_ENDPOINT(*message).address,
+        .depth = FD_REPLY_ENDPOINT(*message).depth
+    };
+    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args);
+
+    message->transferred_capabilities = 1;
+
+    return 0;
+}
+
+size_t fd_read_response_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    struct ipc_message *message = (struct ipc_message *) argument;
+
+    TEST_ASSERT(FD_RETURN_VALUE(*message) == 0);
+
+    char *buffer = alloca(FD_READ_FAST_BYTES_READ(*message) + 1);
+    memcpy(buffer, FD_READ_FAST_DATA(*message), FD_READ_FAST_BYTES_READ(*message));
+    buffer[FD_READ_FAST_BYTES_READ(*message)] = 0;
+
+#ifdef DEBUG
+    printf("bytes read: %d, file contents: \"%s\"\n", FD_READ_FAST_BYTES_READ(*message), buffer);
+#endif
+
+    TEST_ASSERT(strcmp(buffer, "this is yet another test.\n") == 0);
+
+    return 0;
+}
+
+// basic test to make sure the actual ipc interface works
+void test_ipc_interface(void) {
+    // allocate the vfs endpoint
+    const struct alloc_args endpoint_alloc_args = {
+        .type = TYPE_ENDPOINT,
+        .size = 0,
+        .address = 2,
+        .depth = -1
+    };
+    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
+
+    size_t (*send_fakes[])(size_t, size_t, struct capability *, size_t) = {
+        endpoint_success_fake, // vfs_mount
+        fd_open_response_fake,
+        fd_read_response_fake
+    };
+    SET_CUSTOM_FAKE_SEQ(endpoint_send, send_fakes, sizeof(send_fakes) / sizeof(send_fakes[0]));
+
+    size_t (*receive_fakes[])(size_t, size_t, struct capability *, size_t) = {
+        vfs_call_success_fake, // vfs_mount
+        fd_open_request_fake,
+        fd_read_request_fake,
+        endpoint_error_fake
+    };
+    SET_CUSTOM_FAKE_SEQ(endpoint_receive, receive_fakes, sizeof(receive_fakes) / sizeof(receive_fakes[0]));
+
+    entry_point(state.initrd_start, state.initrd_end);
+
+    TEST_ASSERT(endpoint_send_fake.call_count == sizeof(send_fakes) / sizeof(send_fakes[0]));
+    TEST_ASSERT(endpoint_receive_fake.call_count == sizeof(receive_fakes) / sizeof(receive_fakes[0]));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(initrd_as_null);
@@ -386,9 +627,15 @@ int main(void) {
     RUN_TEST(list_subdirectory);
     RUN_TEST(read_file_in_root);
     RUN_TEST(read_file_in_subdirectory);
-    RUN_TEST(open_nonexistent_file);
-    RUN_TEST(open_nonexistent_file_in_subdirectory);
     RUN_TEST(read_position);
     RUN_TEST(read_less_than_full_file);
+    RUN_TEST(read_invalid_directory_entry);
+    RUN_TEST(open_nonexistent_file);
+    RUN_TEST(open_nonexistent_file_in_subdirectory);
+    RUN_TEST(open_with_write);
+    RUN_TEST(open_with_append);
+    RUN_TEST(open_with_create);
+    RUN_TEST(open_with_exclusive);
+    RUN_TEST(test_ipc_interface);
     return UNITY_END();
 }
