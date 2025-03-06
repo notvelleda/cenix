@@ -25,8 +25,11 @@ static const void *next_file(const void *address, const void *initrd_end, struct
     return jax_next_file(&iterator, file) ? iterator.start : NULL;
 }
 
-/// gets the next file after the file pointed to by `address` in the given directory, placing its details in the `jax_file` struct pointed to by `file` and returning the file immediately following it if there aren't
-/// any more files
+/// \brief gets the next file after the file pointed to by `address` in the given directory.
+///
+/// the `dir_file` argument is a pointer to the `jax_file` struct for the directory being read, the file's details are placed in the `jax_file` struct pointed to by `file`,
+/// and a pointer to the raw data of the file immediately following and its header is returned if there are more files in the archive
+/// (which can be fed back into this function as the `address` argument to list the next file in the directory, and so on and so forth)
 static const void *next_file_in_dir(struct jax_file *dir_file, const void *address, const void *initrd_start, const void *initrd_end, struct jax_file *file, const void **file_address) {
     // sanity check
     if (address < initrd_start) {
@@ -79,7 +82,9 @@ static const void *next_file_in_dir(struct jax_file *dir_file, const void *addre
     return NULL;
 }
 
-/// handles a fd_read/fd_read_fast call
+/// \brief handles a fd_read/fd_read_fast call.
+///
+/// 
 static size_t handle_read(const struct state *state, struct ipc_message *received, struct ipc_message *reply, struct jax_file *file, size_t position, size_t read_size, void *read_data) {
     if (file->type == TYPE_DIRECTORY) {
         // read a directory entry from this directory
@@ -96,7 +101,7 @@ static size_t handle_read(const struct state *state, struct ipc_message *receive
         const void *read_address = position == 0 ? (const void *) received->badge : (const void *) position;
 
         // make sure the read address isn't before the start of the initrd, the check for it being after the end is done in jax_next_file() and handled below
-        if (read_address < state->iterator.start && read_address != 0) {
+        if (read_address < (void *) state->iterator.start && read_address != 0) {
             FD_RETURN_VALUE(*reply) = EINVAL;
             return 0;
         }
@@ -142,6 +147,9 @@ static size_t handle_read(const struct state *state, struct ipc_message *receive
     return read_size;
 }
 
+/// \brief handles FD_OPEN calls.
+///
+/// the arguments passed to this function are the same as what's passed to `handle_fd_message()`
 static void handle_open(const struct state *state, struct ipc_message *received, struct ipc_message *reply, struct jax_file *file, const void *next) {
     if (file->type != TYPE_DIRECTORY) {
         FD_RETURN_VALUE(*reply) = ENOTSUP;
@@ -204,6 +212,10 @@ static void handle_open(const struct state *state, struct ipc_message *received,
     syscall_invoke(FD_OPEN_NAME_ADDRESS(*received).address, FD_OPEN_NAME_ADDRESS(*received).depth, UNTYPED_UNLOCK, 0);
 }
 
+/// \brief handles an incoming ipc message once the file/directory it should operate on has been found.
+///
+/// the `state`, `received`, and `reply` arguments are the same as what's passed to `handle_ipc_message()`, the `file` argument points to the file this function should operate on,
+/// and the `next` argument points to the raw data of the file (and its header) that's directly following the current one in memory
 static void handle_fd_message(const struct state *state, struct ipc_message *received, struct ipc_message *reply, struct jax_file *file, const void *next) {
     switch (FD_CALL_NUMBER(*received)) {
     case FD_READ:
@@ -266,6 +278,10 @@ static void handle_fd_message(const struct state *state, struct ipc_message *rec
     }
 }
 
+/// \brief handles an incoming ipc message based on whether it's for the root directory or not.
+///
+/// `received` points to the message that was just received, `reply` points to the message that will be sent as a reply.
+/// it's the responsibility of whatever function calls this one to actually reply with the message, as that makes this function easily testable (no mockups required)
 STATIC_TESTABLE void handle_ipc_message(const struct state *state, struct ipc_message *received, struct ipc_message *reply) {
     if (received->badge == 0) {
         // handle root directory case
@@ -308,6 +324,103 @@ STATIC_TESTABLE void handle_ipc_message(const struct state *state, struct ipc_me
     }
 }
 
+/// \brief the main loop of the program.
+///
+/// this handles receiving messages, handing them off to be processed, sending the reply, and cleaning up after replying
+static void main_loop(const struct state *state) {
+    struct ipc_message received = {
+        .capabilities = {
+            {(0 << INIT_NODE_DEPTH) | state->node.address, -1},
+            {(1 << INIT_NODE_DEPTH) | state->node.address, -1},
+            {(2 << INIT_NODE_DEPTH) | state->node.address, -1},
+            {(3 << INIT_NODE_DEPTH) | state->node.address, -1}
+        }
+    };
+
+    while (1) {
+        received.badge = 0;
+        size_t result = syscall_invoke(state->endpoint.address, -1, ENDPOINT_RECEIVE, (size_t) &received);
+
+        if (result != 0) {
+#ifdef UNDER_TEST
+            // there needs to be a way to exit the main loop if this program is being tested, hence the break here
+            break;
+#else
+            syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: endpoint_receive failed with code ");
+            print_number(result);
+            syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
+            continue; // TODO: should this really continue? is this actually correct behavior?
+#endif
+        }
+
+#ifdef DEBUG
+        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got fd call ");
+        print_number(FD_CALL_NUMBER(received));
+        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) " with badge ");
+        print_number(received.badge);
+        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
+#endif
+
+        struct ipc_message reply = {
+            .capabilities = {}
+        };
+
+        handle_ipc_message(state, &received, &reply);
+        syscall_invoke(FD_REPLY_ENDPOINT(received).address, -1, ENDPOINT_SEND, (size_t) &reply); // return value is ignored here since it doesn't matter if the reply fails to send
+
+        // delete any leftover capabilities that were transferred and temporary capabilities not sent.
+        for (size_t i = 0; i < IPC_CAPABILITY_SLOTS + 1; i ++) {
+            syscall_invoke(state->node.address, state->node.depth, NODE_DELETE, i);
+        }
+    }
+}
+
+/// handles calling vfs_mount() to mount this filesystem at the root of the vfs
+static void mount_to_root(const struct state *state) {
+    // allocate the path
+    const struct alloc_args path_alloc_args = {
+        .type = TYPE_UNTYPED,
+        .size = 1,
+        .address = 5,
+        .depth = -1
+    };
+    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &path_alloc_args);
+
+    // allocate the reply endpoint
+    const struct alloc_args endpoint_alloc_args = {
+        .type = TYPE_ENDPOINT,
+        .size = 0,
+        .address = 6,
+        .depth = -1
+    };
+    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
+
+    char *pointer = (char *) syscall_invoke(path_alloc_args.address, path_alloc_args.depth, UNTYPED_LOCK, 0);
+    ASSERT_IF_TEST(pointer != NULL);
+    *pointer = '/';
+    INVOKE_ASSERT(path_alloc_args.address, path_alloc_args.depth, UNTYPED_UNLOCK, 0);
+
+    // copy the file descriptor endpoint and set its badge to 0 so that operations on the root directory will be properly handled
+    const struct node_copy_args fd_copy_args = {
+        .source_address = state->endpoint.address,
+        .source_depth = state->endpoint.depth,
+        .dest_slot = IPC_CAPABILITY_SLOTS + 1,
+        .access_rights = -1,
+        .badge = 0,
+        .should_set_badge = 1
+    };
+    INVOKE_ASSERT(state->node.address, state->node.depth, NODE_COPY, (size_t) &fd_copy_args);
+
+    // call vfs_mount()
+    size_t mount_result = vfs_mount(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, path_alloc_args.address, (fd_copy_args.dest_slot << INIT_NODE_DEPTH) | state->node.address, MREPL);
+    ASSERT_IF_TEST(mount_result == 0);
+    (void) mount_result; // suppress the unused variable warning if this isn't being built for tests
+
+#ifdef DEBUG
+    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got here (after mount call)\n");
+#endif
+}
+
 void _start(size_t initrd_start, size_t initrd_end) {
 #ifdef DEBUG
     syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "hellorld from initrd_fs!\n");
@@ -338,68 +451,15 @@ void _start(size_t initrd_start, size_t initrd_end) {
     };
     INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args);
 
-    // allocate the reply endpoint
-    const struct alloc_args endpoint_alloc_args = {
+    // allocate the file descriptor endpoint that will be sent to the vfs and will be listened on for incoming messages
+    const struct alloc_args fd_alloc_args = {
         .type = TYPE_ENDPOINT,
         .size = 0,
         .address = 4,
         .depth = -1
     };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
-
-    // allocate the path
-    const struct alloc_args path_alloc_args = {
-        .type = TYPE_UNTYPED,
-        .size = 1,
-        .address = 5,
-        .depth = -1
-    };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &path_alloc_args);
-
-    char *pointer = (char *) syscall_invoke(path_alloc_args.address, path_alloc_args.depth, UNTYPED_LOCK, 0);
-    ASSERT_IF_TEST(pointer != NULL);
-    *pointer = '/';
-    INVOKE_ASSERT(path_alloc_args.address, path_alloc_args.depth, UNTYPED_UNLOCK, 0);
-
-    // allocate the file descriptor endpoint
-    const struct alloc_args fd_alloc_args = {
-        .type = TYPE_ENDPOINT,
-        .size = 0,
-        .address = 6,
-        .depth = -1
-    };
     INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args);
-
-    // copy the file descriptor endpoint 
-    const struct node_copy_args fd_copy_args = {
-        .source_address = fd_alloc_args.address,
-        .source_depth = fd_alloc_args.depth,
-        .dest_slot = IPC_CAPABILITY_SLOTS + 1,
-        .access_rights = -1,
-        .badge = 0,
-        .should_set_badge = 1
-    };
-    INVOKE_ASSERT(node_alloc_args.address, node_alloc_args.depth, NODE_COPY, (size_t) &fd_copy_args);
-
-    size_t mount_result = vfs_mount(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, path_alloc_args.address, (fd_copy_args.dest_slot << INIT_NODE_DEPTH) | node_alloc_args.address, MREPL);
-    ASSERT_IF_TEST(mount_result == 0);
-
-#ifdef DEBUG
-    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got here (after mount call)\n");
-#endif
-
-    /*vfs_open_root(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, 6);
-    INVOKE_ASSERT(1, -1, DEBUG_PRINT, (size_t) "got here 2\n");*/
-
-    struct ipc_message received = {
-        .capabilities = {
-            {(0 << INIT_NODE_DEPTH) | node_alloc_args.address, -1},
-            {(1 << INIT_NODE_DEPTH) | node_alloc_args.address, -1},
-            {(2 << INIT_NODE_DEPTH) | node_alloc_args.address, -1},
-            {(3 << INIT_NODE_DEPTH) | node_alloc_args.address, -1}
-        }
-    };
-
+    
     // this is used so that passing state around to the various functions here that use it is a lot cleaner
     const struct state state = {
         .initrd_start = initrd_start,
@@ -409,40 +469,6 @@ void _start(size_t initrd_start, size_t initrd_end) {
         .node = (struct ipc_capability) {node_alloc_args.address, node_alloc_args.depth}
     };
 
-    while (1) {
-        received.badge = 0;
-        size_t result = syscall_invoke(state.endpoint.address, state.endpoint.depth, ENDPOINT_RECEIVE, (size_t) &received);
-
-        if (result != 0) {
-#ifdef UNDER_TEST
-            // there needs to be a way to exit the main loop if this program is being tested, hence the break here
-            break;
-#else
-            syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: endpoint_receive failed with code ");
-            print_number(result);
-            syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
-            continue; // TODO: should this really continue? is this actually correct behavior?
-#endif
-        }
-
-#ifdef DEBUG
-        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got fd call ");
-        print_number(FD_CALL_NUMBER(received));
-        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) " with badge ");
-        print_number(received.badge);
-        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
-#endif
-
-        struct ipc_message reply = {
-            .capabilities = {}
-        };
-
-        handle_ipc_message(&state, &received, &reply);
-        syscall_invoke(FD_REPLY_ENDPOINT(received).address, -1, ENDPOINT_SEND, (size_t) &reply); // return value is ignored here since it doesn't matter if the reply fails to send
-
-        // delete any leftover capabilities that were transferred and temporary capabilities not sent
-        for (size_t i = 0; i < IPC_CAPABILITY_SLOTS + 1; i ++) {
-            syscall_invoke(node_alloc_args.address, node_alloc_args.depth, NODE_DELETE, i);
-        }
-    }
+    mount_to_root(&state);
+    main_loop(&state);
 }

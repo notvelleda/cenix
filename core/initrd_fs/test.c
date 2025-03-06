@@ -33,6 +33,7 @@ void custom_setup(void) {
 
     FFF_RESET_HISTORY();
 
+    // allocate capabilities that would otherwise be allocated in _start()
     const struct alloc_args fd_alloc_args = {
         .type = TYPE_ENDPOINT,
         .size = 0,
@@ -79,32 +80,7 @@ void custom_teardown(void) {
     free((void *) state.initrd_start);
 }
 
-// test functions to make sure open_jax works properly
-
-void initrd_as_null(void) {
-    struct jax_iterator iterator;
-    TEST_ASSERT(!open_jax(&iterator, NULL, NULL));
-}
-
-void initrd_as_random_data(void) {
-    char *random_data = "qwertyuiopasdfghjklzxcvbnm";
-    struct jax_iterator iterator;
-    TEST_ASSERT(!open_jax(&iterator, (const uint8_t *) random_data, (const uint8_t *) random_data + strlen(random_data)));
-}
-
-void initrd_invalid_end(void) {
-    char *data = "^jax";
-    struct jax_iterator iterator;
-    TEST_ASSERT(!open_jax(&iterator, (const uint8_t *) data + strlen(data), (const uint8_t *) data));
-}
-
-void initrd_valid_header(void) {
-    char *data = "^jax";
-    struct jax_iterator iterator;
-    TEST_ASSERT(open_jax(&iterator, (const uint8_t *) data, (const uint8_t *) data + strlen(data)));
-}
-
-// test utility functions
+// utility functions used by tests over handle_ipc_message()
 
 static void list_directory(struct ipc_message *received, struct ipc_message *reply, size_t badge, const char *entry_names[], size_t num_entries) {
     struct vfs_directory_entry *directory_entry = (struct vfs_directory_entry *) FD_READ_FAST_DATA(*reply);
@@ -264,7 +240,7 @@ static void read_file_slow(struct ipc_message *received, struct ipc_message *rep
     INVOKE_ASSERT(NODE_ADDRESS, INIT_NODE_DEPTH, NODE_DELETE, IPC_CAPABILITY_SLOTS + 2);
 }
 
-// convenient wrapper to test both FD_READ and FD_READ_FAST
+/// convenient wrapper to test both FD_READ and FD_READ_FAST
 static void read_file(struct ipc_message *received, struct ipc_message *reply, size_t badge, size_t position, size_t size, const char *contents) {
     read_file_slow(received, reply, badge, position, size, contents);
     read_file_fast(received, reply, badge, position, size, contents);
@@ -276,6 +252,31 @@ static void stat(struct ipc_message *received, struct ipc_message *reply, size_t
     handle_ipc_message(&state, received, reply);
     TEST_ASSERT(FD_RETURN_VALUE(*reply) == 0);
     memcpy(stat_ptr, &FD_STAT_STRUCT(*reply), sizeof(struct stat));
+}
+
+// test functions to make sure open_jax works properly
+
+void initrd_as_null(void) {
+    struct jax_iterator iterator;
+    TEST_ASSERT(!open_jax(&iterator, NULL, NULL));
+}
+
+void initrd_as_random_data(void) {
+    char *random_data = "qwertyuiopasdfghjklzxcvbnm";
+    struct jax_iterator iterator;
+    TEST_ASSERT(!open_jax(&iterator, (const uint8_t *) random_data, (const uint8_t *) random_data + strlen(random_data)));
+}
+
+void initrd_invalid_end(void) {
+    char *data = "^jax";
+    struct jax_iterator iterator;
+    TEST_ASSERT(!open_jax(&iterator, (const uint8_t *) data + strlen(data), (const uint8_t *) data));
+}
+
+void initrd_valid_header(void) {
+    char *data = "^jax";
+    struct jax_iterator iterator;
+    TEST_ASSERT(open_jax(&iterator, (const uint8_t *) data, (const uint8_t *) data + strlen(data)));
 }
 
 // fs api tests
@@ -463,7 +464,7 @@ void open_with_exclusive(void) {
     TEST_ASSERT(open(&received, &reply, 0, "testing.txt", MODE_READ, OPEN_CREATE | OPEN_EXCLUSIVE, &badge) == EROFS);
 }
 
-// stat would be tested here but due to native libc types being different it won't work
+// FD_STAT would be tested here but due to native libc types being different it won't work
 
 // function mockups for the ipc interface test
 
