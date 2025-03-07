@@ -94,6 +94,16 @@ struct fs_namespace {
     size_t mount_point_addresses[NUM_BUCKETS];
 };
 
+/// stores state that gets passed around a lot between function calls to make passing and accessing it cleaner
+struct state {
+    /// the id of the current worker thread
+    size_t thread_id;
+    /// the index of an available thread-local storage slot that can be used for temporary purposes
+    size_t temp_slot;
+    /// the address of the vfs call endpoint
+    size_t endpoint_address;
+};
+
 /// initializes and allocates vfs structures
 void init_vfs_structures(void);
 
