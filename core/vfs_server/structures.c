@@ -1,3 +1,4 @@
+#include "string.h"
 #include "structures.h"
 #include "errno.h"
 #include <stdbool.h>
@@ -5,8 +6,20 @@
 #include <stdint.h>
 #include "sys/kernel.h"
 #include "sys/limits.h"
-#include "sys/vfs.h"
 #include "debug.h"
+
+// fills an allocated region of memory with all zeroes
+static void clear_allocation(size_t address) {
+    size_t size = syscall_invoke(address, -1, UNTYPED_SIZEOF, 0);
+    uint8_t *pointer = (uint8_t *) syscall_invoke(address, -1, UNTYPED_LOCK, 0);
+
+    if (pointer == NULL) {
+        return;
+    }
+
+    memset(pointer, 0, size);
+    syscall_invoke(address, -1, UNTYPED_UNLOCK, 0);
+}
 
 void init_vfs_structures(void) {
     // TODO: should these be asserted just in case? like nothing here *should* fail but what if it does
@@ -34,7 +47,7 @@ void init_vfs_structures(void) {
         .depth = -1
     };
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_mount_point_ids_alloc_args);
-    // TODO: zero this out
+    clear_allocation(used_mount_point_ids_alloc_args.address);
 
     const struct alloc_args mounted_list_info_alloc_args = {
         .type = TYPE_NODE,
@@ -59,7 +72,7 @@ void init_vfs_structures(void) {
         .depth = -1
     };
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_mounted_lists_alloc_args);
-    // TODO: zero this out
+    clear_allocation(used_mounted_lists_alloc_args.address);
 
     const struct alloc_args namespaces_node_alloc_args = {
         .type = TYPE_NODE,
@@ -76,7 +89,7 @@ void init_vfs_structures(void) {
         .depth = -1
     };
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_namespaces_alloc_args);
-    // TODO: zero this out
+    clear_allocation(used_namespaces_alloc_args.address);
 
     const struct alloc_args directory_node_alloc_args = {
         .type = TYPE_NODE,
@@ -101,7 +114,7 @@ void init_vfs_structures(void) {
         .depth = -1
     };
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_directories_alloc_args);
-    // TODO: zero this out
+    clear_allocation(used_directories_alloc_args.address);
 
     const struct alloc_args thread_storage_node_alloc_args = {
         .type = TYPE_NODE,
