@@ -1,0 +1,4 @@
+BINARY = vfs_server
+TEST_HARNESS = userland_low_level
+
+.include "$(PROJECT_ROOT)/makefiles/test.mk"
