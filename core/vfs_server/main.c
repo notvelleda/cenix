@@ -59,15 +59,7 @@ static void handle_vfs_message(const struct state *state, struct ipc_message *me
 
             printf("vfs_server: VFS_NEW_PROCESS called (pid %d, creator %d, flags 0x%x)\n", new_pid, creator_pid, message->buffer[1]);
 
-            result = set_up_filesystem_for_process(
-                creator_pid,
-                new_pid,
-                message->buffer[1],
-                FD_REPLY_ENDPOINT(*message).address,
-                state->endpoint_address,
-                state->thread_id,
-                state->temp_slot
-            );
+            result = set_up_filesystem_for_process(state, creator_pid, new_pid, message->buffer[1], FD_REPLY_ENDPOINT(*message).address);
 
             if (result != 0) {
                 printf("vfs_server: set_up_filesystem_for_process failed with error %d\n", result);
@@ -109,15 +101,15 @@ void _start(void) {
     };
     syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
 
-    set_up_filesystem_for_process(1, 1, 0, 2, endpoint_alloc_args.address, 0, 0);
-
-    // main vfs server loop
-
     const struct state state = {
         .thread_id = 0,
         .temp_slot = IPC_CAPABILITY_SLOTS + 1,
         .endpoint_address = endpoint_alloc_args.address
     };
+
+    set_up_filesystem_for_process(&state, 1, 1, 0, 2);
+
+    // main vfs server loop
 
     struct ipc_message received;
 
