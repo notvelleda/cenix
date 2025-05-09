@@ -90,7 +90,7 @@ static uint8_t hash(size_t value) {
     return result;
 }
 
-size_t set_up_filesystem_for_process(pid_t creator_pid, pid_t new_pid, uint8_t flags, size_t reply_address, size_t endpoint_address, size_t thread_id, size_t slot) {
+size_t set_up_filesystem_for_process(const struct state *state, pid_t creator_pid, pid_t new_pid, uint8_t flags, size_t reply_address) {
     size_t fs_namespace;
 
     if ((flags & VFS_SHARE_NAMESPACE) != 0) {
@@ -157,14 +157,14 @@ size_t set_up_filesystem_for_process(pid_t creator_pid, pid_t new_pid, uint8_t f
 
     // badge the vfs endpoint with the new filesystem id and send it to the waiting process
     const struct node_copy_args copy_args = {
-        .source_address = endpoint_address,
+        .source_address = state->endpoint_address,
         .source_depth = -1,
-        .dest_slot = slot,
+        .dest_slot = state->temp_slot,
         .access_rights = -1,
         .badge = badge,
         .should_set_badge = 1
     };
-    size_t result = syscall_invoke(THREAD_STORAGE_ADDRESS(thread_id), THREAD_STORAGE_DEPTH, NODE_COPY, (size_t) &copy_args);
+    size_t result = syscall_invoke(THREAD_STORAGE_ADDRESS(state->thread_id), THREAD_STORAGE_DEPTH, NODE_COPY, (size_t) &copy_args);
 
     if (result != 0) {
         printf("set_up_filesystem_for_process: node_copy failed with error %d\n", result);
@@ -174,12 +174,12 @@ size_t set_up_filesystem_for_process(pid_t creator_pid, pid_t new_pid, uint8_t f
     }
 
     struct ipc_message message = {
-        .capabilities = {{THREAD_STORAGE_SLOT(thread_id, slot), THREAD_STORAGE_SLOT_DEPTH}}
+        .capabilities = {{THREAD_STORAGE_SLOT(state->thread_id, state->temp_slot), THREAD_STORAGE_SLOT_DEPTH}}
     };
     result = syscall_invoke(reply_address, -1, ENDPOINT_SEND, (size_t) &message);
 
     // delete the copied endpoint just in case it wasn't transferred or the reply invocation failed
-    syscall_invoke(THREAD_STORAGE_ADDRESS(thread_id), THREAD_STORAGE_DEPTH, NODE_DELETE, slot);
+    syscall_invoke(THREAD_STORAGE_ADDRESS(state->thread_id), THREAD_STORAGE_DEPTH, NODE_DELETE, state->temp_slot);
 
     if (result != 0) {
         free_namespace(fs_namespace);
