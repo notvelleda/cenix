@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "sys/kernel.h"
-#include "sys/vfs.h"
+#include "sys/types.h"
 
 #define PROCESS_DATA_NODE_SLOT 4
 
