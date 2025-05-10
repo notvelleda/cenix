@@ -92,6 +92,7 @@ static uint8_t hash(size_t value) {
 
 size_t set_up_filesystem_for_process(const struct state *state, pid_t creator_pid, pid_t new_pid, uint8_t flags, size_t reply_address) {
     size_t fs_namespace;
+    bool force_disable_namespace_modification = false;
 
     if ((flags & VFS_SHARE_NAMESPACE) != 0) {
         // use the namespace id of the creator process
@@ -103,6 +104,7 @@ size_t set_up_filesystem_for_process(const struct state *state, pid_t creator_pi
         }
 
         fs_namespace = creator_process_data->fs_namespace;
+        force_disable_namespace_modification = !creator_process_data->can_modify_namespace;
 
         syscall_invoke(creator_process_data_address, -1, UNTYPED_UNLOCK, 0);
 
@@ -148,8 +150,13 @@ size_t set_up_filesystem_for_process(const struct state *state, pid_t creator_pi
         return ENOMEM;
     }
 
-    process_data->fs_namespace = fs_namespace; // TODO: set this
-    process_data->can_modify_namespace = (flags & VFS_READ_ONLY_NAMESPACE) != 0 ? false : true;
+    process_data->fs_namespace = fs_namespace;
+
+    if (force_disable_namespace_modification) {
+        process_data->can_modify_namespace = false;
+    } else {
+        process_data->can_modify_namespace = (flags & VFS_READ_ONLY_NAMESPACE) != 0 ? false : true;
+    }
 
     size_t badge = IPC_BADGE(process_data->fs_namespace, process_data->can_modify_namespace ? IPC_FLAG_CAN_MODIFY : 0);
 
