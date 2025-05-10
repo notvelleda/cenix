@@ -412,7 +412,7 @@ static void mount_to_root(const struct state *state) {
     INVOKE_ASSERT(state->node.address, state->node.depth, NODE_COPY, (size_t) &fd_copy_args);
 
     // call vfs_mount()
-    size_t mount_result = vfs_mount(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, path_alloc_args.address, (fd_copy_args.dest_slot << INIT_NODE_DEPTH) | state->node.address, MREPL);
+    size_t mount_result = vfs_mount(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, path_alloc_args.address, (fd_copy_args.dest_slot << INIT_NODE_DEPTH) | state->node.address, MOUNT_REPLACE);
     ASSERT_IF_TEST(mount_result == 0);
     (void) mount_result; // suppress the unused variable warning if this isn't being built for tests
 

@@ -70,7 +70,7 @@ struct mount_point {
 struct mounted_list_info {
     /// stores which slots in the capability node containing this structure are occupied
     size_t used_slots;
-    /// stores which slots in the capability node containing this structure are marked with the MCREATE flag
+    /// stores which slots in the capability node containing this structure are marked with the MOUNT_CREATE flag
     size_t create_flagged_slots;
     // TODO: should this be part of a linked list so that more mount points than size_t has bits can be added to a given inode?
     // i was originally thinking of something like this after all

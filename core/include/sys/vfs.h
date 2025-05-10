@@ -30,11 +30,11 @@
 /// if this flag is set, the new process will not be able to run mount/bind/unmount operations
 #define VFS_READ_ONLY_NAMESPACE 2
 
-#define MREPL 1
-#define MBEFORE 2
-#define MAFTER 4
-#define MCREATE 8
-// TODO: should MCACHE exist? is it worth caching things? how should caching even work here
+#define MOUNT_REPLACE 1
+#define MOUNT_BEFORE 2
+#define MOUNT_AFTER 4
+#define MOUNT_CREATE 8
+// TODO: should MOUNT_CACHE exist? is it worth caching things? how should caching even work here
 
 #define MODE_EXEC 1
 #define MODE_READ 2

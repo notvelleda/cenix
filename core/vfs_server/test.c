@@ -481,7 +481,7 @@ void fd_link_in_directories_ipc(void) {
     TEST_FAIL_MESSAGE("TODO");
 }
 
-// (FD_LINK) should call FD_LINK in every mounted filesystem with the MCREATE flag set
+// (FD_LINK) should call FD_LINK in every mounted filesystem with the MOUNT_CREATE flag set
 void fd_link_in_mount_points(void) {
     TEST_FAIL_MESSAGE("TODO");
 }
@@ -592,7 +592,7 @@ int main(void) {
     RUN_TEST(fd_open_file);
     // FD_LINK
     //  - mount points
-    //     - should call FD_LINK in every mounted filesystem with the MCREATE flag set
+    //     - should call FD_LINK in every mounted filesystem with the MOUNT_CREATE flag set
     RUN_TEST(fd_link_in_mount_points);
     RUN_TEST(fd_link_in_mount_points_ipc);
     //  - directories

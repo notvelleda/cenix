@@ -10,7 +10,7 @@
 /// \brief helper function to iterate over all filesystems in a mount point and run a callback over each.
 ///
 /// this callback is passed the value of the `data` argument, the address of the root file descriptor of the filesystem,
-/// whether this filesystem was flagged with MCREATE, and a pointer to a value that will be returned if the function returns `false`.
+/// whether this filesystem was flagged with MOUNT_CREATE, and a pointer to a value that will be returned if the function returns `false`.
 /// if it returns `true`, it will continue on to the next filesystem and call the callback again, and so on and so forth
 static size_t iterate_over_mount_point(size_t mount_point_address, void *data, bool (*fn)(void *, size_t, bool, size_t *)) {
     // mount point lock is held throughout so that nothing wacky happens. not sure if the performance of this is especially Good but whatever
@@ -85,7 +85,7 @@ static bool link_callback(void *data, size_t directory_address, bool is_create_f
     struct link_args *args = (struct link_args *) data;
 
     if (!is_create_flagged && args->requires_create_flag) {
-        // FD_LINK in a union directory should only successfully link in directories marked with MCREATE
+        // FD_LINK in a union directory should only successfully link in directories marked with MOUNT_CREATE
         return true;
     }
 
