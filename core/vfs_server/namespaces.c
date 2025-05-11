@@ -1,5 +1,6 @@
 #include "namespaces.h"
 #include "debug.h"
+#include "directories.h"
 #include "ipc.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -197,20 +198,16 @@ size_t set_up_filesystem_for_process(const struct state *state, pid_t creator_pi
     return 0;
 }
 
-size_t mount(size_t namespace_id, size_t path, size_t directory_fd, uint8_t flags) {
-    // TODO: properly walk the filesystem tree to find the containing inode
-    ino_t inode = 0;
-    bool is_root = true;
+size_t mount(struct directory_info *info, size_t directory_fd, uint8_t flags) {
+    if (info->can_modify_namespace == false) {
+        return EPERM;
+    }
 
-    size_t namespace_address = (namespace_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
+    size_t namespace_address = (info->namespace_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
     struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(namespace_address, -1, UNTYPED_LOCK, 0);
 
     if (namespace == NULL) {
         return ENOMEM;
-    }
-
-    if (is_root && namespace->root_address != -1) {
-        return EEXIST;
     }
 
     // TODO: handle flags properly so existing mount points can be added on to
@@ -237,17 +234,19 @@ size_t mount(size_t namespace_id, size_t path, size_t directory_fd, uint8_t flag
     mount_point->previous = -1;
     mount_point->next = -1;
     mount_point->references = 1;
-    mount_point->enclosing_filesystem = 0; // TODO: set this properly
-    mount_point->inode = inode;
+    mount_point->enclosing_filesystem = info->enclosing_filesystem;
+    mount_point->inode = info->inode;
     mount_point->first_node = 0;
 
-    if (is_root) {
+    if (namespace->root_address == -1) {
+        // if the root address of this namespace hasn't been set yet, there's no way for this mount call to be mounting anything but the root filesystem.
+        // any existing file descriptors for the previously unset root directory will be automatically updated to the new value when operations are performed on them
         namespace->root_address = mount_point_address;
     } else {
         // TODO: should the hash value take something else into account as well (maybe the containing filesystem?) in order to reduce
         // collisions between, for example, sequentially assigned inodes in multiple basic filesystem implementations?
         // or should that be left up to the filesystem drivers themselves
-        uint8_t bucket = hash(inode) % NUM_BUCKETS;
+        uint8_t bucket = hash(info->inode) % NUM_BUCKETS;
         size_t *bucket_value = &namespace->mount_point_addresses[bucket];
 
         if (*bucket_value == -1) {

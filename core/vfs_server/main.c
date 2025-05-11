@@ -37,20 +37,6 @@ static void handle_vfs_message(const struct state *state, struct ipc_message *me
         }
 
         break;
-    case VFS_MOUNT:
-        printf("vfs_server: VFS_MOUNT called (flags 0x%x)\n", message->buffer[1]);
-        FD_RETURN_VALUE(reply) = can_modify_namespace ? mount(namespace_id, message->capabilities[1].address, message->capabilities[2].address, message->buffer[1]) : EPERM;
-        syscall_invoke(FD_REPLY_ENDPOINT(*message).address, -1, ENDPOINT_SEND, (size_t) &reply);
-
-        break;
-    case VFS_UNMOUNT:
-        printf("vfs_server: VFS_UNMOUNT called\n");
-
-        // TODO: this
-        FD_RETURN_VALUE(reply) = ENOSYS;
-        syscall_invoke(FD_REPLY_ENDPOINT(*message).address, -1, ENDPOINT_SEND, (size_t) &reply);
-
-        break;
     case VFS_NEW_PROCESS:
         {
             // TODO: verify that this is coming from the process server

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "directories.h"
 #include <stddef.h>
 #include <stdint.h>
 #include "structures.h"
@@ -9,7 +10,7 @@
 size_t set_up_filesystem_for_process(const struct state *state, pid_t creator_pid, pid_t new_pid, uint8_t flags, size_t reply_address);
 
 /// mounts the provided file descriptor for a directory into a filesystem's namespace
-size_t mount(size_t namespace_id, size_t path, size_t directory_fd, uint8_t flags);
+size_t mount(struct directory_info *info, size_t directory_fd, uint8_t flags);
 
 /// \brief finds the mount point that matches the given inode and enclosing filesystem.
 ///

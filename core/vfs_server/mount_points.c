@@ -2,6 +2,7 @@
 #include "directories.h"
 #include "ipc.h"
 #include "mount_points.h"
+#include "namespaces.h"
 #include "structures.h"
 #include "sys/kernel.h"
 #include "sys/vfs.h"
@@ -208,9 +209,31 @@ void handle_mount_point_message(const struct state *state, struct ipc_message *m
         return;
     }
 
-    printf("vfs_server: got message %d for mount point %d!\n", message->buffer[0], info->mount_point_address >> INIT_NODE_DEPTH);
+    if (info->mount_point_address == -1) {
+        // if this mount point file descriptor was created before the root filesystem for its namespace was mounted, then it's necessary
+        // to check whether the root filesystem has actually been mounted before attempting any operations on this file descriptor.
+        // this probably isn't the ideal way of doing it, but it should work and i'm hoping the added overhead on these calls isn't that bad
 
-    switch (message->buffer[0]) {
+        size_t namespace_address = (info->namespace_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
+        struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(namespace_address, -1, UNTYPED_LOCK, 0);
+
+        if (namespace != NULL) {
+            if (namespace->root_address != -1) {
+                // way too many levels of indentation here but i'd rather not make this its own function
+                info->mount_point_address = namespace->root_address;
+            }
+
+            syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
+        }
+    }
+
+    if (info->mount_point_address == -1) {
+        printf("vfs_server: got message %d for unset root mount point!\n", FD_CALL_NUMBER(*message));
+    } else {
+        printf("vfs_server: got message %d for mount point %d!\n", FD_CALL_NUMBER(*message), info->mount_point_address >> INIT_NODE_DEPTH);
+    }
+
+    switch (FD_CALL_NUMBER(*message)) {
     case FD_READ:
     case FD_READ_FAST:
         // TODO: this one is a fucking Mess and idk really how to implement it well. all the calls should be intercepted so that the highest position value can be found
@@ -237,6 +260,17 @@ void handle_mount_point_message(const struct state *state, struct ipc_message *m
     case FD_TRUNCATE:
         // writing/truncating is prohibited for directories
         return_value(message->capabilities[0].address, ENOTSUP);
+        break;
+    case FD_MOUNT:
+        {
+            struct ipc_message reply = {.capabilities = {}};
+            FD_RETURN_VALUE(reply) = mount(info, FD_MOUNT_FILE_DESCRIPTOR(*message).address, FD_MOUNT_FLAGS(*message));
+            syscall_invoke(FD_REPLY_ENDPOINT(*message).address, -1, ENDPOINT_SEND, (size_t) &reply);
+        }
+        break;
+    case FD_UNMOUNT:
+        // TODO
+        return_value(FD_REPLY_ENDPOINT(*message).address, ENOSYS);
         break;
     default:
         return_value(message->capabilities[0].address, EBADMSG);

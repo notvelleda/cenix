@@ -31,7 +31,7 @@ static size_t open_file_callback(void *data, size_t slot) {
 #define DIRECTORY_ADDRESS(id) (((id) << INIT_NODE_DEPTH) | DIRECTORY_NODE_SLOT)
 #define DIRECTORY_INFO_ADDRESS(id) (((id) << INIT_NODE_DEPTH) | DIRECTORY_INFO_SLOT)
 
-static size_t open_mount_point(const struct state *state, size_t opened_file_address, size_t mount_point_address, struct directory_info *info, size_t reply_address) {
+static size_t open_mount_point(const struct state *state, size_t opened_file_address, size_t mount_point_address, struct directory_info *info, ino_t inode, size_t reply_address) {
     size_t opened_file_slot = opened_file_address >> INIT_NODE_DEPTH;
     size_t info_address = DIRECTORY_INFO_ADDRESS(opened_file_slot);
 
@@ -58,6 +58,8 @@ static size_t open_mount_point(const struct state *state, size_t opened_file_add
     }
 
     new_info->namespace_id = info->namespace_id;
+    new_info->can_modify_namespace = info->can_modify_namespace;
+    new_info->inode = inode;
     new_info->mount_point_address = mount_point_address;
 
     syscall_invoke(info_address, -1, UNTYPED_UNLOCK, 0);
@@ -66,7 +68,7 @@ static size_t open_mount_point(const struct state *state, size_t opened_file_add
     return badge_and_send(state, IPC_BADGE(info_address, IPC_FLAG_IS_MOUNT_POINT), reply_address);
 }
 
-static size_t proxy_directory(const struct state *state, size_t opened_file_address, struct directory_info *info, size_t reply_address) {
+static size_t proxy_directory(const struct state *state, size_t opened_file_address, struct directory_info *info, ino_t inode, size_t reply_address) {
     // since this is a directory and it's not a mount point, a new directory_info struct is created to go along with the directory endpoint
     // before badging the directory id and sending an endpoint with it back to the caller
 
@@ -92,7 +94,8 @@ static size_t proxy_directory(const struct state *state, size_t opened_file_addr
         return result;
     }
 
-    *new_directory_info = *info; // this will be the same as the parent directory's directory_info since they're both on the same filesystem
+    *new_directory_info = *info; // this will be mostly the same as the parent directory's directory_info since they're both on the same filesystem
+    new_directory_info->inode = inode;
 
     syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_UNLOCK, 0);
 
@@ -144,7 +147,7 @@ idk_just_fucking_return:
     if (mount_point_address != -1) {
         // this directory is a mount point, so it needs to be handled accordingly
 
-        size_t result = open_mount_point(state, opened_file_address, mount_point_address, info, reply_capability);
+        size_t result = open_mount_point(state, opened_file_address, mount_point_address, info, stat.st_ino, reply_capability);
 
         if (result != 0) {
             goto idk_just_fucking_return; // i am So Tired of not having destructors (or even just defer). i long for the crab
@@ -166,7 +169,7 @@ idk_just_fucking_return:
     } else {
         // proxy the directory and send that back to the caller
 
-        size_t result = proxy_directory(state, opened_file_address, info, reply_capability);
+        size_t result = proxy_directory(state, opened_file_address, info, stat.st_ino, reply_capability);
 
         if (result != 0) {
             goto idk_just_fucking_return;
@@ -233,6 +236,24 @@ void handle_directory_message(const struct state *state, struct ipc_message *mes
     case FD_TRUNCATE:
         // writing/truncating is prohibited for directories
         return return_value(message->capabilities[0].address, ENOTSUP);
+    case FD_MOUNT:
+        {
+            struct directory_info *info = (struct directory_info *) syscall_invoke(directory_id, -1, UNTYPED_LOCK, 0);
+
+            if (info == NULL) {
+                return_value(FD_REPLY_ENDPOINT(*message).address, ENOMEM);
+                return;
+            }
+
+            struct ipc_message reply = {.capabilities = {}};
+            FD_RETURN_VALUE(reply) = mount(info, FD_MOUNT_FILE_DESCRIPTOR(*message).address, FD_MOUNT_FLAGS(*message));
+            syscall_invoke(FD_REPLY_ENDPOINT(*message).address, -1, ENDPOINT_SEND, (size_t) &reply);
+        }
+        break;
+    case FD_UNMOUNT:
+        // TODO
+        return_value(FD_REPLY_ENDPOINT(*message).address, ENOSYS);
+        break;
     default:
         return return_value(message->capabilities[0].address, EBADMSG);
     }
@@ -264,6 +285,8 @@ size_t open_root(const struct state *state, struct ipc_message *message, size_t 
     }
 
     info->namespace_id = namespace_id;
+    info->can_modify_namespace = IPC_FLAGS(message->badge) == IPC_FLAG_CAN_MODIFY;
+    info->inode = 0;
     info->mount_point_address = namespace->root_address;
 
     syscall_invoke(info_address, -1, UNTYPED_UNLOCK, 0);

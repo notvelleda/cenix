@@ -377,28 +377,14 @@ static void main_loop(const struct state *state) {
 
 /// handles calling vfs_mount() to mount this filesystem at the root of the vfs
 static void mount_to_root(const struct state *state) {
-    // allocate the path
-    const struct alloc_args path_alloc_args = {
-        .type = TYPE_UNTYPED,
-        .size = 1,
-        .address = 5,
-        .depth = -1
-    };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &path_alloc_args);
-
     // allocate the reply endpoint
     const struct alloc_args endpoint_alloc_args = {
         .type = TYPE_ENDPOINT,
         .size = 0,
-        .address = 6,
+        .address = 5,
         .depth = -1
     };
     INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
-
-    char *pointer = (char *) syscall_invoke(path_alloc_args.address, path_alloc_args.depth, UNTYPED_LOCK, 0);
-    ASSERT_IF_TEST(pointer != NULL);
-    *pointer = '/';
-    INVOKE_ASSERT(path_alloc_args.address, path_alloc_args.depth, UNTYPED_UNLOCK, 0);
 
     // copy the file descriptor endpoint and set its badge to 0 so that operations on the root directory will be properly handled
     const struct node_copy_args fd_copy_args = {
@@ -411,10 +397,21 @@ static void mount_to_root(const struct state *state) {
     };
     INVOKE_ASSERT(state->node.address, state->node.depth, NODE_COPY, (size_t) &fd_copy_args);
 
+    // temporary call to vfs_open_root(), will be removed once the vfs endpoint isn't passed around anymore
+    size_t open_root_result = vfs_open_root(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, 6);
+    ASSERT_IF_TEST(open_root_result == 0);
+    (void) open_root_result;
+
     // call vfs_mount()
-    size_t mount_result = vfs_mount(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, path_alloc_args.address, (fd_copy_args.dest_slot << INIT_NODE_DEPTH) | state->node.address, MOUNT_REPLACE);
+    size_t mount_result = fd_mount(6, endpoint_alloc_args.address, (fd_copy_args.dest_slot << INIT_NODE_DEPTH) | state->node.address, MOUNT_REPLACE);
     ASSERT_IF_TEST(mount_result == 0);
     (void) mount_result; // suppress the unused variable warning if this isn't being built for tests
+
+    if (mount_result != 0) {
+        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "error ");
+        print_number(mount_result);
+        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
+    }
 
 #ifdef DEBUG
     syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got here (after mount call)\n");

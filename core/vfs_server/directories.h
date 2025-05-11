@@ -1,12 +1,18 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include "structures.h"
 #include "sys/kernel.h"
+#include "sys/types.h"
 
 struct directory_info {
     /// the id of the filesystem namespace this directory is in
     size_t namespace_id;
+    /// whether this namespace can be modified or not
+    bool can_modify_namespace;
+    /// the inode of this directory
+    ino_t inode;
     union {
         /// the address of the filesystem that this directory is contained within
         size_t enclosing_filesystem;

@@ -16,8 +16,6 @@
 // (though they should be bounds checked with untyped_sizeof anyway)
 
 #define VFS_OPEN_ROOT 0
-#define VFS_MOUNT 1
-#define VFS_UNMOUNT 2
 
 // TODO: replace the vfs call endpoint with a root directory endpoint, replace vfs_mount/vfs_unmount with fd_mount/fd_unmount so path parsing isn't required in the vfs server
 // this will likely require optimization to speed up path traversal, maybe a flag could be passed to fd_open to have it open in place? this should be easily doable, would get rid of a decent chunk of overhead,
@@ -74,32 +72,6 @@ static inline size_t vfs_open_root(size_t vfs_endpoint, size_t reply_endpoint, s
     return vfs_call(vfs_endpoint, reply_endpoint, &to_send, &to_receive);
 }
 
-static inline size_t vfs_mount(size_t vfs_endpoint, size_t reply_endpoint, size_t path, size_t directory_fd, uint8_t flags) {
-    struct ipc_message to_send = {
-        .buffer = {VFS_MOUNT, flags},
-        .capabilities = {{reply_endpoint, -1}, {path, -1}, {directory_fd, -1}},
-        .to_copy = 1 // TODO: should these all be copied?
-    };
-    struct ipc_message to_receive = {
-        .capabilities = {}
-    };
-
-    return vfs_call(vfs_endpoint, reply_endpoint, &to_send, &to_receive);
-}
-
-static inline size_t vfs_unmount(size_t vfs_endpoint, size_t reply_endpoint, size_t path, size_t to_unmount) {
-    struct ipc_message to_send = {
-        .buffer = {VFS_UNMOUNT},
-        .capabilities = {{reply_endpoint, -1}, {path, -1}, {to_unmount, -1}},
-        .to_copy = 1 // TODO: should these all be copied?
-    };
-    struct ipc_message to_receive = {
-        .capabilities = {}
-    };
-
-    return vfs_call(vfs_endpoint, reply_endpoint, &to_send, &to_receive);
-}
-
 #define FD_READ 0
 #define FD_READ_FAST 1
 #define FD_WRITE 2
@@ -109,8 +81,9 @@ static inline size_t vfs_unmount(size_t vfs_endpoint, size_t reply_endpoint, siz
 #define FD_LINK 6
 #define FD_UNLINK 7
 #define FD_TRUNCATE 8
+#define FD_MOUNT 9
+#define FD_UNMOUNT 10
 // TODO: chmod, chown (could these be combined into one call?)
-// TODO: fd_mount, fd_unmount (vfs layer specific calls, behavior is undefined when called on a directory file descriptor not originating from the vfs)
 
 /// gets a number corresponding to which operation was requested on a file descriptor when given an IPC message
 #define FD_CALL_NUMBER(message) ((message).buffer[0])
@@ -317,6 +290,37 @@ static inline size_t fd_truncate(size_t fd_address, size_t reply_endpoint, size_
     };
 
     FD_TRUNCATE_SIZE(to_send) = size;
+
+    return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
+}
+
+#define FD_MOUNT_FLAGS(message) ((message).buffer[1])
+#define FD_MOUNT_FILE_DESCRIPTOR(message) ((message).capabilities[1])
+
+static inline size_t fd_mount(size_t fd_address, size_t reply_endpoint, size_t directory_fd, uint8_t flags) {
+    struct ipc_message to_send = {
+        .buffer = {FD_MOUNT, flags},
+        .capabilities = {{reply_endpoint, -1}, {directory_fd, -1}},
+        .to_copy = 1 // TODO: should both of these be copied?
+    };
+    struct ipc_message to_receive = {
+        .capabilities = {}
+    };
+
+    return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
+}
+
+#define FD_UNMOUNT_FILE_DESCRIPTOR(message) ((message).capabilities[1])
+
+static inline size_t fd_unmount(size_t fd_address, size_t reply_endpoint, size_t to_unmount) {
+    struct ipc_message to_send = {
+        .buffer = {FD_UNMOUNT},
+        .capabilities = {{reply_endpoint, -1}, {to_unmount, -1}},
+        .to_copy = 1 // TODO: should both of these be copied?
+    };
+    struct ipc_message to_receive = {
+        .capabilities = {}
+    };
 
     return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
 }

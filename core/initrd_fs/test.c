@@ -597,15 +597,26 @@ void test_ipc_interface(void) {
     };
     INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
 
+    // hacky fix to get vfs_open_root working here before it's removed
+    const struct alloc_args endpoint_alloc_args_2 = {
+        .type = TYPE_ENDPOINT,
+        .size = 0,
+        .address = 6,
+        .depth = -1
+    };
+    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args_2);
+
     size_t (*send_fakes[])(size_t, size_t, struct capability *, size_t) = {
-        endpoint_success_fake, // vfs_mount
+        endpoint_success_fake, // vfs_open_root
+        endpoint_success_fake, // fd_mount
         fd_open_response_fake,
         fd_read_response_fake
     };
     SET_CUSTOM_FAKE_SEQ(endpoint_send, send_fakes, sizeof(send_fakes) / sizeof(send_fakes[0]));
 
     size_t (*receive_fakes[])(size_t, size_t, struct capability *, size_t) = {
-        vfs_call_success_fake, // vfs_mount
+        vfs_call_success_fake, // vfs_open_root
+        vfs_call_success_fake, // fd_mount
         fd_open_request_fake,
         fd_read_request_fake,
         endpoint_error_fake
