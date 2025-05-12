@@ -109,7 +109,7 @@ static size_t proxy_directory(const struct state *state, size_t opened_file_addr
 }
 
 size_t open_file(const struct state *state, size_t fd_endpoint, struct directory_info *info, struct ipc_message *message) {
-    size_t reply_capability = message->capabilities[0].address;
+    size_t reply_capability = FD_REPLY_ENDPOINT(*message).address;
 
     // TODO: have a special case for .. both in mount points and in directories 1 level above mount points to hopefully prevent any wackiness there
 
@@ -120,9 +120,9 @@ size_t open_file(const struct state *state, size_t fd_endpoint, struct directory
     struct open_fields fields = {
         .fd_endpoint = fd_endpoint,
         .reply_endpoint = reply_endpoint_address,
-        .name_address = message->capabilities[1].address,
-        .flags = message->buffer[1],
-        .mode = message->buffer[2]
+        .name_address = FD_OPEN_NAME_ADDRESS(*message).address,
+        .flags = FD_OPEN_FLAGS(*message),
+        .mode = FD_OPEN_MODE(*message)
     };
 
     // the capability for this gets put in the directories node since if it's a directory it'll stay there, and if it's a regular file it'll
@@ -160,7 +160,7 @@ idk_just_fucking_return:
         struct ipc_message reply = {
             .capabilities = {{opened_file_address, -1}}
         };
-        *(size_t *) &reply.buffer = 0;
+        FD_RETURN_VALUE(reply) = 0;
 
         syscall_invoke(reply_capability, -1, ENDPOINT_SEND, (size_t) &reply);
 
@@ -201,7 +201,7 @@ static void directory_open(const struct state *state, size_t directory_id, struc
     struct directory_info *info = (struct directory_info *) syscall_invoke(directory_info_address, -1, UNTYPED_LOCK, 0);
 
     if (info == NULL) {
-        return return_value(message->capabilities[0].address, ENOMEM);
+        return return_value(FD_REPLY_ENDPOINT(*message).address, ENOMEM);
     }
 
     size_t result = open_file(state, directory_address, info, message);
@@ -209,18 +209,18 @@ static void directory_open(const struct state *state, size_t directory_id, struc
     syscall_invoke(directory_info_address, -1, UNTYPED_UNLOCK, 0);
 
     if (result != 0) {
-        return_value(message->capabilities[0].address, result);
+        return_value(FD_REPLY_ENDPOINT(*message).address, result);
     }
 }
 
 void handle_directory_message(const struct state *state, struct ipc_message *message) {
     size_t directory_id = IPC_ID(message->badge);
 
-    printf("vfs_server: got message %d for directory %d!\n", message->buffer[0], directory_id);
+    printf("vfs_server: got message %d for directory %d!\n", FD_CALL_NUMBER(*message), directory_id);
 
     // TODO: should there be a check for if this directory is now a mount point? does the potential benefit outweigh the performance impact?
 
-    switch (message->buffer[0]) {
+    switch (FD_CALL_NUMBER(*message)) {
     case FD_READ:
     case FD_READ_FAST:
     case FD_STAT:
@@ -235,7 +235,7 @@ void handle_directory_message(const struct state *state, struct ipc_message *mes
     case FD_WRITE_FAST:
     case FD_TRUNCATE:
         // writing/truncating is prohibited for directories
-        return return_value(message->capabilities[0].address, ENOTSUP);
+        return return_value(FD_REPLY_ENDPOINT(*message).address, ENOTSUP);
     case FD_MOUNT:
         {
             struct directory_info *info = (struct directory_info *) syscall_invoke(directory_id, -1, UNTYPED_LOCK, 0);
@@ -255,12 +255,12 @@ void handle_directory_message(const struct state *state, struct ipc_message *mes
         return_value(FD_REPLY_ENDPOINT(*message).address, ENOSYS);
         break;
     default:
-        return return_value(message->capabilities[0].address, EBADMSG);
+        return return_value(FD_REPLY_ENDPOINT(*message).address, EBADMSG);
     }
 }
 
 size_t open_root(const struct state *state, struct ipc_message *message, size_t namespace_id) {
-    size_t reply_capability = message->capabilities[0].address;
+    size_t reply_capability = FD_REPLY_ENDPOINT(*message).address;
 
     // get the namespace object from the namespace id
     size_t namespace_address = (namespace_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;

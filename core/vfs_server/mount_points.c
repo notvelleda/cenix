@@ -54,9 +54,9 @@ static void mount_point_stat(struct directory_info *info, struct ipc_message *me
     struct ipc_message reply = {
         .capabilities = {}
     };
-    *(size_t *) &reply.buffer = 0;
+    FD_RETURN_VALUE(reply) = 0;
 
-    struct stat *stat = (struct stat *) &reply.buffer[sizeof(size_t)];
+    struct stat *stat = &FD_STAT_STRUCT(reply);
     stat->st_dev = info->mount_point_address;
     stat->st_rdev = 0;
     stat->st_size = 0;
@@ -73,7 +73,7 @@ static void mount_point_stat(struct directory_info *info, struct ipc_message *me
     stat->st_mtime = 0;
     stat->st_ctime = 0;
 
-    syscall_invoke(message->capabilities[0].address, -1, ENDPOINT_SEND, (size_t) &reply);
+    syscall_invoke(FD_REPLY_ENDPOINT(*message).address, -1, ENDPOINT_SEND, (size_t) &reply);
 }
 
 struct link_args {
@@ -95,7 +95,7 @@ static bool link_callback(void *data, size_t directory_address, bool is_create_f
     };
 
     // TODO: have a timeout on this
-    size_t result = vfs_call(directory_address, args->to_send.capabilities[0].address, &args->to_send, &to_receive);
+    size_t result = vfs_call(directory_address, FD_REPLY_ENDPOINT(args->to_send).address, &args->to_send, &to_receive);
 
     if (result == 0) {
         // if the link call succeeded, we're done
@@ -111,12 +111,12 @@ static void mount_point_link(size_t thread_id, struct directory_info *info, stru
     struct link_args args = {
         .to_send = {
             .buffer = {FD_LINK},
-            .capabilities = {{THREAD_STORAGE_SLOT(thread_id, 7), -1}, message->capabilities[1], message->capabilities[2]},
+            .capabilities = {{THREAD_STORAGE_SLOT(thread_id, 7), -1}, FD_LINK_FD(*message), FD_LINK_NAME_ADDRESS(*message)},
             .to_copy = 7
         },
         .requires_create_flag = true
     };
-    return_value(message->capabilities[0].address, iterate_over_mount_point(info->mount_point_address, &args, &link_callback));
+    return_value(FD_REPLY_ENDPOINT(*message).address, iterate_over_mount_point(info->mount_point_address, &args, &link_callback));
 }
 
 /// handles FD_UNLINK calls in mount points
@@ -124,12 +124,12 @@ static void mount_point_unlink(size_t thread_id, struct directory_info *info, st
     struct link_args args = {
         .to_send = {
             .buffer = {FD_UNLINK},
-            .capabilities = {{THREAD_STORAGE_SLOT(thread_id, 7), -1}, message->capabilities[1]},
+            .capabilities = {{THREAD_STORAGE_SLOT(thread_id, 7), -1}, FD_UNLINK_NAME_ADDRESS(*message)},
             .to_copy = 3
         },
         .requires_create_flag = false
     };
-    return_value(message->capabilities[0].address, iterate_over_mount_point(info->mount_point_address, &args, &link_callback));
+    return_value(FD_REPLY_ENDPOINT(*message).address, iterate_over_mount_point(info->mount_point_address, &args, &link_callback));
 }
 
 struct open_args {
@@ -161,7 +161,7 @@ static void mount_point_open(const struct state *state, struct directory_info *i
     struct mount_point *mount_point = (struct mount_point *) syscall_invoke(info->mount_point_address, -1, UNTYPED_LOCK, 0);
 
     if (mount_point == NULL) {
-        return_value(message->capabilities[0].address, ENOMEM);
+        return_value(FD_REPLY_ENDPOINT(*message).address, ENOMEM);
     }
 
     struct open_args args = {
@@ -175,13 +175,13 @@ static void mount_point_open(const struct state *state, struct directory_info *i
     };
     size_t result;
 
-    if ((message->buffer[1] & (OPEN_CREATE | OPEN_EXCLUSIVE)) == (OPEN_CREATE | OPEN_EXCLUSIVE)) {
+    if ((FD_OPEN_FLAGS(*message) & (OPEN_CREATE | OPEN_EXCLUSIVE)) == (OPEN_CREATE | OPEN_EXCLUSIVE)) {
         // TODO: fail if a file with this name already exists
         args.allow_create = true;
         result = iterate_over_mount_point(info->mount_point_address, &args, &open_callback);
     } else {
-        bool should_create = (message->buffer[1] & OPEN_CREATE) != 0;
-        message->buffer[1] &= ~OPEN_CREATE;
+        bool should_create = (FD_OPEN_FLAGS(*message) & OPEN_CREATE) != 0;
+        FD_OPEN_FLAGS(*message) &= ~OPEN_CREATE;
 
         syscall_invoke(info->mount_point_address, -1, UNTYPED_UNLOCK, 0);
 
@@ -189,13 +189,13 @@ static void mount_point_open(const struct state *state, struct directory_info *i
 
         if (result != 0 && should_create) {
             args.allow_create = true;
-            message->buffer[1] |= OPEN_CREATE;
+            FD_OPEN_FLAGS(*message) |= OPEN_CREATE;
             result = iterate_over_mount_point(info->mount_point_address, &args, &open_callback);
         }
     }
 
     if (result != 0) {
-        return_value(message->capabilities[0].address, result);
+        return_value(FD_REPLY_ENDPOINT(*message).address, result);
     }
 }
 
@@ -205,7 +205,7 @@ void handle_mount_point_message(const struct state *state, struct ipc_message *m
     struct directory_info *info = (struct directory_info *) syscall_invoke(info_address, -1, UNTYPED_LOCK, 0);
 
     if (info == NULL) {
-        return_value(message->capabilities[0].address, ENOMEM);
+        return_value(FD_REPLY_ENDPOINT(*message).address, ENOMEM);
         return;
     }
 
@@ -241,7 +241,7 @@ void handle_mount_point_message(const struct state *state, struct ipc_message *m
         // in the list. TODO: how should this be stored? what kind of offset should be used in order to allow for extra entries to be added to one of the directories
         // while the mount point is open?
         // . and .. directory entries will also need special handling, not sure how that should work either
-        return_value(message->capabilities[0].address, ENOSYS);
+        return_value(FD_REPLY_ENDPOINT(*message).address, ENOSYS);
         break;
     case FD_STAT:
         mount_point_stat(info, message);
@@ -259,7 +259,7 @@ void handle_mount_point_message(const struct state *state, struct ipc_message *m
     case FD_WRITE_FAST:
     case FD_TRUNCATE:
         // writing/truncating is prohibited for directories
-        return_value(message->capabilities[0].address, ENOTSUP);
+        return_value(FD_REPLY_ENDPOINT(*message).address, ENOTSUP);
         break;
     case FD_MOUNT:
         {
@@ -273,7 +273,7 @@ void handle_mount_point_message(const struct state *state, struct ipc_message *m
         return_value(FD_REPLY_ENDPOINT(*message).address, ENOSYS);
         break;
     default:
-        return_value(message->capabilities[0].address, EBADMSG);
+        return_value(FD_REPLY_ENDPOINT(*message).address, EBADMSG);
         break;
     }
 
