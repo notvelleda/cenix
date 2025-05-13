@@ -3,7 +3,9 @@
 #include "string.h"
 #include "sys/kernel.h"
 
-#ifdef DEBUG
+#if defined(DEBUG) && defined(UNDER_TEST)
+#include <stdio.h>
+#elif defined(DEBUG)
 #include "printf.h"
 #else
 #define printf(...)

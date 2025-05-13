@@ -1,5 +1,6 @@
 CFLAGS += -fPIC -fPIE -msep-data -Os
-LDFLAGS += -Wl,-elf2flt -Wl,-move-rodata
+LDFLAGS += -Wl,-elf2flt -Wl,-move-rodata -L../common
+LIBRARIES += -lcommon
 BINARY = process_server
 
 .include "$(PROJECT_ROOT)/makefiles/common-vars.mk"

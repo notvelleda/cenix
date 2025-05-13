@@ -6,7 +6,8 @@ BUILD_DIRECTORY = $(PROJECT_ROOT)/build
 INITRD_PATH = $(BUILD_DIRECTORY)/initrd.jax
 INITRD_DIR_PATH = $(BUILD_DIRECTORY)/initrd
 
-process_server: $(INITRD_PATH) # process server requires initrd to be built so it can be embedded inside
+process_server: common $(INITRD_PATH) # process server requires common library and requires initrd to be built so it can be embedded inside
+# this should also hopefully force common to be built before everything that depends on it without having to manually write out all of these dependency relationships
 
 SBIN_CONTENTS = vfs_server service_manager debug_console initrd_fs
 
