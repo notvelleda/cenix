@@ -25,16 +25,16 @@ static size_t initrd_fs_registers_callback(struct thread_registers *registers, v
 }
 
 void _start(void) {
-    printf("hellorld from process server!\n");
+    puts("early init stage 1 running...\n");
 
     init_process_table();
 
     size_t initrd_size = (size_t) &_binary_initrd_jax_end - (size_t) &_binary_initrd_jax_start;
-
     printf("initrd is at 0x%x to 0x%x (%d bytes)\n", &_binary_initrd_jax_start, &_binary_initrd_jax_end, initrd_size);
 
-    printf("starting vfs_server...\n");
+    puts("starting core processes:\n");
 
+    puts(" - /sbin/vfs_server\n");
     pid_t vfs_pid = allocate_pid();
 
     // allocate an endpoint that the vfs server will use to send a properly set up endpoint back to the process server
@@ -108,7 +108,7 @@ void _start(void) {
     // TODO: start initrd_fs to mount initrd as root directory, mount /proc, start debug_console for initial stdout (/dev/debug_console?), start service manager
     // TODO: ensure initrd_fs starts in this address space on systems with multiple (when support is added)
 
-    printf("starting initrd_fs...\n");
+    puts(" - /sbin/initrd_fs\n");
 
     pid_t initrd_fs_pid = allocate_pid();
 
@@ -140,6 +140,8 @@ void _start(void) {
     assert(exec_from_initrd(initrd_fs_pid, &iter, "/sbin/initrd_fs", root_alloc_args.address, root_alloc_args.depth, initrd_fs_registers_callback, &addresses) == 0);
 
     printf("done! (pid %d)\n", initrd_fs_pid);
+
+    puts("done (for now)\n");
 
     while (1) {
         syscall_yield();
