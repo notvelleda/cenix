@@ -1,4 +1,5 @@
 #include "debug.h"
+#include "debug_always.h"
 #include "jax.h"
 #include "processes.h"
 #include <stdbool.h>
@@ -43,7 +44,7 @@ void _start(void) {
         .address = 6,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args) == 0);
 
     // set up the vfs server's capability space
     struct alloc_args root_alloc_args = {
@@ -52,7 +53,7 @@ void _start(void) {
         .address = 7,
         .depth = INIT_NODE_DEPTH
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &root_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &root_alloc_args) == 0);
 
     struct node_copy_args alloc_copy_args = {
         .source_address = 0,
@@ -62,7 +63,7 @@ void _start(void) {
         .badge = 0,
         .should_set_badge = 0
     };
-    syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &alloc_copy_args);
+    assert(syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &alloc_copy_args) == 0);
 
     struct node_copy_args debug_copy_args = {
         .source_address = 1,
@@ -72,7 +73,7 @@ void _start(void) {
         .badge = 0,
         .should_set_badge = 0
     };
-    syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &debug_copy_args);
+    assert(syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &debug_copy_args) == 0);
 
     struct node_copy_args endpoint_copy_args = {
         .source_address = endpoint_alloc_args.address,
@@ -82,12 +83,12 @@ void _start(void) {
         .badge = 0,
         .should_set_badge = 0
     };
-    syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &endpoint_copy_args);
+    assert(syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &endpoint_copy_args) == 0);
 
     struct jax_iterator iter;
-    open_jax(&iter, &_binary_initrd_jax_start, &_binary_initrd_jax_end);
+    assert(open_jax(&iter, &_binary_initrd_jax_start, &_binary_initrd_jax_end) == true);
 
-    exec_from_initrd(vfs_pid, &iter, "/sbin/vfs_server", root_alloc_args.address, root_alloc_args.depth, NULL, NULL);
+    assert(exec_from_initrd(vfs_pid, &iter, "/sbin/vfs_server", root_alloc_args.address, root_alloc_args.depth, NULL, NULL) == 0);
 
     printf("done! (pid %d)\n", vfs_pid);
 
@@ -95,7 +96,7 @@ void _start(void) {
     struct ipc_message message = {
         .capabilities = {{VFS_ENDPOINT_SLOT, -1}}
     };
-    syscall_invoke(endpoint_alloc_args.address, endpoint_alloc_args.depth, ENDPOINT_RECEIVE, (size_t) &message);
+    assert(syscall_invoke(endpoint_alloc_args.address, endpoint_alloc_args.depth, ENDPOINT_RECEIVE, (size_t) &message) == 0);
 
     // test messages just to make sure the vfs main loop is working
     /*struct ipc_message message2 = {
@@ -111,9 +112,9 @@ void _start(void) {
 
     pid_t initrd_fs_pid = allocate_pid();
 
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &root_alloc_args);
-    syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &alloc_copy_args);
-    syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &debug_copy_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &root_alloc_args) == 0);
+    assert(syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &alloc_copy_args) == 0);
+    assert(syscall_invoke(root_alloc_args.address, root_alloc_args.depth, NODE_COPY, (size_t) &debug_copy_args) == 0);
 
     // TODO: inform vfs of new process and how it relates to its creator (in this case, this process) so it can provide a new endpoint for communication with it
 
@@ -131,12 +132,12 @@ void _start(void) {
         .capabilities = {{(2 << INIT_NODE_DEPTH) | root_alloc_args.address, -1}}
     };
 
-    vfs_call(VFS_ENDPOINT_SLOT, endpoint_alloc_args.address, &to_send, &to_receive);
+    assert(vfs_call(VFS_ENDPOINT_SLOT, endpoint_alloc_args.address, &to_send, &to_receive) == 0);
 
-    open_jax(&iter, &_binary_initrd_jax_start, &_binary_initrd_jax_end);
+    assert(open_jax(&iter, &_binary_initrd_jax_start, &_binary_initrd_jax_end) == true);
 
     size_t addresses[2] = {(size_t) &_binary_initrd_jax_start, (size_t) &_binary_initrd_jax_end};
-    exec_from_initrd(initrd_fs_pid, &iter, "/sbin/initrd_fs", root_alloc_args.address, root_alloc_args.depth, initrd_fs_registers_callback, &addresses);
+    assert(exec_from_initrd(initrd_fs_pid, &iter, "/sbin/initrd_fs", root_alloc_args.address, root_alloc_args.depth, initrd_fs_registers_callback, &addresses) == 0);
 
     printf("done! (pid %d)\n", initrd_fs_pid);
 

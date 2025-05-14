@@ -1,4 +1,5 @@
 #include "debug.h"
+#include "debug_always.h"
 #include "directories.h"
 #include "ipc.h"
 #include "mount_points.h"
@@ -113,14 +114,7 @@ void _start(void) {
     printf("hellorld from vfs server!\n");
 
     // sanity check :3
-#ifdef UNDER_TEST
-    TEST_ASSERT(sizeof(struct stat) <= IPC_BUFFER_SIZE - sizeof(size_t));
-#else
-    if (sizeof(struct stat) > IPC_BUFFER_SIZE - sizeof(size_t)) {
-        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "vfs_server: fatal: stat structure is too big!\n");
-        while (1);
-    }
-#endif
+    assert(sizeof(struct stat) <= IPC_BUFFER_SIZE - sizeof(size_t));
 
     init_vfs_structures();
 
@@ -131,7 +125,7 @@ void _start(void) {
         .address = 3,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args) == 0);
 
     const struct state state = {
         .thread_id = 0,
@@ -139,6 +133,6 @@ void _start(void) {
         .endpoint_address = endpoint_alloc_args.address
     };
 
-    set_up_filesystem_for_process(&state, 1, 1, 0, 2);
+    assert(set_up_filesystem_for_process(&state, 1, 1, 0, 2) == 0);
     main_loop(&state);
 }

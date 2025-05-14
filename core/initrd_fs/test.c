@@ -40,7 +40,7 @@ void custom_setup(void) {
         .address = ENDPOINT_ADDRESS,
         .depth = -1
     };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args);
+    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args) == 0);
 
     const struct alloc_args node_alloc_args = {
         .type = TYPE_NODE,
@@ -48,7 +48,7 @@ void custom_setup(void) {
         .address = NODE_ADDRESS,
         .depth = INIT_NODE_DEPTH
     };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args);
+    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args) == 0);
 
     // load the test jax archive from disk
     FILE *jax_file = fopen(STRINGIFY(TEST_JAX_LOCATION), "rb");
@@ -125,7 +125,7 @@ static size_t open(struct ipc_message *received, struct ipc_message *reply, size
         .address = ((IPC_CAPABILITY_SLOTS + 2) << INIT_NODE_DEPTH) | NODE_ADDRESS,
         .depth = -1
     };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
+    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args) == 0);
 
     // copy the name into it
     char *buffer = (char *) syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_LOCK, 0);
@@ -133,7 +133,7 @@ static size_t open(struct ipc_message *received, struct ipc_message *reply, size
 
     memcpy(buffer, name, alloc_args.size);
 
-    INVOKE_ASSERT(alloc_args.address, alloc_args.depth, UNTYPED_UNLOCK, 0);
+    TEST_ASSERT(syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_UNLOCK, 0) == 0);
 
     // call fd_open
     received->badge = badge;
@@ -157,7 +157,7 @@ static size_t open(struct ipc_message *received, struct ipc_message *reply, size
 
     // delete capabilities so that this function can be called again
     syscall_invoke(NODE_ADDRESS, INIT_NODE_DEPTH, NODE_DELETE, IPC_CAPABILITY_SLOTS + 1); // used in handle_open()
-    INVOKE_ASSERT(NODE_ADDRESS, INIT_NODE_DEPTH, NODE_DELETE, IPC_CAPABILITY_SLOTS + 2);
+    TEST_ASSERT(syscall_invoke(NODE_ADDRESS, INIT_NODE_DEPTH, NODE_DELETE, IPC_CAPABILITY_SLOTS + 2) == 0);
 
     return result;
 }
@@ -193,7 +193,7 @@ static void read_file_slow(struct ipc_message *received, struct ipc_message *rep
         .address = ((IPC_CAPABILITY_SLOTS + 2) << INIT_NODE_DEPTH) | NODE_ADDRESS,
         .depth = -1
     };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
+    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args) == 0);
 
     // fill the buffer with a set value to check nothing extra was read (this could be its own test but it's easier to just slap it onto all the existing cases)
     uint8_t *buffer = (uint8_t *) syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_LOCK, 0);
@@ -202,7 +202,7 @@ static void read_file_slow(struct ipc_message *received, struct ipc_message *rep
     const uint8_t fill_value = 0xaa;
     memset(buffer, fill_value, alloc_args.size);
 
-    INVOKE_ASSERT(alloc_args.address, alloc_args.depth, UNTYPED_UNLOCK, 0);
+    TEST_ASSERT(syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_UNLOCK, 0) == 0);
 
     // do the fd call
     received->badge = badge;
@@ -234,10 +234,10 @@ static void read_file_slow(struct ipc_message *received, struct ipc_message *rep
 
     TEST_ASSERT(strcmp(buffer, contents) == 0);
 
-    INVOKE_ASSERT(alloc_args.address, alloc_args.depth, UNTYPED_UNLOCK, 0);
+    TEST_ASSERT(syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_UNLOCK, 0) == 0);
 
     // delete the read buffer
-    INVOKE_ASSERT(NODE_ADDRESS, INIT_NODE_DEPTH, NODE_DELETE, IPC_CAPABILITY_SLOTS + 2);
+    TEST_ASSERT(syscall_invoke(NODE_ADDRESS, INIT_NODE_DEPTH, NODE_DELETE, IPC_CAPABILITY_SLOTS + 2) == 0);
 }
 
 /// convenient wrapper to test both FD_READ and FD_READ_FAST
@@ -508,7 +508,7 @@ size_t fd_open_request_fake(size_t address, size_t depth, struct capability *slo
         .address = FD_REPLY_ENDPOINT(*message).address,
         .depth = FD_REPLY_ENDPOINT(*message).depth
     };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args);
+    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args) == 0);
 
     // allocate a capability to store the name
     const struct alloc_args name_alloc_args = {
@@ -517,7 +517,7 @@ size_t fd_open_request_fake(size_t address, size_t depth, struct capability *slo
         .address = FD_OPEN_NAME_ADDRESS(*message).address,
         .depth = FD_OPEN_NAME_ADDRESS(*message).depth
     };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &name_alloc_args);
+    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &name_alloc_args) == 0);
 
     // copy the name into it
     char *buffer = (char *) syscall_invoke(name_alloc_args.address, name_alloc_args.depth, UNTYPED_LOCK, 0);
@@ -525,7 +525,7 @@ size_t fd_open_request_fake(size_t address, size_t depth, struct capability *slo
 
     memcpy(buffer, name, name_alloc_args.size);
 
-    INVOKE_ASSERT(name_alloc_args.address, name_alloc_args.depth, UNTYPED_UNLOCK, 0);
+    TEST_ASSERT(syscall_invoke(name_alloc_args.address, name_alloc_args.depth, UNTYPED_UNLOCK, 0) == 0);
 
     message->transferred_capabilities = 3;
 
@@ -561,7 +561,7 @@ size_t fd_read_request_fake(size_t address, size_t depth, struct capability *slo
         .address = FD_REPLY_ENDPOINT(*message).address,
         .depth = FD_REPLY_ENDPOINT(*message).depth
     };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args);
+    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args) == 0);
 
     message->transferred_capabilities = 1;
 
@@ -595,7 +595,7 @@ void test_ipc_interface(void) {
         .address = 2,
         .depth = -1
     };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
+    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args) == 0);
 
     // hacky fix to get vfs_open_root working here before it's removed
     const struct alloc_args endpoint_alloc_args_2 = {
@@ -604,7 +604,7 @@ void test_ipc_interface(void) {
         .address = 6,
         .depth = -1
     };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args_2);
+    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args_2) == 0);
 
     size_t (*send_fakes[])(size_t, size_t, struct capability *, size_t) = {
         endpoint_success_fake, // vfs_open_root

@@ -1,3 +1,4 @@
+#include "debug_always.h"
 #include "jax.h"
 #include "main.h"
 #include <stdbool.h>
@@ -13,7 +14,7 @@
 
 static void print_number(size_t number) {
     // what can i say, i like writing fucked up for loops sometimes :3
-    for (int i = sizeof(size_t) * 2 - 1; syscall_invoke(1, -1, DEBUG_PRINT, (size_t) &"0\0001\0002\0003\0004\0005\0006\0007\0008\0009\000a\000b\000c\000d\000e\000f"[((number >> (i * 4)) & 15) * 2]), i > 0; i --);
+    for (int i = sizeof(size_t) * 2 - 1; puts(&"0\0001\0002\0003\0004\0005\0006\0007\0008\0009\000a\000b\000c\000d\000e\000f"[((number >> (i * 4)) & 15) * 2]), i > 0; i --);
 }
 
 static const void *next_file(const void *address, const void *initrd_end, struct jax_file *file) {
@@ -346,19 +347,19 @@ static void main_loop(const struct state *state) {
             // there needs to be a way to exit the main loop if this program is being tested, hence the break here
             break;
 #else
-            syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: endpoint_receive failed with code ");
+            puts("initrd_fs: endpoint_receive failed with code ");
             print_number(result);
-            syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
+            puts("\n");
             continue; // TODO: should this really continue? is this actually correct behavior?
 #endif
         }
 
 #ifdef DEBUG
-        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got fd call ");
+        puts("initrd_fs: got fd call ");
         print_number(FD_CALL_NUMBER(received));
-        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) " with badge ");
+        puts(" with badge ");
         print_number(received.badge);
-        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
+        puts("\n");
 #endif
 
         struct ipc_message reply = {
@@ -384,7 +385,7 @@ static void mount_to_root(const struct state *state) {
         .address = 5,
         .depth = -1
     };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args) == 0);
 
     // copy the file descriptor endpoint and set its badge to 0 so that operations on the root directory will be properly handled
     const struct node_copy_args fd_copy_args = {
@@ -395,44 +396,34 @@ static void mount_to_root(const struct state *state) {
         .badge = 0,
         .should_set_badge = 1
     };
-    INVOKE_ASSERT(state->node.address, state->node.depth, NODE_COPY, (size_t) &fd_copy_args);
+    assert(syscall_invoke(state->node.address, state->node.depth, NODE_COPY, (size_t) &fd_copy_args) == 0);
 
     // temporary call to vfs_open_root(), will be removed once the vfs endpoint isn't passed around anymore
-    size_t open_root_result = vfs_open_root(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, 6);
-    ASSERT_IF_TEST(open_root_result == 0);
-    (void) open_root_result;
+    assert(vfs_open_root(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, 6) == 0);
 
     // call vfs_mount()
-    size_t mount_result = fd_mount(6, endpoint_alloc_args.address, (fd_copy_args.dest_slot << INIT_NODE_DEPTH) | state->node.address, MOUNT_REPLACE);
-    ASSERT_IF_TEST(mount_result == 0);
-    (void) mount_result; // suppress the unused variable warning if this isn't being built for tests
-
-    if (mount_result != 0) {
-        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "error ");
-        print_number(mount_result);
-        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
-    }
+    assert(fd_mount(6, endpoint_alloc_args.address, (fd_copy_args.dest_slot << INIT_NODE_DEPTH) | state->node.address, MOUNT_REPLACE) == 0);
 
 #ifdef DEBUG
-    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: got here (after mount call)\n");
+    puts("initrd_fs: got here (after mount call)\n");
 #endif
 }
 
 void _start(size_t initrd_start, size_t initrd_end) {
 #ifdef DEBUG
-    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "hellorld from initrd_fs!\n");
+    puts("hellorld from initrd_fs!\n");
 
-    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: initrd is at ");
+    puts("initrd_fs: initrd is at ");
     print_number(initrd_start);
-    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) " to ");
+    puts(" to ");
     print_number(initrd_end);
-    syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "\n");
+    puts("\n");
 #endif
 
     struct jax_iterator iterator;
 
     if (!open_jax(&iterator, (const uint8_t *) initrd_start, (const uint8_t *) initrd_end)) {
-        syscall_invoke(1, -1, DEBUG_PRINT, (size_t) "initrd_fs: fatal: initrd format is invalid\n");
+        puts("initrd_fs: fatal: initrd format is invalid\n");
 
         while (true) {
             syscall_yield();
@@ -446,7 +437,7 @@ void _start(size_t initrd_start, size_t initrd_end) {
         .address = 3,
         .depth = INIT_NODE_DEPTH
     };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args) == 0);
 
     // allocate the file descriptor endpoint that will be sent to the vfs and will be listened on for incoming messages
     const struct alloc_args fd_alloc_args = {
@@ -455,8 +446,8 @@ void _start(size_t initrd_start, size_t initrd_end) {
         .address = 4,
         .depth = -1
     };
-    INVOKE_ASSERT(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args);
-    
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args) == 0);
+
     // this is used so that passing state around to the various functions here that use it is a lot cleaner
     const struct state state = {
         .initrd_start = initrd_start,
