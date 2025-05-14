@@ -1,3 +1,4 @@
+#include "assert.h"
 #include "errno.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -10,26 +11,23 @@
 // fills an allocated region of memory with all zeroes
 static void clear_allocation(size_t address) {
     size_t size = syscall_invoke(address, -1, UNTYPED_SIZEOF, 0);
-    uint8_t *pointer = (uint8_t *) syscall_invoke(address, -1, UNTYPED_LOCK, 0);
 
-    if (pointer == NULL) {
-        return;
-    }
+    uint8_t *pointer = (uint8_t *) syscall_invoke(address, -1, UNTYPED_LOCK, 0);
+    assert(pointer != NULL);
 
     memset(pointer, 0, size);
-    syscall_invoke(address, -1, UNTYPED_UNLOCK, 0);
+
+    assert(syscall_invoke(address, -1, UNTYPED_UNLOCK, 0) == 0);
 }
 
 void init_vfs_structures(void) {
-    // TODO: should these be asserted just in case? like nothing here *should* fail but what if it does
-
     const struct alloc_args process_data_node_alloc_args = {
         .type = TYPE_NODE,
         .size = PID_BITS,
         .address = PROCESS_DATA_NODE_SLOT,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &process_data_node_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &process_data_node_alloc_args) == 0);
 
     const struct alloc_args mount_points_node_alloc_args = {
         .type = TYPE_NODE,
@@ -37,7 +35,7 @@ void init_vfs_structures(void) {
         .address = MOUNT_POINTS_NODE_SLOT,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &mount_points_node_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &mount_points_node_alloc_args) == 0);
 
     const struct alloc_args used_mount_point_ids_alloc_args = {
         .type = TYPE_UNTYPED,
@@ -45,7 +43,7 @@ void init_vfs_structures(void) {
         .address = USED_MOUNT_POINT_IDS_SLOT,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_mount_point_ids_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_mount_point_ids_alloc_args) == 0);
     clear_allocation(used_mount_point_ids_alloc_args.address);
 
     const struct alloc_args mounted_list_info_alloc_args = {
@@ -54,7 +52,7 @@ void init_vfs_structures(void) {
         .address = MOUNTED_LIST_INFO_SLOT,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &mounted_list_info_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &mounted_list_info_alloc_args) == 0);
 
     const struct alloc_args mounted_list_node_alloc_args = {
         .type = TYPE_NODE,
@@ -62,7 +60,7 @@ void init_vfs_structures(void) {
         .address = MOUNTED_LIST_NODE_SLOT,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &mounted_list_node_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &mounted_list_node_alloc_args) == 0);
 
     const struct alloc_args used_mounted_lists_alloc_args = {
         .type = TYPE_UNTYPED,
@@ -70,7 +68,7 @@ void init_vfs_structures(void) {
         .address = USED_MOUNTED_LISTS_SLOT,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_mounted_lists_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_mounted_lists_alloc_args) == 0);
     clear_allocation(used_mounted_lists_alloc_args.address);
 
     const struct alloc_args namespaces_node_alloc_args = {
@@ -79,7 +77,7 @@ void init_vfs_structures(void) {
         .address = NAMESPACE_NODE_SLOT,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &namespaces_node_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &namespaces_node_alloc_args) == 0);
 
     const struct alloc_args used_namespaces_alloc_args = {
         .type = TYPE_UNTYPED,
@@ -87,7 +85,7 @@ void init_vfs_structures(void) {
         .address = USED_NAMESPACES_SLOT,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_namespaces_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_namespaces_alloc_args) == 0);
     clear_allocation(used_namespaces_alloc_args.address);
 
     const struct alloc_args directory_node_alloc_args = {
@@ -96,7 +94,7 @@ void init_vfs_structures(void) {
         .address = DIRECTORY_NODE_SLOT,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &directory_node_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &directory_node_alloc_args) == 0);
 
     const struct alloc_args directory_info_alloc_args = {
         .type = TYPE_NODE,
@@ -104,7 +102,7 @@ void init_vfs_structures(void) {
         .address = DIRECTORY_INFO_SLOT,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &directory_info_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &directory_info_alloc_args) == 0);
 
     const struct alloc_args used_directories_alloc_args = {
         .type = TYPE_UNTYPED,
@@ -112,7 +110,7 @@ void init_vfs_structures(void) {
         .address = USED_DIRECTORY_IDS_SLOT,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_directories_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &used_directories_alloc_args) == 0);
     clear_allocation(used_directories_alloc_args.address);
 
     const struct alloc_args thread_storage_node_alloc_args = {
@@ -121,7 +119,7 @@ void init_vfs_structures(void) {
         .address = THREAD_STORAGE_NODE_SLOT,
         .depth = -1
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &thread_storage_node_alloc_args);
+    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &thread_storage_node_alloc_args) == 0);
 
     for (int i = 0; i < MAX_WORKER_THREADS; i ++) {
         const struct alloc_args node_alloc_args = {
@@ -130,7 +128,7 @@ void init_vfs_structures(void) {
             .address = (i << INIT_NODE_DEPTH) | THREAD_STORAGE_NODE_SLOT,
             .depth = -1
         };
-        syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args);
+        assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args) == 0);
 
         const struct alloc_args reply_endpoint_alloc_args = {
             .type = TYPE_ENDPOINT,
@@ -139,7 +137,7 @@ void init_vfs_structures(void) {
             .depth = -1
         };
 
-        syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_endpoint_alloc_args);
+        assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_endpoint_alloc_args) == 0);
     }
 }
 
