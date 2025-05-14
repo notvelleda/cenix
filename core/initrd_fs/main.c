@@ -392,11 +392,8 @@ static void mount_to_root(const struct state *state) {
     };
     assert(syscall_invoke(state->node.address, state->node.depth, NODE_COPY, (size_t) &fd_copy_args) == 0);
 
-    // temporary call to vfs_open_root(), will be removed once the vfs endpoint isn't passed around anymore
-    assert(vfs_open_root(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, 6) == 0);
-
     // call vfs_mount()
-    assert(fd_mount(6, endpoint_alloc_args.address, (fd_copy_args.dest_slot << INIT_NODE_DEPTH) | state->node.address, MOUNT_REPLACE) == 0);
+    assert(fd_mount(VFS_ENDPOINT_ADDRESS, endpoint_alloc_args.address, (fd_copy_args.dest_slot << INIT_NODE_DEPTH) | state->node.address, MOUNT_REPLACE) == 0);
 
     debug_puts("initrd_fs: got here (after mount call)\n");
 }

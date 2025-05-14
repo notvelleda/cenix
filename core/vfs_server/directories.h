@@ -28,5 +28,5 @@ size_t open_file(const struct state *state, size_t fd_endpoint, struct directory
 /// handles receiving a message for a directory file descriptor and replying to it
 void handle_directory_message(const struct state *state, struct ipc_message *message);
 
-/// opens the root directory of a process' filesystem namespace, handling the VFS_OPEN_ROOT call
+/// opens the root directory of a process' filesystem namespace
 size_t open_root(const struct state *state, struct ipc_message *message, size_t namespace_id);

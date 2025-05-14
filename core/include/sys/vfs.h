@@ -15,8 +15,6 @@
 // TODO: properly document that strings in untyped capabilities must be null terminated since the kernel doesn't guarantee that untyped objects will stay the same size
 // (though they should be bounds checked with untyped_sizeof anyway)
 
-#define VFS_OPEN_ROOT 0
-
 // TODO: replace the vfs call endpoint with a root directory endpoint, replace vfs_mount/vfs_unmount with fd_mount/fd_unmount so path parsing isn't required in the vfs server
 // this will likely require optimization to speed up path traversal, maybe a flag could be passed to fd_open to have it open in place? this should be easily doable, would get rid of a decent chunk of overhead,
 // and would greatly simplify path traversal in libc
@@ -57,19 +55,6 @@ static inline size_t vfs_call(size_t endpoint, size_t reply_endpoint, struct ipc
     }
 
     return *(size_t *) &to_receive->buffer;
-}
-
-static inline size_t vfs_open_root(size_t vfs_endpoint, size_t reply_endpoint, size_t fd_slot) {
-    struct ipc_message to_send = {
-        .buffer = {VFS_OPEN_ROOT},
-        .capabilities = {{reply_endpoint, -1}},
-        .to_copy = 1
-    };
-    struct ipc_message to_receive = {
-        .capabilities = {{fd_slot, -1}}
-    };
-
-    return vfs_call(vfs_endpoint, reply_endpoint, &to_send, &to_receive);
 }
 
 #define FD_READ 0
@@ -327,7 +312,7 @@ static inline size_t fd_unmount(size_t fd_address, size_t reply_endpoint, size_t
 
 /// \brief describes the format of directory entries as returned by the VFS and all filesystem servers.
 ///
-/// directory entries are read by opening a directory (i.e. with `vfs_open_root`/`fd_open`) and reading their contents similarly to a regular file.
+/// directory entries are read by opening a directory (i.e. with `fd_open`) and reading their contents similarly to a regular file.
 ///
 /// however, unlike with character streams, the `position` argument to `fd_read`/`fd_read_fast` is undefined but consistent, with the only defined value being
 /// 0 (which always means the first entry in the directory).

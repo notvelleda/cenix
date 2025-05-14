@@ -12,8 +12,9 @@
 #include "sys/vfs.h"
 #include "sys/stat.h"
 #include "test_macros.h"
+#include "utils.h"
 
-/// handles receiving a message not specific to a given file descriptor (i.e. VFS_* calls) and replying to it
+/// handles receiving messages from the process server and replying to them
 static void handle_vfs_message(const struct state *state, struct ipc_message *message) {
     size_t namespace_id = IPC_ID(message->badge);
     bool can_modify_namespace = IPC_FLAGS(message->badge) == IPC_FLAG_CAN_MODIFY;
@@ -26,21 +27,8 @@ static void handle_vfs_message(const struct state *state, struct ipc_message *me
     size_t result;
 
     switch (FD_CALL_NUMBER(*message)) {
-    case VFS_OPEN_ROOT:
-        debug_printf("vfs_server: VFS_OPEN_ROOT called\n");
-
-        result = open_root(state, message, namespace_id);
-
-        if (result != 0) {
-            debug_printf("vfs_server: open_root failed with error %d\n", result);
-            FD_RETURN_VALUE(reply) = ENOSYS;
-            syscall_invoke(FD_REPLY_ENDPOINT(*message).address, -1, ENDPOINT_SEND, (size_t) &reply);
-        }
-
-        break;
     case VFS_NEW_PROCESS:
         {
-            // TODO: verify that this is coming from the process server
             pid_t new_pid = (message->buffer[2] << 8) | message->buffer[3];
             pid_t creator_pid = (message->buffer[4] << 8) | message->buffer[5];
 
@@ -133,6 +121,7 @@ void _start(void) {
         .endpoint_address = endpoint_alloc_args.address
     };
 
+    assert(badge_and_send(&state, IPC_BADGE(0, 0), 2) == 0);
     assert(set_up_filesystem_for_process(&state, 1, 1, 0, 2) == 0);
     main_loop(&state);
 }

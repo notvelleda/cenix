@@ -163,39 +163,19 @@ size_t set_up_filesystem_for_process(const struct state *state, pid_t creator_pi
 
     syscall_invoke(alloc_args.address, -1, UNTYPED_UNLOCK, 0);
 
-    // badge the vfs endpoint with the new filesystem id and send it to the waiting process
-    const struct node_copy_args copy_args = {
-        .source_address = state->endpoint_address,
-        .source_depth = -1,
-        .dest_slot = state->temp_slot,
-        .access_rights = -1,
-        .badge = badge,
-        .should_set_badge = 1
-    };
-    size_t result = syscall_invoke(THREAD_STORAGE_ADDRESS(state->thread_id), THREAD_STORAGE_DEPTH, NODE_COPY, (size_t) &copy_args);
-
-    if (result != 0) {
-        debug_printf("set_up_filesystem_for_process: node_copy failed with error %d\n", result);
-        free_namespace(fs_namespace);
-        syscall_invoke(PROCESS_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, new_pid);
-        return result;
-    }
-
     struct ipc_message message = {
-        .capabilities = {{THREAD_STORAGE_SLOT(state->thread_id, state->temp_slot), THREAD_STORAGE_SLOT_DEPTH}}
+        .capabilities = {{reply_address, -1}},
+        .badge = badge
     };
-    result = syscall_invoke(reply_address, -1, ENDPOINT_SEND, (size_t) &message);
-
-    // delete the copied endpoint just in case it wasn't transferred or the reply invocation failed
-    syscall_invoke(THREAD_STORAGE_ADDRESS(state->thread_id), THREAD_STORAGE_DEPTH, NODE_DELETE, state->temp_slot);
+    size_t result = open_root(state, &message, fs_namespace);
 
     if (result != 0) {
+        debug_printf("set_up_filesystem_for_process: open_root failed with error %d\n", result);
         free_namespace(fs_namespace);
         syscall_invoke(PROCESS_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, new_pid);
-        return result;
     }
 
-    return 0;
+    return result;
 }
 
 size_t mount(struct directory_info *info, size_t directory_fd, uint8_t flags) {

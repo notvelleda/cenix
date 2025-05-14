@@ -11,8 +11,9 @@
 extern const uint8_t _binary_initrd_jax_start;
 extern const uint8_t _binary_initrd_jax_end;
 
-#define VFS_ENDPOINT_SLOT 8
 #define ROOT_NODE_ADDRESS 7
+#define VFS_ENDPOINT_SLOT 8
+#define ROOT_FD_SLOT 9
 
 /// \brief starts a core/early init process that doesn't require libc.
 ///
@@ -138,10 +139,16 @@ void early_init(void) {
     start_process("/sbin/vfs_server", vfs_server_setup_callback, &endpoint_alloc_args, NULL, NULL);
 
     // receive the endpoint that will be used for communicating with the vfs server from the vfs server
-    struct ipc_message message = {
+    const struct ipc_message message = {
         .capabilities = {{VFS_ENDPOINT_SLOT, -1}}
     };
     assert(syscall_invoke(endpoint_alloc_args.address, endpoint_alloc_args.depth, ENDPOINT_RECEIVE, (size_t) &message) == 0);
+
+    // receive a file descriptor for the root directory of the filesystem
+    const struct ipc_message message_2 = {
+        .capabilities = {{ROOT_FD_SLOT, -1}}
+    };
+    assert(syscall_invoke(endpoint_alloc_args.address, endpoint_alloc_args.depth, ENDPOINT_RECEIVE, (size_t) &message_2) == 0);
 
     // start initrd_fs now that the vfs server is running. this'll populate the filesystem with a decent initial set of directories (/dev, /proc, etc.)
     // TODO: ensure initrd_fs starts in this address space on systems with multiple (when support is added)

@@ -32,12 +32,23 @@ size_t new_process_response_fake(size_t address, size_t depth, struct capability
 
     badge_values[0] = badge_values[1];
     TEST_ASSERT(read_badge(message->capabilities[0].address, message->capabilities[0].depth, &badge_values[1]) == 0);
+    TEST_ASSERT(IPC_FLAGS(badge_values[1]) == IPC_FLAG_IS_MOUNT_POINT);
 
 #ifdef DEBUG
-    printf("got badge %d\n", badge_values[1]);
+    printf("got badge 0x%x: id 0x%x, flags 0x%x\n", badge_values[1], IPC_ID(badge_values[1]), IPC_FLAGS(badge_values[1]));
 #endif
 
     return 0;
+}
+
+struct directory_info *directory_info_from_badge(size_t badge) {
+    size_t directory_id = IPC_ID(badge);
+
+    struct directory_info *info = (struct directory_info *) syscall_invoke(directory_id, -1, UNTYPED_LOCK, 0);
+    syscall_invoke(directory_id, -1, UNTYPED_UNLOCK, 0); // this is ok since the heap here doesn't reallocate or anything
+    TEST_ASSERT(info != NULL);
+
+    return info;
 }
 
 void custom_setup(void) {
@@ -94,14 +105,9 @@ void new_process_share_namespace(void) {
     endpoint_send_fake.custom_fake = new_process_response_fake;
     TEST_ASSERT(set_up_filesystem_for_process(&state, 1, 2, VFS_SHARE_NAMESPACE, reply_alloc_args.address) == 0);
 
-#ifdef DEBUG
-    printf("pid 1: flags: 0x%lx, id: 0x%lx\n", IPC_FLAGS(badge_values[0]), IPC_ID(badge_values[0]));
-    printf("pid 2: flags: 0x%lx, id: 0x%lx\n", IPC_FLAGS(badge_values[1]), IPC_ID(badge_values[1]));
-#endif
-
-    TEST_ASSERT(IPC_ID(badge_values[0]) == IPC_ID(badge_values[1]));
-    TEST_ASSERT(IPC_FLAGS(badge_values[0]) == IPC_FLAGS(badge_values[1]));
-    TEST_ASSERT(IPC_FLAGS(badge_values[1]) == IPC_FLAG_CAN_MODIFY);
+    TEST_ASSERT(directory_info_from_badge(badge_values[0])->namespace_id == directory_info_from_badge(badge_values[1])->namespace_id);
+    TEST_ASSERT(directory_info_from_badge(badge_values[0])->can_modify_namespace == true);
+    TEST_ASSERT(directory_info_from_badge(badge_values[1])->can_modify_namespace == true);
 }
 
 size_t new_process_pid_2_share_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
@@ -146,17 +152,12 @@ void new_process_share_namespace_ipc(void) {
 
     main_loop(&state);
 
-#ifdef DEBUG
-    printf("pid 1: flags: 0x%lx, id: 0x%lx\n", IPC_FLAGS(badge_values[0]), IPC_ID(badge_values[0]));
-    printf("pid 2: flags: 0x%lx, id: 0x%lx\n", IPC_FLAGS(badge_values[1]), IPC_ID(badge_values[1]));
-#endif
-
     TEST_ASSERT(endpoint_send_fake.call_count == 1); // called once per call, 1 call in this test
     TEST_ASSERT(endpoint_receive_fake.call_count == 2); // called once per call plus an extra at the end to break
 
-    TEST_ASSERT(IPC_ID(badge_values[0]) == IPC_ID(badge_values[1]));
-    TEST_ASSERT(IPC_FLAGS(badge_values[0]) == IPC_FLAGS(badge_values[1]));
-    TEST_ASSERT(IPC_FLAGS(badge_values[1]) == IPC_FLAG_CAN_MODIFY);
+    TEST_ASSERT(directory_info_from_badge(badge_values[0])->namespace_id == directory_info_from_badge(badge_values[1])->namespace_id);
+    TEST_ASSERT(directory_info_from_badge(badge_values[0])->can_modify_namespace == true);
+    TEST_ASSERT(directory_info_from_badge(badge_values[1])->can_modify_namespace == true);
 }
 
 // (VFS_NEW_PROCESS + VFS_SHARE_NAMESPACE) test that read-onlyness is preserved
@@ -175,14 +176,9 @@ void new_process_share_read_only_namespace(void) {
     endpoint_send_fake.custom_fake = new_process_response_fake;
     TEST_ASSERT(set_up_filesystem_for_process(&state, 2, 3, VFS_SHARE_NAMESPACE, reply_alloc_args.address) == 0);
 
-#ifdef DEBUG
-    printf("pid 2: flags: 0x%lx, id: 0x%lx\n", IPC_FLAGS(badge_values[0]), IPC_ID(badge_values[0]));
-    printf("pid 3: flags: 0x%lx, id: 0x%lx\n", IPC_FLAGS(badge_values[1]), IPC_ID(badge_values[1]));
-#endif
-
-    TEST_ASSERT(IPC_ID(badge_values[0]) == IPC_ID(badge_values[1]));
-    TEST_ASSERT(IPC_FLAGS(badge_values[0]) == IPC_FLAGS(badge_values[1]));
-    TEST_ASSERT(IPC_FLAGS(badge_values[1]) == 0);
+    TEST_ASSERT(directory_info_from_badge(badge_values[0])->namespace_id == directory_info_from_badge(badge_values[1])->namespace_id);
+    TEST_ASSERT(directory_info_from_badge(badge_values[0])->can_modify_namespace == false);
+    TEST_ASSERT(directory_info_from_badge(badge_values[1])->can_modify_namespace == false);
 }
 
 size_t new_process_pid_2_read_only_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
@@ -256,17 +252,12 @@ void new_process_share_read_only_namespace_ipc(void) {
 
     main_loop(&state);
 
-#ifdef DEBUG
-    printf("pid 2: flags: 0x%lx, id: 0x%lx\n", IPC_FLAGS(badge_values[0]), IPC_ID(badge_values[0]));
-    printf("pid 3: flags: 0x%lx, id: 0x%lx\n", IPC_FLAGS(badge_values[1]), IPC_ID(badge_values[1]));
-#endif
-
     TEST_ASSERT(endpoint_send_fake.call_count == 2); // called once per call, 2 calls in this test
     TEST_ASSERT(endpoint_receive_fake.call_count == 3); // called once per call plus an extra at the end to break
 
-    TEST_ASSERT(IPC_ID(badge_values[0]) == IPC_ID(badge_values[1]));
-    TEST_ASSERT(IPC_FLAGS(badge_values[0]) == IPC_FLAGS(badge_values[1]));
-    TEST_ASSERT(IPC_FLAGS(badge_values[1]) == 0);
+    TEST_ASSERT(directory_info_from_badge(badge_values[0])->namespace_id == directory_info_from_badge(badge_values[1])->namespace_id);
+    TEST_ASSERT(directory_info_from_badge(badge_values[0])->can_modify_namespace == false);
+    TEST_ASSERT(directory_info_from_badge(badge_values[1])->can_modify_namespace == false);
 }
 
 // (VFS_NEW_PROCESS + VFS_READ_ONLY_NAMESPACE) test that the namespace of the new process cannot be modified with mount/unmount calls
@@ -292,15 +283,10 @@ void new_process_new_namespace(void) {
     endpoint_send_fake.custom_fake = new_process_response_fake;
     TEST_ASSERT(set_up_filesystem_for_process(&state, 1, 2, 0, reply_alloc_args.address) == 0);
 
-#ifdef DEBUG
-    printf("pid 1: flags: 0x%lx, id: 0x%lx\n", IPC_FLAGS(badge_values[0]), IPC_ID(badge_values[0]));
-    printf("pid 2: flags: 0x%lx, id: 0x%lx\n", IPC_FLAGS(badge_values[1]), IPC_ID(badge_values[1]));
-#endif
-
-    TEST_ASSERT(IPC_ID(badge_values[0]) == 0);
-    TEST_ASSERT(IPC_ID(badge_values[1]) == 1);
-    TEST_ASSERT(IPC_FLAGS(badge_values[0]) == IPC_FLAGS(badge_values[1]));
-    TEST_ASSERT(IPC_FLAGS(badge_values[1]) == IPC_FLAG_CAN_MODIFY);
+    TEST_ASSERT(directory_info_from_badge(badge_values[0])->namespace_id == 0);
+    TEST_ASSERT(directory_info_from_badge(badge_values[1])->namespace_id == 1);
+    TEST_ASSERT(directory_info_from_badge(badge_values[0])->can_modify_namespace == true);
+    TEST_ASSERT(directory_info_from_badge(badge_values[1])->can_modify_namespace == true);
 }
 
 size_t new_process_pid_2_new_namespace_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
@@ -345,18 +331,13 @@ void new_process_new_namespace_ipc(void) {
 
     main_loop(&state);
 
-#ifdef DEBUG
-    printf("pid 1: flags: 0x%lx, id: 0x%lx\n", IPC_FLAGS(badge_values[0]), IPC_ID(badge_values[0]));
-    printf("pid 2: flags: 0x%lx, id: 0x%lx\n", IPC_FLAGS(badge_values[1]), IPC_ID(badge_values[1]));
-#endif
-
     TEST_ASSERT(endpoint_send_fake.call_count == 1); // called once per call, 1 call in this test
     TEST_ASSERT(endpoint_receive_fake.call_count == 2); // called once per call plus an extra at the end to break
 
-    TEST_ASSERT(IPC_ID(badge_values[0]) == 0);
-    TEST_ASSERT(IPC_ID(badge_values[1]) == 1);
-    TEST_ASSERT(IPC_FLAGS(badge_values[0]) == IPC_FLAGS(badge_values[1]));
-    TEST_ASSERT(IPC_FLAGS(badge_values[1]) == IPC_FLAG_CAN_MODIFY);
+    TEST_ASSERT(directory_info_from_badge(badge_values[0])->namespace_id == 0);
+    TEST_ASSERT(directory_info_from_badge(badge_values[1])->namespace_id == 1);
+    TEST_ASSERT(directory_info_from_badge(badge_values[0])->can_modify_namespace == true);
+    TEST_ASSERT(directory_info_from_badge(badge_values[1])->can_modify_namespace == true);
 }
 
 // ====================================================================================================
@@ -523,8 +504,6 @@ void fd_truncate_should_fail(void) {
 
 int main(void) {
     UNITY_BEGIN();
-
-    // should VFS_OPEN_ROOT/VFS_MOUNT/VFS_UNMOUNT be tested if that part of the api is gonna be reworked?
 
     // for all calls/variations
     //  - test that the functions that are called by them return properly when invoked
