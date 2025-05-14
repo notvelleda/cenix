@@ -1,12 +1,11 @@
-#include "string.h"
-#include "structures.h"
 #include "errno.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "string.h"
+#include "structures.h"
 #include "sys/kernel.h"
 #include "sys/limits.h"
-#include "debug.h"
 
 // fills an allocated region of memory with all zeroes
 static void clear_allocation(size_t address) {

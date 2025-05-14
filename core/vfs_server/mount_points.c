@@ -1,4 +1,4 @@
-#include "debug.h"
+#include "core_io.h"
 #include "directories.h"
 #include "ipc.h"
 #include "mount_points.h"
@@ -228,9 +228,9 @@ void handle_mount_point_message(const struct state *state, struct ipc_message *m
     }
 
     if (info->mount_point_address == -1) {
-        printf("vfs_server: got message %d for unset root mount point!\n", FD_CALL_NUMBER(*message));
+        debug_printf("vfs_server: got message %d for unset root mount point!\n", FD_CALL_NUMBER(*message));
     } else {
-        printf("vfs_server: got message %d for mount point %d!\n", FD_CALL_NUMBER(*message), info->mount_point_address >> INIT_NODE_DEPTH);
+        debug_printf("vfs_server: got message %d for mount point %d!\n", FD_CALL_NUMBER(*message), info->mount_point_address >> INIT_NODE_DEPTH);
     }
 
     switch (FD_CALL_NUMBER(*message)) {

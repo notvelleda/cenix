@@ -5,8 +5,10 @@
 
 #if defined(DEBUG) && defined(UNDER_TEST)
 #include <stdio.h>
-#elif defined(DEBUG)
+#elif defined(DEBUG) && defined(IN_KERNEL)
 #include "printf.h"
+#elif defined(DEBUG)
+#include "core_io.h"
 #else
 #define printf(...)
 #endif

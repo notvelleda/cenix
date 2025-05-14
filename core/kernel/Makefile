@@ -3,6 +3,8 @@ BINARY = kernel
 
 .include "$(PROJECT_ROOT)/makefiles/common-vars.mk"
 
+CFLAGS += -I$(PROJECT_ROOT)/core/printf -DIN_KERNEL
+
 # platform-specific ld flags
 # these are used for things like specifying a linker script to be used if something other than the default is required
 MAC_LDFLAGS != [ "$(PLATFORM)" = mac-68000 ] && echo "-T$(CWD)/$(PLATFORM_PATH)/kernel.ld" || echo ""

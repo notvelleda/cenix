@@ -1,4 +1,5 @@
-#include "debug_always.h"
+#include "assert.h"
+#include "core_io.h"
 #include "jax.h"
 #include "main.h"
 #include <stdbool.h>
@@ -11,11 +12,6 @@
 #include "test_macros.h"
 
 #define VFS_ENDPOINT_ADDRESS 2
-
-static void print_number(size_t number) {
-    // what can i say, i like writing fucked up for loops sometimes :3
-    for (int i = sizeof(size_t) * 2 - 1; puts(&"0\0001\0002\0003\0004\0005\0006\0007\0008\0009\000a\000b\000c\000d\000e\000f"[((number >> (i * 4)) & 15) * 2]), i > 0; i --);
-}
 
 static const void *next_file(const void *address, const void *initrd_end, struct jax_file *file) {
     struct jax_iterator iterator = {
@@ -348,19 +344,17 @@ static void main_loop(const struct state *state) {
             break;
 #else
             puts("initrd_fs: endpoint_receive failed with code ");
-            print_number(result);
+            print_number_hex(result);
             puts("\n");
             continue; // TODO: should this really continue? is this actually correct behavior?
 #endif
         }
 
-#ifdef DEBUG
-        puts("initrd_fs: got fd call ");
-        print_number(FD_CALL_NUMBER(received));
-        puts(" with badge ");
-        print_number(received.badge);
-        puts("\n");
-#endif
+        debug_puts("initrd_fs: got fd call ");
+        debug_print_number_hex(FD_CALL_NUMBER(received));
+        debug_puts(" with badge ");
+        debug_print_number_hex(received.badge);
+        debug_puts("\n");
 
         struct ipc_message reply = {
             .capabilities = {}
@@ -404,21 +398,17 @@ static void mount_to_root(const struct state *state) {
     // call vfs_mount()
     assert(fd_mount(6, endpoint_alloc_args.address, (fd_copy_args.dest_slot << INIT_NODE_DEPTH) | state->node.address, MOUNT_REPLACE) == 0);
 
-#ifdef DEBUG
-    puts("initrd_fs: got here (after mount call)\n");
-#endif
+    debug_puts("initrd_fs: got here (after mount call)\n");
 }
 
 void _start(size_t initrd_start, size_t initrd_end) {
-#ifdef DEBUG
-    puts("hellorld from initrd_fs!\n");
+    debug_puts("hellorld from initrd_fs!\n");
 
-    puts("initrd_fs: initrd is at ");
-    print_number(initrd_start);
-    puts(" to ");
-    print_number(initrd_end);
-    puts("\n");
-#endif
+    debug_puts("initrd_fs: initrd is at ");
+    debug_print_number_hex(initrd_start);
+    debug_puts(" to ");
+    debug_print_number_hex(initrd_end);
+    debug_puts("\n");
 
     struct jax_iterator iterator;
 

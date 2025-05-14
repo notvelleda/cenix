@@ -1,5 +1,5 @@
-#include "debug.h"
-#include "debug_always.h"
+#include "assert.h"
+#include "core_io.h"
 #include "jax.h"
 #include "processes.h"
 #include <stdbool.h>
@@ -70,7 +70,7 @@ static void start_process(
 
     assert(exec_from_initrd(pid, &iter, filename, root_alloc_args.address, root_alloc_args.depth, registers_callback, registers_callback_data) == 0);
 
-    printf("done! (pid %d)\n", pid);
+    debug_printf("done! (pid %d)\n", pid);
 }
 
 void vfs_server_setup_callback(pid_t pid, void *data) {
@@ -121,7 +121,7 @@ static size_t initrd_fs_registers_callback(struct thread_registers *registers, v
 
 void early_init(void) {
     //size_t initrd_size = (size_t) &_binary_initrd_jax_end - (size_t) &_binary_initrd_jax_start;
-    //printf("initrd is at 0x%x to 0x%x (%d bytes)\n", &_binary_initrd_jax_start, &_binary_initrd_jax_end, initrd_size);
+    //debug_printf("initrd is at 0x%x to 0x%x (%d bytes)\n", &_binary_initrd_jax_start, &_binary_initrd_jax_end, initrd_size);
 
     puts("starting core processes:\n");
 

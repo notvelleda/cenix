@@ -1,5 +1,5 @@
-#include "debug.h"
-#include "debug_always.h"
+#include "assert.h"
+#include "core_io.h"
 #include "directories.h"
 #include "ipc.h"
 #include "mount_points.h"
@@ -18,7 +18,7 @@ static void handle_vfs_message(const struct state *state, struct ipc_message *me
     size_t namespace_id = IPC_ID(message->badge);
     bool can_modify_namespace = IPC_FLAGS(message->badge) == IPC_FLAG_CAN_MODIFY;
 
-    printf("vfs_server: got message %d for fs %d (can modify: %s)\n", FD_CALL_NUMBER(*message), namespace_id, can_modify_namespace ? "true" : "false");
+    debug_printf("vfs_server: got message %d for fs %d (can modify: %s)\n", FD_CALL_NUMBER(*message), namespace_id, can_modify_namespace ? "true" : "false");
 
     struct ipc_message reply = {
         .capabilities = {}
@@ -27,12 +27,12 @@ static void handle_vfs_message(const struct state *state, struct ipc_message *me
 
     switch (FD_CALL_NUMBER(*message)) {
     case VFS_OPEN_ROOT:
-        printf("vfs_server: VFS_OPEN_ROOT called\n");
+        debug_printf("vfs_server: VFS_OPEN_ROOT called\n");
 
         result = open_root(state, message, namespace_id);
 
         if (result != 0) {
-            printf("vfs_server: open_root failed with error %d\n", result);
+            debug_printf("vfs_server: open_root failed with error %d\n", result);
             FD_RETURN_VALUE(reply) = ENOSYS;
             syscall_invoke(FD_REPLY_ENDPOINT(*message).address, -1, ENDPOINT_SEND, (size_t) &reply);
         }
@@ -44,12 +44,12 @@ static void handle_vfs_message(const struct state *state, struct ipc_message *me
             pid_t new_pid = (message->buffer[2] << 8) | message->buffer[3];
             pid_t creator_pid = (message->buffer[4] << 8) | message->buffer[5];
 
-            printf("vfs_server: VFS_NEW_PROCESS called (pid %d, creator %d, flags 0x%x)\n", new_pid, creator_pid, message->buffer[1]);
+            debug_printf("vfs_server: VFS_NEW_PROCESS called (pid %d, creator %d, flags 0x%x)\n", new_pid, creator_pid, message->buffer[1]);
 
             result = set_up_filesystem_for_process(state, creator_pid, new_pid, message->buffer[1], FD_REPLY_ENDPOINT(*message).address);
 
             if (result != 0) {
-                printf("vfs_server: set_up_filesystem_for_process failed with error %d\n", result);
+                debug_printf("vfs_server: set_up_filesystem_for_process failed with error %d\n", result);
 
                 FD_RETURN_VALUE(reply) = result;
 
@@ -81,7 +81,7 @@ STATIC_TESTABLE void main_loop(const struct state *state) {
             // like in initrd_fs, there needs to be a way to exit the main loop if this program is being tested, hence the break here
             break;
 #else
-            printf("vfs_server: endpoint_receive failed with error %d\n", result);
+            debug_printf("vfs_server: endpoint_receive failed with error %d\n", result);
             continue; // TODO: should this really continue? is this actually correct behavior?
 #endif
         }
@@ -111,7 +111,7 @@ STATIC_TESTABLE void main_loop(const struct state *state) {
 }
 
 void _start(void) {
-    printf("hellorld from vfs server!\n");
+    debug_printf("hellorld from vfs server!\n");
 
     // sanity check :3
     assert(sizeof(struct stat) <= IPC_BUFFER_SIZE - sizeof(size_t));

@@ -1,4 +1,4 @@
-#include "debug.h"
+#include "core_io.h"
 #include "directories.h"
 #include "ipc.h"
 #include "namespaces.h"
@@ -216,7 +216,7 @@ static void directory_open(const struct state *state, size_t directory_id, struc
 void handle_directory_message(const struct state *state, struct ipc_message *message) {
     size_t directory_id = IPC_ID(message->badge);
 
-    printf("vfs_server: got message %d for directory %d!\n", FD_CALL_NUMBER(*message), directory_id);
+    debug_printf("vfs_server: got message %d for directory %d!\n", FD_CALL_NUMBER(*message), directory_id);
 
     // TODO: should there be a check for if this directory is now a mount point? does the potential benefit outweigh the performance impact?
 

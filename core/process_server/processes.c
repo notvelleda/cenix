@@ -1,8 +1,8 @@
-#include "processes.h"
 #include "bflt.h"
-#include "debug.h"
+#include "core_io.h"
 #include "errno.h"
 #include "jax.h"
+#include "processes.h"
 #include <stddef.h>
 #include <stdint.h>
 #include "string.h"
@@ -109,7 +109,7 @@ size_t exec_from_initrd(
     const char *file_data;
     size_t file_size;
     if (!jax_find(iter, filename, TYPE_REGULAR, &file_data, &file_size)) {
-        printf("exec_from_initrd: couldn't find %s in initrd\n", filename);
+        debug_printf("exec_from_initrd: couldn't find %s in initrd\n", filename);
         return ENOENT;
     }
 
@@ -121,7 +121,7 @@ size_t exec_from_initrd(
 
     size_t allocation_size = bflt_allocation_size(header);
 
-    printf("exec_from_initrd: allocation size is %d\n", allocation_size);
+    debug_printf("exec_from_initrd: allocation size is %d\n", allocation_size);
 
     struct alloc_args data_alloc_args = {
         .type = TYPE_UNTYPED,
@@ -131,7 +131,7 @@ size_t exec_from_initrd(
     };
 
     if (syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &data_alloc_args) != 0) {
-        printf("exec_from_initrd: memory allocation for thread data failed\n");
+        debug_printf("exec_from_initrd: memory allocation for thread data failed\n");
         return ENOMEM;
     }
 
@@ -143,7 +143,7 @@ size_t exec_from_initrd(
     };
 
     if (syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &thread_alloc_args) != 0) {
-        printf("exec_from_initrd: memory allocation for thread failed\n");
+        debug_printf("exec_from_initrd: memory allocation for thread failed\n");
 
         syscall_invoke(PID_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, pid);
         return ENOMEM;
@@ -152,7 +152,7 @@ size_t exec_from_initrd(
     void *data = (void *) syscall_invoke(data_alloc_args.address, -1, UNTYPED_LOCK, 0);
 
     if (data == NULL) {
-        printf("exec_from_initrd: failed to lock thread data\n");
+        debug_printf("exec_from_initrd: failed to lock thread data\n");
 
         syscall_invoke(PID_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, pid);
         syscall_invoke(PID_THREAD_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, pid);
@@ -165,7 +165,7 @@ size_t exec_from_initrd(
     size_t callback_result = registers_callback == NULL ? 0 : registers_callback(&registers, callback_data);
 
     if (callback_result != 0) {
-        printf("exec_from_initrd: registers_callback failed with code %d\n", callback_result);
+        debug_printf("exec_from_initrd: registers_callback failed with code %d\n", callback_result);
 
         syscall_invoke(PID_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, pid);
         syscall_invoke(PID_THREAD_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, pid);

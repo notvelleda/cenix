@@ -1,4 +1,4 @@
-#if defined(DEBUG) && !defined(UNDER_TEST)
+#ifndef UNDER_TEST
 #include "../printf/printf.c"
 #include "sys/kernel.h"
 

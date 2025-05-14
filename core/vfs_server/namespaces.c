@@ -1,7 +1,7 @@
-#include "namespaces.h"
-#include "debug.h"
+#include "core_io.h"
 #include "directories.h"
 #include "ipc.h"
+#include "namespaces.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include "structures.h"
@@ -41,7 +41,7 @@ static void free_namespace(size_t namespace_id) {
     struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(address, -1, UNTYPED_LOCK, 0);
 
     if (namespace == NULL) {
-        printf("free_namespace: couldn't lock namespace, reference count will be wrong!\n");
+        debug_printf("free_namespace: couldn't lock namespace, reference count will be wrong!\n");
         return;
     }
 
@@ -175,7 +175,7 @@ size_t set_up_filesystem_for_process(const struct state *state, pid_t creator_pi
     size_t result = syscall_invoke(THREAD_STORAGE_ADDRESS(state->thread_id), THREAD_STORAGE_DEPTH, NODE_COPY, (size_t) &copy_args);
 
     if (result != 0) {
-        printf("set_up_filesystem_for_process: node_copy failed with error %d\n", result);
+        debug_printf("set_up_filesystem_for_process: node_copy failed with error %d\n", result);
         free_namespace(fs_namespace);
         syscall_invoke(PROCESS_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, new_pid);
         return result;
