@@ -15,9 +15,10 @@
 // TODO: properly document that strings in untyped capabilities must be null terminated since the kernel doesn't guarantee that untyped objects will stay the same size
 // (though they should be bounds checked with untyped_sizeof anyway)
 
-// TODO: replace the vfs call endpoint with a root directory endpoint, replace vfs_mount/vfs_unmount with fd_mount/fd_unmount so path parsing isn't required in the vfs server
-// this will likely require optimization to speed up path traversal, maybe a flag could be passed to fd_open to have it open in place? this should be easily doable, would get rid of a decent chunk of overhead,
+// TODO: should a flag be passed to fd_open to have it open in place? this should be easily doable, would get rid of a decent chunk of overhead in path traversal,
 // and would greatly simplify path traversal in libc
+// TODO: how the hell will fd_unmount work???? should it check the provided file descriptor against all the mounted file descriptors to see if any of them are copies
+// of the same endpoint (this'll need a new invocation type to be added to the kernel but that's fine), then do an inode comparison? but that method is far from perfect
 
 #define VFS_NEW_PROCESS 255
 
