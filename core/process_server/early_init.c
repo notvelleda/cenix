@@ -136,7 +136,7 @@ void early_init(void) {
     assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args) == 0);
 
     // start vfs server
-    start_process("/sbin/vfs_server", vfs_server_setup_callback, &endpoint_alloc_args, NULL, NULL);
+    start_process("/lib/core/vfs_server", vfs_server_setup_callback, &endpoint_alloc_args, NULL, NULL);
 
     // receive the endpoint that will be used for communicating with the vfs server from the vfs server
     const struct ipc_message message = {
@@ -153,7 +153,7 @@ void early_init(void) {
     // start initrd_fs now that the vfs server is running. this'll populate the filesystem with a decent initial set of directories (/dev, /proc, etc.)
     // TODO: ensure initrd_fs starts in this address space on systems with multiple (when support is added)
     size_t addresses[2] = {(size_t) &_binary_initrd_jax_start, (size_t) &_binary_initrd_jax_end};
-    start_process("/sbin/initrd_fs", initrd_fs_setup_callback, &endpoint_alloc_args, initrd_fs_registers_callback, &addresses);
+    start_process("/lib/core/initrd_fs", initrd_fs_setup_callback, &endpoint_alloc_args, initrd_fs_registers_callback, &addresses);
 
     // TODO: start debug_console for initial stdout/stderr (/dev/debug_console?), mount /proc, start early init stage 2 as its own process to start device manager, find/mount a root filesystem,
     // and proceed with initialization from there (should that be in its own stage? or would early init stage 2 suffice and could therefore be renamed)
