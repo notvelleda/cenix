@@ -4,6 +4,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/// structure that describes a list of filesystems mounted on a given mount point
+struct mounted_list_info {
+    /// stores which slots in the capability node containing this structure are occupied
+    size_t used_slots;
+    /// stores which slots in the capability node containing this structure are marked with the MOUNT_CREATE flag
+    size_t create_flagged_slots;
+    /// if there are more filesystems mounted, this stores the next index that should be searched for them, or -1 otherwise
+    size_t next_index;
+};
+
 /// \brief creates and initializes a new mounted file descriptor list entry.
 ///
 /// this can be used to create a new mounted file descriptor list, add another link to an existing list, etc.

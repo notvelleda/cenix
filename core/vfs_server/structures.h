@@ -3,7 +3,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "sys/kernel.h"
-#include "sys/types.h"
 
 #define PROCESS_DATA_NODE_SLOT 4
 
@@ -68,48 +67,11 @@
 #define MOUNTED_LIST_NODE_DEPTH (INIT_NODE_DEPTH + MOUNTED_FS_BITS)
 #define MOUNTED_LIST_SLOT(index, slot) ((slot) << MOUNTED_FS_BITS | MOUNTED_LIST_NODE_ADDRESS(index))
 
-/// structure that describes a mount/bind point in the virtual filesystem
-struct mount_point {
-    /// capability space address of the previous mount point in the list
-    size_t previous;
-    /// capability space address of the next mount point in the list
-    size_t next;
-    /// how many references to this mount point exist
-    size_t references;
-    /// the filesystem that this mount point is contained in
-    size_t enclosing_filesystem;
-    /// the inode (unique identifier) of the directory that this mount point refers to
-    ino_t inode;
-    /// the index at which the mounted list info and mounted list can be found for this mount point
-    size_t mounted_list_index;
-};
-
-/// structure that describes a list of filesystems mounted on a given mount point
-struct mounted_list_info {
-    /// stores which slots in the capability node containing this structure are occupied
-    size_t used_slots;
-    /// stores which slots in the capability node containing this structure are marked with the MOUNT_CREATE flag
-    size_t create_flagged_slots;
-    /// if there are more filesystems mounted, this stores the next index that should be searched for them, or -1 otherwise
-    size_t next_index;
-};
-
 struct process_data {
     /// the address of the filesystem namespace this process uses
     size_t fs_namespace;
     /// whether this process has permission to modify its namespace
     bool can_modify_namespace;
-};
-
-#define NUM_BUCKETS 128
-
-struct fs_namespace {
-    /// how many references exist to this namespace
-    size_t references;
-    /// address of the root mount point in capability space
-    size_t root_address;
-    /// hash table containing addresses of mount points in capability space
-    size_t mount_point_addresses[NUM_BUCKETS];
 };
 
 /// stores state that gets passed around a lot between function calls to make passing and accessing it cleaner

@@ -1,6 +1,7 @@
 #include "core_io.h"
 #include "directories.h"
 #include "ipc.h"
+#include "mount_points.h"
 #include "namespaces.h"
 #include <stdbool.h>
 #include <stddef.h>

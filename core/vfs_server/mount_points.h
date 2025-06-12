@@ -5,6 +5,22 @@
 #include "structures.h"
 #include "sys/kernel.h"
 
+/// structure that describes a mount/bind point in the virtual filesystem
+struct mount_point {
+    /// capability space address of the previous mount point in the list
+    size_t previous;
+    /// capability space address of the next mount point in the list
+    size_t next;
+    /// how many references to this mount point exist
+    size_t references;
+    /// the filesystem that this mount point is contained in
+    size_t enclosing_filesystem;
+    /// the inode (unique identifier) of the directory that this mount point refers to
+    ino_t inode;
+    /// the index at which the mounted list info and mounted list can be found for this mount point
+    size_t mounted_list_index;
+};
+
 /// handles receiving a message for a mount point directory file descriptor and replying to it
 void handle_mount_point_message(const struct state *state, struct ipc_message *message);
 
