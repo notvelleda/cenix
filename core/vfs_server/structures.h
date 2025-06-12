@@ -50,6 +50,24 @@
 
 #define REPLY_ENDPOINT_SLOT ((1 << THREAD_STORAGE_BITS) - 1) // the slot number of the reply endpoint to use when issuing ipc calls to filesystem servers
 
+#if __SIZEOF_POINTER__ == 2
+#define MOUNTED_LIST_ENTRY_SIZE 16
+#define MOUNTED_LIST_ENTRY_BITS 4
+#elif __SIZEOF_POINTER__ == 4
+#define MOUNTED_LIST_ENTRY_SIZE 32
+#define MOUNTED_LIST_ENTRY_BITS 5
+#elif __SIZEOF_POINTER__ == 8
+#define MOUNTED_LIST_ENTRY_SIZE 64
+#define MOUNTED_LIST_ENTRY_BITS 6
+#else
+#error unsupported pointer size
+#endif
+
+#define MOUNTED_LIST_INFO_ADDRESS(index) (((index) << INIT_NODE_DEPTH) | MOUNTED_LIST_INFO_SLOT)
+#define MOUNTED_LIST_NODE_ADDRESS(index) (((index) << INIT_NODE_DEPTH) | MOUNTED_LIST_NODE_SLOT)
+#define MOUNTED_LIST_NODE_DEPTH (INIT_NODE_DEPTH + MOUNTED_FS_BITS)
+#define MOUNTED_LIST_SLOT(index, slot) ((slot) << MOUNTED_FS_BITS | MOUNTED_LIST_NODE_ADDRESS(index))
+
 /// structure that describes a mount/bind point in the virtual filesystem
 struct mount_point {
     /// capability space address of the previous mount point in the list
@@ -62,8 +80,8 @@ struct mount_point {
     size_t enclosing_filesystem;
     /// the inode (unique identifier) of the directory that this mount point refers to
     ino_t inode;
-    /// the address in capability space of the first capability node containing directory entries mounted at this mount point
-    size_t first_node;
+    /// the index at which the mounted list info and mounted list can be found for this mount point
+    size_t mounted_list_index;
 };
 
 /// structure that describes a list of filesystems mounted on a given mount point
@@ -72,8 +90,8 @@ struct mounted_list_info {
     size_t used_slots;
     /// stores which slots in the capability node containing this structure are marked with the MOUNT_CREATE flag
     size_t create_flagged_slots;
-    // TODO: should this be part of a linked list so that more mount points than size_t has bits can be added to a given inode?
-    // i was originally thinking of something like this after all
+    /// if there are more filesystems mounted, this stores the next index that should be searched for them, or -1 otherwise
+    size_t next_index;
 };
 
 struct process_data {

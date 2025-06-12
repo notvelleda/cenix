@@ -1,6 +1,8 @@
 #include "core_io.h"
 #include "directories.h"
+#include "errno.h"
 #include "ipc.h"
+#include "mount_lists.h"
 #include "mount_points.h"
 #include "namespaces.h"
 #include "structures.h"
@@ -8,11 +10,7 @@
 #include "sys/vfs.h"
 #include "utils.h"
 
-/// \brief helper function to iterate over all filesystems in a mount point and run a callback over each.
-///
-/// this callback is passed the value of the `data` argument, the address of the root file descriptor of the filesystem,
-/// whether this filesystem was flagged with MOUNT_CREATE, and a pointer to a value that will be returned if the function returns `false`.
-/// if it returns `true`, it will continue on to the next filesystem and call the callback again, and so on and so forth
+/// small wrapper to call iterate_over_mounted_list for the mounted list corresponding to a given mount point
 static size_t iterate_over_mount_point(size_t mount_point_address, void *data, bool (*fn)(void *, size_t, bool, size_t *)) {
     // mount point lock is held throughout so that nothing wacky happens. not sure if the performance of this is especially Good but whatever
     struct mount_point *mount_point = (struct mount_point *) syscall_invoke(mount_point_address, -1, UNTYPED_LOCK, 0);
@@ -21,32 +19,10 @@ static size_t iterate_over_mount_point(size_t mount_point_address, void *data, b
         return ENOMEM;
     }
 
-    struct mounted_list_info *list = (struct mounted_list_info *) syscall_invoke(mount_point->first_node, -1, UNTYPED_LOCK, 0);
+    size_t result = iterate_over_mounted_list(mount_point->mounted_list_index, data, fn);
 
-    if (list == NULL) {
-        syscall_invoke(mount_point_address, -1, UNTYPED_UNLOCK, 0);
-        return ENOMEM;
-    }
-
-    for (int i = 0; i < sizeof(size_t) * 8; i ++) {
-        if ((list->used_slots & (1 << i)) == 0) {
-            continue;
-        }
-
-        bool is_create_flagged = (list->create_flagged_slots & (1 << i)) != 0;
-        size_t address = (i << (INIT_NODE_DEPTH + MOUNTED_FS_BITS)) | (mount_point_address & ~((1 << INIT_NODE_DEPTH) - 1)) | MOUNTED_LIST_NODE_SLOT;
-        size_t result = 0;
-
-        if (!fn(data, address, is_create_flagged, &result)) {
-            syscall_invoke(mount_point->first_node, -1, UNTYPED_UNLOCK, 0);
-            syscall_invoke(mount_point_address, -1, UNTYPED_UNLOCK, 0);
-            return result;
-        }
-    }
-
-    syscall_invoke(mount_point->first_node, -1, UNTYPED_UNLOCK, 0);
     syscall_invoke(mount_point_address, -1, UNTYPED_UNLOCK, 0);
-    return ENOENT;
+    return result;
 }
 
 /// handles FD_STAT calls for mount points
@@ -278,4 +254,50 @@ void handle_mount_point_message(const struct state *state, struct ipc_message *m
     }
 
     syscall_invoke(info_address, -1, UNTYPED_UNLOCK, 0);
+}
+
+size_t mount(struct directory_info *info, size_t directory_fd, uint8_t flags) {
+    if (info->can_modify_namespace == false) {
+        return EPERM;
+    }
+
+    size_t namespace_address = (info->namespace_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
+    struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(namespace_address, -1, UNTYPED_LOCK, 0);
+
+    if (namespace == NULL) {
+        return ENOMEM;
+    }
+
+    // TODO: handle flags properly so existing mount points can be added on to
+    // TODO: if directory_fd is a proxied endpoint, copy the original endpoint to prevent any Wackiness
+    // TODO: should other mount points be allowed to be mounted like this? it would be nice but it would probably also lead to issues and would require
+    // circular reference checking (to prevent multiple vfs worker threads from locking up permanently)
+
+    size_t mounted_list_index = create_mounted_list_entry();
+
+    if (mounted_list_index == -1) {
+        syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
+        return ENOMEM;
+    }
+
+    size_t result = mounted_list_insert(mounted_list_index, directory_fd, flags);
+
+    if (result != 0) {
+        syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
+        return result;
+    }
+
+    struct mount_point mount_point = {
+        .previous = -1,
+        .next = -1,
+        .references = 1,
+        .enclosing_filesystem = info->enclosing_filesystem,
+        .inode = info->inode,
+        .mounted_list_index = mounted_list_index
+    };
+
+    result = add_mount_point_to_namespace(namespace, &mount_point);
+    syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
+
+    return result;
 }

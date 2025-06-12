@@ -4,6 +4,7 @@
 #include "namespaces.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h>
 #include "structures.h"
 #include "sys/kernel.h"
 #include "sys/vfs.h"
@@ -178,45 +179,21 @@ size_t set_up_filesystem_for_process(const struct state *state, pid_t creator_pi
     return result;
 }
 
-size_t mount(struct directory_info *info, size_t directory_fd, uint8_t flags) {
-    if (info->can_modify_namespace == false) {
-        return EPERM;
-    }
-
-    size_t namespace_address = (info->namespace_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
-    struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(namespace_address, -1, UNTYPED_LOCK, 0);
-
-    if (namespace == NULL) {
-        return ENOMEM;
-    }
-
-    // TODO: handle flags properly so existing mount points can be added on to
-    // TODO: figure out how the hell directory_fd should be stored
-    // TODO: if directory_fd is a proxied endpoint, copy the original endpoint to prevent any Wackiness
-    // TODO: should other mount points be allowed to be mounted like this? it would be nice but it would probably also lead to issues and would require
-    // circular reference checking (to prevent multiple vfs worker threads from locking up permanently)
-
+size_t add_mount_point_to_namespace(struct fs_namespace *namespace, struct mount_point *mount_point) {
     size_t mount_point_address = alloc_structure(USED_MOUNT_POINT_IDS_SLOT, MOUNT_POINTS_NODE_SLOT, MAX_MOUNT_POINTS, sizeof(struct mount_point));
 
     if (mount_point_address == -1) {
-        syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
         return ENOMEM;
     }
 
-    struct mount_point *mount_point = (struct mount_point *) syscall_invoke(mount_point_address, -1, UNTYPED_LOCK, 0);
+    struct mount_point *new_mount_point = (struct mount_point *) syscall_invoke(mount_point_address, -1, UNTYPED_LOCK, 0);
 
-    if (mount_point == NULL) {
+    if (new_mount_point == NULL) {
         free_structure(USED_MOUNT_POINT_IDS_SLOT, MOUNT_POINTS_NODE_SLOT, MAX_MOUNT_POINTS, mount_point_address);
-        syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
         return ENOMEM;
     }
 
-    mount_point->previous = -1;
-    mount_point->next = -1;
-    mount_point->references = 1;
-    mount_point->enclosing_filesystem = info->enclosing_filesystem;
-    mount_point->inode = info->inode;
-    mount_point->first_node = 0;
+    memcpy(new_mount_point, mount_point, sizeof(struct mount_point));
 
     if (namespace->root_address == -1) {
         // if the root address of this namespace hasn't been set yet, there's no way for this mount call to be mounting anything but the root filesystem.
@@ -226,7 +203,7 @@ size_t mount(struct directory_info *info, size_t directory_fd, uint8_t flags) {
         // TODO: should the hash value take something else into account as well (maybe the containing filesystem?) in order to reduce
         // collisions between, for example, sequentially assigned inodes in multiple basic filesystem implementations?
         // or should that be left up to the filesystem drivers themselves
-        uint8_t bucket = hash(info->inode) % NUM_BUCKETS;
+        uint8_t bucket = hash(new_mount_point->inode) % NUM_BUCKETS;
         size_t *bucket_value = &namespace->mount_point_addresses[bucket];
 
         if (*bucket_value == -1) {
@@ -236,7 +213,6 @@ size_t mount(struct directory_info *info, size_t directory_fd, uint8_t flags) {
 
             if (other_mount_point == NULL) {
                 free_structure(USED_MOUNT_POINT_IDS_SLOT, MOUNT_POINTS_NODE_SLOT, MAX_MOUNT_POINTS, mount_point_address);
-                syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
                 return ENOMEM;
             }
 
@@ -244,13 +220,12 @@ size_t mount(struct directory_info *info, size_t directory_fd, uint8_t flags) {
 
             syscall_invoke(*bucket_value, -1, UNTYPED_UNLOCK, 0); // TODO: is unlocking it here ok? could this cause problems?
 
-            mount_point->next = *bucket_value;
+            new_mount_point->next = *bucket_value;
             *bucket_value = mount_point_address;
         }
     }
 
     syscall_invoke(mount_point_address, -1, UNTYPED_UNLOCK, 0);
-    syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
 
     return 0;
 }
