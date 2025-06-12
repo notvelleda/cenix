@@ -1,4 +1,5 @@
 #include "assert.h"
+#include "capabilities_layout.h"
 #include "errno.h"
 #include <stdbool.h>
 #include <stddef.h>

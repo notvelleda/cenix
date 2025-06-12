@@ -1,3 +1,4 @@
+#include "capabilities_layout.h"
 #include "core_io.h"
 #include "directories.h"
 #include "ipc.h"
@@ -28,9 +29,6 @@ static size_t open_file_callback(void *data, size_t slot) {
         return -1;
     }
 }
-
-#define DIRECTORY_ADDRESS(id) (((id) << INIT_NODE_DEPTH) | DIRECTORY_NODE_SLOT)
-#define DIRECTORY_INFO_ADDRESS(id) (((id) << INIT_NODE_DEPTH) | DIRECTORY_INFO_SLOT)
 
 static size_t open_mount_point(const struct state *state, size_t opened_file_address, size_t mount_point_address, struct directory_info *info, ino_t inode, size_t reply_address) {
     size_t opened_file_slot = opened_file_address >> INIT_NODE_DEPTH;

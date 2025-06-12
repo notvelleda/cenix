@@ -1,3 +1,4 @@
+#include "capabilities_layout.h"
 #include "core_io.h"
 #include "directories.h"
 #include "ipc.h"

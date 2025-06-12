@@ -1,3 +1,4 @@
+#include "capabilities_layout.h"
 #include "errno.h"
 #include "mount_lists.h"
 #include "structures.h"

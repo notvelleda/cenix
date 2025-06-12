@@ -1,3 +1,4 @@
+#include "capabilities_layout.h"
 #include "structures.h"
 #include "sys/kernel.h"
 #include "utils.h"
