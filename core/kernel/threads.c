@@ -162,7 +162,7 @@ static void thread_destructor(struct capability *slot) {
         }
     }
 
-    used_thread_ids[thread->thread_id / PTR_BITS] &= ~(1 << (thread->thread_id % PTR_BITS)); // release thread id
+    used_thread_ids[thread->thread_id / PTR_BITS] &= ~((size_t) 1 << (thread->thread_id % PTR_BITS)); // release thread id
 }
 
 void on_thread_moved(void *resource) {
@@ -217,9 +217,9 @@ struct thread_capability *alloc_thread(struct heap *heap) {
         }
 
         int bit;
-        for (bit = 0; bit < PTR_BITS && (used_thread_ids[i] & (1 << bit)) != 0; bit ++);
+        for (bit = 0; bit < PTR_BITS && (used_thread_ids[i] & ((size_t) 1 << bit)) != 0; bit ++);
 
-        used_thread_ids[i] |= (1 << bit);
+        used_thread_ids[i] |= ((size_t) 1 << bit);
 
         thread_id = i * PTR_BITS + bit;
         has_thread_id = true;
@@ -244,7 +244,7 @@ struct thread_capability *alloc_thread(struct heap *heap) {
 #ifdef DEBUG_THREADS
         printk("alloc_thread: heap_alloc for new thread failed!\n");
 #endif
-        used_thread_ids[thread_id / PTR_BITS] &= ~(1 << (thread_id % PTR_BITS)); // release thread id
+        used_thread_ids[thread_id / PTR_BITS] &= ~((size_t) 1 << (thread_id % PTR_BITS)); // release thread id
         return NULL;
     }
 

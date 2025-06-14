@@ -65,7 +65,7 @@ size_t mounted_list_insert(size_t index, size_t directory_fd, uint8_t mount_flag
             result = 0;
 
             int slot_index;
-            for (slot_index = 0; slot_index < sizeof(size_t) * 8 && (info->used_slots & (1 << slot_index)) != 0; slot_index ++);
+            for (slot_index = 0; slot_index < sizeof(size_t) * 8 && (info->used_slots & ((size_t) 1 << slot_index)) != 0; slot_index ++);
 
             const struct node_move_args move_args = {
                 .source_address = directory_fd,
@@ -76,10 +76,10 @@ size_t mounted_list_insert(size_t index, size_t directory_fd, uint8_t mount_flag
             result = syscall_invoke(MOUNTED_LIST_NODE_ADDRESS(index), MOUNTED_LIST_NODE_DEPTH, NODE_MOVE, (size_t) &move_args);
 
             if (result == 0) {
-                info->used_slots |= (1 << slot_index);
+                info->used_slots |= ((size_t) 1 << slot_index);
 
                 if (mount_flags & MOUNT_CREATE) {
-                    info->create_flagged_slots |= (1 << slot_index);
+                    info->create_flagged_slots |= ((size_t) 1 << slot_index);
                 }
             }
         }
@@ -103,11 +103,11 @@ size_t iterate_over_mounted_list(size_t index, void *data, bool (*fn)(void *, si
         }
 
         for (int i = 0; i < sizeof(size_t) * 8; i ++) {
-            if ((info->used_slots & (1 << i)) == 0) {
+            if ((info->used_slots & ((size_t) 1 << i)) == 0) {
                 continue;
             }
 
-            bool is_create_flagged = (info->create_flagged_slots & (1 << i)) != 0;
+            bool is_create_flagged = (info->create_flagged_slots & ((size_t) 1 << i)) != 0;
             size_t result = 0;
 
             if (!fn(data, MOUNTED_LIST_SLOT(index, i), is_create_flagged, &result)) {

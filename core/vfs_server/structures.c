@@ -159,9 +159,9 @@ size_t find_slot_for(size_t used_slots_address, size_t max_items, void *data, si
         }
 
         int bit_index;
-        for (bit_index = 0; bit_index < sizeof(size_t) * 8 && (value & (1 << bit_index)) != 0; bit_index ++);
+        for (bit_index = 0; bit_index < sizeof(size_t) * 8 && (value & ((size_t) 1 << bit_index)) != 0; bit_index ++);
 
-        *pointer |= (1 << bit_index);
+        *pointer |= ((size_t) 1 << bit_index);
 
         id = i * SIZE_BITS + bit_index;
         break;
@@ -171,7 +171,7 @@ size_t find_slot_for(size_t used_slots_address, size_t max_items, void *data, si
 
     if (result == -1) {
         // mark the id as free if the function fails
-        pointer[id / SIZE_BITS] &= ~(1 << (id % SIZE_BITS));
+        pointer[id / SIZE_BITS] &= ~((size_t) 1 << (id % SIZE_BITS));
     }
 
     syscall_invoke(used_slots_address, -1, UNTYPED_UNLOCK, 0);
@@ -191,7 +191,7 @@ size_t mark_slot_unused(size_t used_slots_address, size_t max_items, size_t slot
         return unlock_result != 0 ? unlock_result : 1;
     }
 
-    pointer[slot_number / SIZE_BITS] &= ~(1 << (slot_number % SIZE_BITS));
+    pointer[slot_number / SIZE_BITS] &= ~((size_t) 1 << (slot_number % SIZE_BITS));
 
     return syscall_invoke(used_slots_address, -1, UNTYPED_UNLOCK, 0);
 }

@@ -69,16 +69,16 @@ pid_t allocate_pid(void) {
     pid_t pid = 0;
 
     for (int i = 0; i < PID_MAX / 32; i ++, pointer ++) {
-        uint32_t value = *pointer;
+        uint32_t value = *pointer; // TODO: should this be a size_t?
 
         if (value == 0xffffffff) {
             continue;
         }
 
         int bit_index;
-        for (bit_index = 0; bit_index < 32 && (value & (1 << bit_index)) != 0; bit_index ++);
+        for (bit_index = 0; bit_index < 32 && (value & ((uint32_t) 1 << bit_index)) != 0; bit_index ++);
 
-        *pointer |= (1 << bit_index);
+        *pointer |= ((uint32_t) 1 << bit_index);
 
         pid = i * 32 + bit_index;
         break;
@@ -92,7 +92,7 @@ pid_t allocate_pid(void) {
 void release_pid(pid_t pid) {
     uint32_t *pointer = (uint32_t *) syscall_invoke(PID_SET_SLOT, -1, UNTYPED_LOCK, 0);
 
-    pointer[pid / 32] &= ~(1 << (pid % 32));
+    pointer[pid / 32] &= ~((uint32_t) 1 << (pid % 32));
 
     syscall_invoke(PID_SET_SLOT, -1, UNTYPED_UNLOCK, 0);
 }

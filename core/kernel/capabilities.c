@@ -144,7 +144,7 @@ void update_capability_addresses(struct capability *slot, const struct absolute_
         header->nested_nodes = nesting;
 
         struct capability *slot_in_node = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header));
-        for (int i = 0; i < (1 << header->slot_bits); i ++, slot_in_node ++) {
+        for (size_t i = 0; i < ((size_t) 1 << header->slot_bits); i ++, slot_in_node ++) {
             if (slot_in_node->handlers == NULL) {
                 continue;
             }
@@ -234,7 +234,7 @@ static size_t node_copy(size_t address, size_t depth, struct capability *slot, s
     const struct capability_node_header *header = (struct capability_node_header *) slot->resource;
 
     // make sure slot id is valid
-    if (args->dest_slot >= 1 << header->slot_bits) {
+    if (args->dest_slot >= (size_t) 1 << header->slot_bits) {
         return EINVAL;
     }
 
@@ -286,7 +286,7 @@ static size_t node_move(size_t address, size_t depth, struct capability *slot, s
     const struct capability_node_header *header = (struct capability_node_header *) slot->resource;
 
     // make sure slot id is valid
-    if (args->dest_slot >= 1 << header->slot_bits) {
+    if (args->dest_slot >= (size_t) 1 << header->slot_bits) {
         return EINVAL;
     }
 
@@ -323,7 +323,7 @@ static size_t node_delete(size_t address, size_t depth, struct capability *slot,
     struct capability_node_header *header = (struct capability_node_header *) slot->resource;
 
     // make sure slot id is valid
-    if (argument >= 1 << header->slot_bits) {
+    if (argument >= (size_t) 1 << header->slot_bits) {
         return EINVAL;
     }
 
@@ -345,7 +345,7 @@ static size_t node_revoke(size_t address, size_t depth, struct capability *slot,
     struct capability_node_header *header = (struct capability_node_header *) slot->resource;
 
     // make sure slot id is valid
-    if (argument >= 1 << header->slot_bits) {
+    if (argument >= (size_t) 1 << header->slot_bits) {
         return EINVAL;
     }
 
@@ -387,7 +387,7 @@ static void on_node_moved(void *resource) {
     struct capability_node_header *header = (struct capability_node_header *) resource;
     struct capability *slot = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header));
 
-    for (int i = 0; i < (1 << header->slot_bits); i ++, slot ++) {
+    for (size_t i = 0; i < ((size_t) 1 << header->slot_bits); i ++, slot ++) {
         if (slot->handlers != NULL) {
             update_capability_references(slot);
         }
@@ -398,7 +398,7 @@ static void node_destructor(struct capability *node) {
     const struct capability_node_header *header = (struct capability_node_header *) node->resource;
     struct capability *slot = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header));
 
-    for (int i = 0; i < (1 << header->slot_bits); i ++, slot ++) {
+    for (size_t i = 0; i < ((size_t) 1 << header->slot_bits); i ++, slot ++) {
         if (slot->handlers != NULL) {
             merge_derivation_lists(slot);
             delete_capability(slot);
@@ -414,7 +414,12 @@ struct invocation_handlers node_handlers = {
 };
 
 void *alloc_node(struct heap *heap, size_t slot_bits) {
-    size_t total_slots = 1 << slot_bits;
+    // sanity check, limits the number of possible slots in a capability node to ensure (size_t) 1 << slot_bits won't overflow
+    if (slot_bits >= sizeof(size_t) * 8) {
+        slot_bits = (sizeof(size_t) * 8) - 1;
+    }
+
+    size_t total_slots = (size_t) 1 << slot_bits;
 
     size_t slots_start = sizeof(struct capability_node_header);
     size_t slots_size = total_slots * sizeof(struct capability);
@@ -424,7 +429,7 @@ void *alloc_node(struct heap *heap, size_t slot_bits) {
         return NULL;
     }
 
-    new->slot_bits = slot_bits;
+    new->slot_bits = slot_bits; // this is guaranteed to fit within a uint8_t due to the above sanity check. if (sizeof(size_t) * 8) - 1 is greater than 256 then you have other problems really
     new->nested_nodes = 1; // to be filled out in populate_capability_slot() if this isn't the kernel root node
 
     struct capability *slots = (struct capability *) ((uint8_t *) new + slots_start);
@@ -442,14 +447,14 @@ bool look_up_capability(struct capability *root, size_t address, size_t depth, s
 
     bool use_first_non_node = depth == -1 ? true : false;
 
-    address &= ((1 << depth) - 1); // make sure there aren't any invalid bits outside of the address
+    address &= (((size_t) 1 << depth) - 1); // make sure there aren't any invalid bits outside of the address
 
     bool should_unlock = heap_lock(root->resource);
     struct capability_node_header *header = (struct capability_node_header *) root->resource;
     size_t actual_depth = 0;
 
     while (1) {
-        size_t index_in_node = address & ((1 << header->slot_bits) - 1);
+        size_t index_in_node = address & (((size_t) 1 << header->slot_bits) - 1);
         struct capability *slot = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + index_in_node * sizeof(struct capability));
 
         if ((use_first_non_node && slot->handlers != &node_handlers) || depth == header->slot_bits) {
@@ -529,8 +534,8 @@ bool look_up_capability_absolute(const struct absolute_capability_address *addre
 #if 0
 static void list_capability_node_slots(struct capability_node_header *header) {
     int last_empty = -1;
-    int i = 0;
-    for (; i < (1 << header->slot_bits); i ++) {
+    size_t i = 0;
+    for (; i < ((size_t) 1 << header->slot_bits); i ++) {
         const struct capability *slot = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header) + i * sizeof(struct capability));
 
         if (slot->handlers != NULL) {
@@ -639,7 +644,7 @@ static uint8_t nesting_depth_search(const struct capability *node) {
     uint8_t nesting_value = header->nested_nodes;
 
     const struct capability *slot = (struct capability *) ((uint8_t *) header + sizeof(struct capability_node_header));
-    for (int i = 0; i < (1 << header->slot_bits); i ++, slot ++) {
+    for (size_t i = 0; i < ((size_t) 1 << header->slot_bits); i ++, slot ++) {
         if (slot->handlers != &node_handlers) {
             continue;
         }

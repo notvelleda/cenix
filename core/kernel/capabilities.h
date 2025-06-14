@@ -133,7 +133,7 @@ struct capability_node_header {
     /// \brief the size of this node, stored as the amount of bits that size takes up
     ///
     /// this value can be converted to the number of slots in this capability node by shifting 1 left by it (`1 << slot_bits`)
-    size_t slot_bits;
+    uint8_t slot_bits;
     uint8_t nested_nodes;
 };
 
