@@ -1,5 +1,8 @@
 .include "$(PROJECT_ROOT)/makefiles/out-of-source.mk"
 
+# this is the set of common C compiler flags that are enforced for all compilations in this project, as these warnings are Very Important and shouldn't be forgotten
+CFLAGS += -Wall -Wextra -Wsign-conversion
+
 .PHONY: clean
 
 .c.o:
