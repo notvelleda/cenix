@@ -11,12 +11,17 @@ struct thread_capability {
 
 extern struct invocation_handlers thread_handlers;
 static inline struct thread_capability *alloc_thread(struct heap *heap) {
+    (void) heap;
+
     return NULL;
 }
 
 #include "scheduler.h"
 
 static inline bool look_up_thread_by_id(uint16_t thread_id, uint8_t bucket_number, struct thread_capability **thread) {
+    (void) thread_id;
+    (void) bucket_number;
+
     *thread = scheduler_state.current_thread;
     return heap_lock(scheduler_state.current_thread);
 }

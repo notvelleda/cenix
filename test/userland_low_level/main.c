@@ -11,36 +11,75 @@
 // weak linked stubs that programs under test can override
 
 __attribute__((weak)) size_t read_registers(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+    (void) argument;
+
     return (size_t) ENOSYS;
 }
 
 __attribute__((weak)) size_t write_registers(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+    (void) argument;
+
     return (size_t) ENOSYS;
 }
 
 __attribute__((weak)) size_t resume(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+    (void) argument;
+
     return (size_t) ENOSYS;
 }
 
 __attribute__((weak)) size_t suspend(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+    (void) argument;
+
     return (size_t) ENOSYS;
 }
 
 __attribute__((weak)) size_t set_root_node(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+    (void) argument;
+
     return (size_t) ENOSYS;
 }
 
-__attribute__((weak)) void thread_destructor(struct capability *slot) {}
+__attribute__((weak)) void thread_destructor(struct capability *slot) {
+    (void) slot;
+}
 
 __attribute__((weak)) size_t endpoint_send(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+    (void) argument;
+
     return (size_t) ENOSYS;
 }
 
 __attribute__((weak)) size_t endpoint_receive(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+    (void) argument;
+
     return (size_t) ENOSYS;
 }
 
-__attribute__((weak)) void endpoint_destructor(struct capability *slot) {}
+__attribute__((weak)) void endpoint_destructor(struct capability *slot) {
+    (void) slot;
+}
 
 __attribute__((weak)) void syscall_yield(void) {}
 
@@ -97,7 +136,7 @@ void setUp(void) {
 
     thread->root_capability.flags = CAP_FLAG_IS_HEAP_MANAGED | CAP_FLAG_ORIGINAL;
 
-    thread->root_capability.access_rights = -1; // all rights given
+    thread->root_capability.access_rights = UINT8_MAX; // all rights given
 
     LIST_INIT_NO_CONTAINER(&thread->root_capability, resource_list);
 
