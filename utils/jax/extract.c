@@ -1,4 +1,5 @@
 #include "endianness.h"
+#include <inttypes.h>
 #include "jax.h"
 #include <limits.h>
 #include <stdbool.h>
@@ -113,6 +114,13 @@ read_error:
         other_fields.group = u16_to_ne(other_fields.group);
         other_fields.file_size = i64_to_ne(other_fields.file_size);
 
+        if (other_fields.file_size < 0) {
+            // since for some reason file size is allowed to be negative (what purpose does that serve?) this serves as a sanity check for that.
+            // this allows all
+            fprintf(stderr, "%s: ignoring contents of file \"%s\" with invalid size %" PRId64 ", things may break", program_name, name, other_fields.file_size);
+            other_fields.file_size = 0;
+        }
+
         if (record_type == TYPE_REGULAR) {
             // create a regular file
             FILE *output_file = fopen(name, "w");
@@ -123,7 +131,7 @@ read_error:
             }
 
             for (; other_fields.file_size >= 0; other_fields.file_size -= BUFSIZ) {
-                size_t rw_size = other_fields.file_size > BUFSIZ ? BUFSIZ : other_fields.file_size;
+                size_t rw_size = other_fields.file_size > BUFSIZ ? BUFSIZ : (size_t) other_fields.file_size; // conversion to size_t is safe here because the minimum bound was set above
 
                 if (fread(buffer, rw_size, 1, archive) != 1) {
                     goto read_error;
@@ -138,13 +146,22 @@ read_error:
             fclose(output_file);
         } else if (record_type == TYPE_LINK) {
             // create a symlink
-            char *link_target = malloc(other_fields.file_size + 1);
+
+#if __SIZEOF_POINTER__ < 8
+            // sanity check to prevent overflow on non 64 bit platforms
+            if (other_fields.file_size >= (int64_t) SIZE_MAX) {
+                fprintf(stderr, "%s: symlink target path too big, cannot continue\n", program_name);
+                return 1;
+            }
+#endif
+
+            char *link_target = malloc((size_t) other_fields.file_size + 1);
 
             if (link_target == NULL) {
                 goto malloc_failed;
             }
 
-            if (fread(link_target, other_fields.file_size, 1, archive) != 1) {
+            if (fread(link_target, (size_t) other_fields.file_size, 1, archive) != 1) {
                 goto read_error;
             }
 

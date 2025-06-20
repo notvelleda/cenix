@@ -95,7 +95,7 @@ int main(int argc, char **argv) {
             break;
         }
     } else {
-        const char *open_mode;
+        const char *open_mode = "";
 
         switch (mode) {
         case MODE_CREATE:

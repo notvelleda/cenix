@@ -18,6 +18,8 @@ FILE *global_archive;
 bool global_is_verbose;
 
 static int nftw_visit(const char *name, const struct stat *file_stat, int type, struct FTW *ftw_struct) {
+    (void) ftw_struct;
+
     if (type == FTW_DNR) {
         fprintf(stderr, "%s: failed to read directory \"%s\"\n", global_program_name, name);
         return 0; // TODO: should this fail?
@@ -90,7 +92,7 @@ write_error:
         }
 
         for (int64_t file_size = file_stat->st_size; file_size >= 0; file_size -= BUFSIZ) {
-            size_t rw_size = file_size > BUFSIZ ? BUFSIZ : file_size;
+            size_t rw_size = file_size > BUFSIZ ? BUFSIZ : (size_t) file_size; // file_size is guaranteed to be positive due to the loop condition
 
             if (fread(global_buffer, rw_size, 1, file) != 1) {
                 fprintf(stderr, "%s: failed to read from file\n", global_program_name);
@@ -104,16 +106,22 @@ write_error:
 
         fclose(file);
     } else if (type == FTW_SL) {
-        char *link_target = malloc(file_stat->st_size);
+        if (file_stat->st_size < 0) {
+            // TODO: sanity check the upper bound of this on platforms where that's an issue
+            fprintf(stderr, "%s: invalid symlink size %ld for file \"%s\"\n", global_program_name, file_stat->st_size, name);
+            return 1;
+        }
+
+        char *link_target = malloc((size_t) file_stat->st_size);
 
         if (link_target == NULL) {
             fprintf(stderr, "%s: failed to allocate memory\n", global_program_name);
             return 1;
         }
 
-        ssize_t bytes_read = readlink(name, link_target, file_stat->st_size);
+        ssize_t bytes_read = readlink(name, link_target, (size_t) file_stat->st_size);
 
-        if (bytes_read == -1) {
+        if (bytes_read < 0) { // this could be a check against -1 but realistically this value shouldn't be negative at all
             free(link_target);
             perror("failed to read link");
             return 1;
@@ -128,7 +136,7 @@ write_error:
             }
         }
 
-        if (fwrite(link_target, bytes_read, 1, global_archive) != 1) {
+        if (fwrite(link_target, (size_t) bytes_read, 1, global_archive) != 1) { // cast to size_t is valid here because of the above check
             goto write_error;
         }
 

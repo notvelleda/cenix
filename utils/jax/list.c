@@ -1,4 +1,5 @@
 #include "endianness.h"
+#include <inttypes.h>
 #include "jax.h"
 #include <limits.h>
 #include <stdint.h>
@@ -167,7 +168,7 @@ read_error:
             mode_string[i * 3 + 3] = triplet & 0b001 ? 'x' : '-';
         }
 
-        printf("%s %d/%d ", mode_string, other_fields.owner, other_fields.group);
+        printf("%s %" PRId16 "/%" PRId16 " ", mode_string, other_fields.owner, other_fields.group);
 
         int padding_characters_required = 17 - num_digits(other_fields.owner) - num_digits(other_fields.group) - num_digits(other_fields.file_size);
         for (int i = 0; i < padding_characters_required; i ++) {
@@ -179,7 +180,7 @@ read_error:
         char date_string[17] = {};
         strftime(date_string, 17, "%C%y-%m-%d %H:%M:%S", localtime_r(&timestamp_epoch, &timestamp));
 
-        printf("%lld %s ", other_fields.file_size, date_string);
+        printf("%" PRId64 " %s ", other_fields.file_size, date_string);
 
         fseek(archive, name_position, SEEK_SET); // TODO: do this with SEEK_CUR for best possible compatibility
 
