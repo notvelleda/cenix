@@ -33,7 +33,7 @@ bool jax_next_file(struct jax_iterator *iter, struct jax_file *file) {
         return false;
     }
 
-    file->type = iter->start[0];
+    file->type = (char) iter->start[0];
     file->name_length = u16_to_ne(iter->start + 1);
     file->name = (const char *) iter->start + 3;
     iter->start += file->name_length + 3;

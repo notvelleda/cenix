@@ -7,10 +7,11 @@
 #else
 #include "../printf/printf.h"
 #include <stddef.h>
+#include <stdint.h>
 #include "sys/kernel.h"
 
 static inline size_t puts(const char *str) {
-    return syscall_invoke(1, -1, DEBUG_PRINT, (size_t) str);
+    return syscall_invoke(1, SIZE_MAX, DEBUG_PRINT, (size_t) str);
 }
 #endif
 

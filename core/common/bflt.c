@@ -20,7 +20,7 @@ bool bflt_verify(const struct bflt_header *header) {
     }
 
     if (header->version != 4) {
-        printf("bflt_verify: binary has an unsupported version of %d\n", header->version);
+        printf("bflt_verify: binary has an unsupported version of %ld\n", header->version);
         return false;
     }
 
@@ -69,7 +69,7 @@ void bflt_load(struct bflt_header *header, void *allocation, struct thread_regis
     // zero out bss
     memset(data_end, 0, header->bss_end - header->data_end);
 
-    printf("bflt_load: %d relocation(s) at offset %d\n", header->num_relocations, header->relocations_start);
+    printf("bflt_load: %ld relocation(s) at offset %ld\n", header->num_relocations, header->relocations_start);
 
     // apply all the relocations
     const uint32_t *relocations_start = (uint32_t *) ((uint8_t *) header + header->relocations_start);
@@ -94,10 +94,10 @@ void bflt_load(struct bflt_header *header, void *allocation, struct thread_regis
 
     if ((header->flags & BFLT_FLAG_GOTPIC) != 0) {
         uint32_t *got = (uint32_t *) data_start;
-        printf("bflt_load: GOT is at address 0x%x\n", got);
+        printf("bflt_load: GOT is at address 0x%zx\n", (size_t) got);
 
-        int i = 0;
-        for (; *got != -1; got ++, i ++) {
+        size_t i = 0;
+        for (; *got != UINT32_MAX; got ++, i ++) {
             //uint32_t old = *got;
             if (*got < header->data_start - sizeof(struct bflt_header)) {
                 // this offset is in the text segment
@@ -109,7 +109,7 @@ void bflt_load(struct bflt_header *header, void *allocation, struct thread_regis
             //printf("entry %d is 0x%08x from 0x%08x\n", i, *got, old);
         }
 
-        printf("bflt_load: fixed up %d GOT entries\n", i);
+        printf("bflt_load: fixed up %zu GOT entries\n", i);
     }
 
     size_t entry_point;
@@ -120,7 +120,7 @@ void bflt_load(struct bflt_header *header, void *allocation, struct thread_regis
         entry_point = (size_t) allocation + header->entry_point - sizeof(struct bflt_header);
     }
 
-    printf("bflt_load: entry point is 0x%x (offset %d)\n", entry_point, header->entry_point);
+    printf("bflt_load: entry point is 0x%zx (offset %ld)\n", entry_point, header->entry_point);
     set_program_counter(registers, entry_point);
 
     // TODO: is this ok on all platforms? will ones be supported without a full descending stack?
