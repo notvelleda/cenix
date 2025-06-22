@@ -2,6 +2,7 @@
 #include "debug.h"
 #include "errno.h"
 #include "heap.h"
+#include "inttypes.h"
 #include "ipc.h"
 #include "linked_list.h"
 #include "scheduler.h"
@@ -103,16 +104,16 @@ void delete_capability(struct capability *to_delete) {
 
 #ifdef DEBUG
 void print_capability_lists(struct capability *capability) {
-    printk("this capability: 0x%x\n", capability);
+    printk("this capability: 0x%" PRIxPTR "\n", (size_t) capability);
     struct capability *c = capability->resource_list.start;
-    printk("resource start: 0x%x, end: 0x%x\n", c, capability->resource_list.end);
+    printk("resource start: 0x%" PRIxPTR ", end: 0x%" PRIxPTR "\n", (size_t) c, (size_t) capability->resource_list.end);
     for (; c != NULL; c = c->resource_list.next) {
-        printk(" - 0x%x (start 0x%x, end 0x%x)\n", c, c->resource_list.start, c->resource_list.end);
+        printk(" - 0x%" PRIxPTR " (start 0x%" PRIxPTR ", end 0x%" PRIxPTR ")\n", (size_t) c, (size_t) c->resource_list.start, (size_t) c->resource_list.end);
     }
     c = capability->derivation_list.start;
-    printk("derivation start: 0x%x, end: 0x%x\n", c, capability->derivation_list.end);
+    printk("derivation start: 0x%" PRIxPTR ", end: 0x%" PRIxPTR "\n", (size_t) c, (size_t) capability->derivation_list.end);
     for (; c != NULL; c = c->derivation_list.next) {
-        printk(" - 0x%x (start 0x%x, end 0x%x)\n", c, c->derivation_list.start, c->derivation_list.end);
+        printk(" - 0x%" PRIxPTR " (start 0x%" PRIxPTR ", end 0x%" PRIxPTR ")\n", (size_t) c, (size_t) c->derivation_list.start, (size_t) c->derivation_list.end);
     }
 }
 #endif
@@ -166,7 +167,7 @@ void copy_capability(struct capability *source, struct capability *dest, size_t 
     printk("copy_capability: source: 0x%x, dest: 0x%x\n", source, dest);
 #endif
 
-    dest->flags &= ~(CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED);
+    dest->flags &= (uint8_t) ~(CAP_FLAG_ORIGINAL | CAP_FLAG_BADGED);
 
     dest->address.address = address;
     dest->address.depth = depth;
@@ -319,6 +320,9 @@ static size_t node_move(size_t address, size_t depth, struct capability *slot, s
 }
 
 static size_t node_delete(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+
     // resource lock/unlock is omitted here since no allocations take place
     struct capability_node_header *header = (struct capability_node_header *) slot->resource;
 
@@ -341,6 +345,9 @@ static size_t node_delete(size_t address, size_t depth, struct capability *slot,
 }
 
 static size_t node_revoke(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+
     // resource lock/unlock is omitted here since no allocations take place
     struct capability_node_header *header = (struct capability_node_header *) slot->resource;
 
@@ -433,7 +440,7 @@ void *alloc_node(struct heap *heap, size_t slot_bits) {
     new->nested_nodes = 1; // to be filled out in populate_capability_slot() if this isn't the kernel root node
 
     struct capability *slots = (struct capability *) ((uint8_t *) new + slots_start);
-    for (int i = 0; i < total_slots; i ++) {
+    for (size_t i = 0; i < total_slots; i ++) {
         (slots ++)->handlers = NULL;
     }
 
@@ -445,7 +452,7 @@ bool look_up_capability(struct capability *root, size_t address, size_t depth, s
         return false;
     }
 
-    bool use_first_non_node = depth == -1 ? true : false;
+    bool use_first_non_node = depth == SIZE_MAX ? true : false;
 
     address &= (((size_t) 1 << depth) - 1); // make sure there aren't any invalid bits outside of the address
 
@@ -564,7 +571,7 @@ size_t populate_capability_slot(struct heap *heap, size_t address, size_t depth,
 #endif
 
     if (!look_up_capability_relative(address, depth, &result)) {
-        printk("populate_capability_slot: failed to look up slot at 0x%x (%d bits)\n", address, depth);
+        printk("populate_capability_slot: failed to look up slot at 0x%" PRIxPTR " (%" PRIdPTR " bits)\n", address, depth);
 
         if ((flags & CAP_FLAG_IS_HEAP_MANAGED) != 0) {
             heap_free(heap, resource);
@@ -575,7 +582,7 @@ size_t populate_capability_slot(struct heap *heap, size_t address, size_t depth,
 
     // make sure destination slot is empty
     if (result.slot->handlers != NULL) {
-        printk("populate_capability_slot: slot at 0x%x (%d bits) isn't empty (contains %s)\n", address, depth, handlers_to_name(result.slot->handlers));
+        printk("populate_capability_slot: slot at 0x%" PRIxPTR " (%" PRIdPTR " bits) isn't empty (contains %s)\n", address, depth, handlers_to_name(result.slot->handlers));
 
         if ((flags & CAP_FLAG_IS_HEAP_MANAGED) != 0) {
             heap_free(heap, resource);
@@ -616,7 +623,7 @@ size_t populate_capability_slot(struct heap *heap, size_t address, size_t depth,
     result.slot->handlers = handlers;
     result.slot->resource = resource;
     result.slot->flags = flags | CAP_FLAG_ORIGINAL;
-    result.slot->access_rights = -1; // all rights given
+    result.slot->access_rights = UINT8_MAX; // all rights given
     LIST_INIT_NO_CONTAINER(result.slot, resource_list);
     // everything else here assumes NULL is 0
 
@@ -673,6 +680,10 @@ uint8_t get_nested_nodes_depth(const struct capability *node) {
 // TODO: wrap these in a mutex
 
 static size_t untyped_lock(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) argument;
+
     if (!heap_lock(slot->resource)) {
         printk("untyped_lock: attempted to lock a memory region twice!\n");
     }
@@ -680,11 +691,19 @@ static size_t untyped_lock(size_t address, size_t depth, struct capability *slot
 }
 
 static size_t untyped_unlock(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) argument;
+
     heap_unlock(slot->resource);
     return 0;
 }
 
 static size_t untyped_try_lock(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) argument;
+
     if (heap_lock(slot->resource)) {
         return (size_t) slot->resource;
     } else {
@@ -693,6 +712,10 @@ static size_t untyped_try_lock(size_t address, size_t depth, struct capability *
 }
 
 static size_t untyped_sizeof(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) argument;
+
     return heap_sizeof(slot->resource);
 }
 
@@ -718,7 +741,7 @@ static size_t address_space_alloc(size_t address, size_t depth, struct capabilit
     // make sure there's permission to create this kind of object
     if ((slot->access_rights & (1 << args->type)) == 0) {
         printk(
-            "address_space_alloc: capability at 0x%x (depth %d) doesn't have permission to create type %d (%s)\n",
+            "address_space_alloc: capability at 0x%" PRIxPTR " (%" PRIdPTR " bits) doesn't have permission to create type %d (%s)\n",
             address,
             depth,
             args->type,
@@ -770,7 +793,7 @@ static size_t address_space_alloc(size_t address, size_t depth, struct capabilit
     }
 
     if (resource == NULL) {
-        printk("address_space_alloc: heap allocation for type %d (%s) with size %d failed\n", args->type, type_names[args->type], args->size);
+        printk("address_space_alloc: heap allocation for type %d (%s) with size %" PRIdPTR " failed\n", args->type, type_names[args->type], args->size);
         return ENOMEM;
     }
 
@@ -805,7 +828,7 @@ void update_capability_resource(const struct absolute_capability_address *addres
 
         result.slot = &thread->root_capability;
     } else if (!look_up_capability_absolute(address, &result)) {
-        printk("update_capability_resource: couldn't locate capability at 0x%x:0x%x (%d bits)\n", address->thread_id, address->address, address->depth);
+        printk("update_capability_resource: couldn't locate capability at 0x%x:0x%" PRIxPTR " (%" PRIdPTR " bits)\n", address->thread_id, address->address, address->depth);
         return;
     }
 
@@ -830,7 +853,7 @@ size_t invoke_capability(size_t address, size_t depth, size_t handler_number, si
     struct look_up_result result;
 
     if (!look_up_capability_relative(address, depth, &result)) {
-        printk("invoke_capability: couldn't locate capability at 0x%x (%d bits) for invocation\n", address, depth);
+        printk("invoke_capability: couldn't locate capability at 0x%" PRIxPTR " (%" PRIdPTR " bits) for invocation\n", address, depth);
 
         // TODO: rethink how error values are returned here in order to prevent issues with untyped_lock invocations not returning NULL
         return ENOCAPABILITY;
@@ -840,7 +863,7 @@ size_t invoke_capability(size_t address, size_t depth, size_t handler_number, si
 
     // TODO: add guard value to invocation numbers so you can't accidentally run a different invocation than was intended
     if (handlers == NULL || handler_number >= handlers->num_handlers) {
-        printk("invoke_capability: invocation %d on capability 0x%x (%d bits, type %s) is invalid\n", handler_number, address, depth, handlers_to_name(handlers));
+        printk("invoke_capability: invocation %" PRIdPTR " on capability 0x%" PRIxPTR " (%" PRIdPTR " bits, type %s) is invalid\n", handler_number, address, depth, handlers_to_name(handlers));
         unlock_looked_up_capability(&result);
 
         // TODO: see above
@@ -848,14 +871,14 @@ size_t invoke_capability(size_t address, size_t depth, size_t handler_number, si
     }
 
 #ifdef DEBUG_CAPABILITIES
-    printk("invoke_capability: invoking %d on 0x%d (%d bits) with argument 0x%x\n", handler_number, address, depth, argument);
+    printk("invoke_capability: invoking %" PRIdPTR " on 0x%" PRIxPTR " (%" PRIdPTR " bits) with argument 0x%" PRIxPTR "\n", handler_number, address, depth, argument);
 #endif
 
     size_t return_value = handlers->handlers[handler_number](address, depth, result.slot, argument);
     unlock_looked_up_capability(&result);
 
 #ifdef DEBUG_CAPABILITIES
-    printk("invoke_capability: invocation returned 0x%x\n", return_value);
+    printk("invoke_capability: invocation returned 0x%" PRIxPTR "\n", return_value);
 #endif
 
     return return_value;

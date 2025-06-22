@@ -35,6 +35,8 @@ static uint8_t read_addr(uint8_t value) {
 void *new_stack_pointer;
 
 void _start(uint16_t screen_width, uint16_t screen_height, const char *cmdline) {
+    (void) cmdline;
+
     init_console(screen_width, screen_height);
     init_vector_table();
 

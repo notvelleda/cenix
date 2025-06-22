@@ -78,7 +78,7 @@ void main_init(struct heap *heap) {
 
     thread->root_capability.flags = CAP_FLAG_IS_HEAP_MANAGED | CAP_FLAG_ORIGINAL;
 
-    thread->root_capability.access_rights = -1; // all rights given
+    thread->root_capability.access_rights = UINT8_MAX; // all rights given
 
     LIST_INIT_NO_CONTAINER(&thread->root_capability, resource_list);
 
@@ -110,7 +110,7 @@ void main_init(struct heap *heap) {
     unlock_looked_up_capability(&result);*/
 
     // reset the current thread to NULL since it's not running yet
-    scheduler_state.current_thread->flags &= ~THREAD_CURRENTLY_RUNNING;
+    scheduler_state.current_thread->flags &= (uint8_t) ~THREAD_CURRENTLY_RUNNING;
     scheduler_state.current_thread = NULL;
 
     printk(

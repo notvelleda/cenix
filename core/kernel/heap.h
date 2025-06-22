@@ -44,10 +44,10 @@ struct heap_header {
 #define FLAG_UPDATE_FUNCTION 32
 
 #define KIND_MASK 3
-#define GET_KIND(header) (header->flags & KIND_MASK)
-#define SET_KIND(header, kind) { header->flags = (header->flags & ~KIND_MASK) | kind; }
-#define GET_OLD_KIND(header) ((header->flags >> 2) & KIND_MASK)
-#define SET_OLD_KIND(header, kind) { header->flags = (header->flags & ~(KIND_MASK << 2)) | (kind << 2); }
+#define GET_KIND(header) (header->flags & (uint8_t) KIND_MASK)
+#define SET_KIND(header, kind) { header->flags = (header->flags & (uint8_t) ~KIND_MASK) | kind; }
+#define GET_OLD_KIND(header) ((header->flags >> 2) & (uint8_t) KIND_MASK)
+#define SET_OLD_KIND(header, kind) { header->flags = (header->flags & (uint8_t) ~(KIND_MASK << 2)) | (kind << 2); }
 
 /// \brief describes part of the system's memory map for heap initialization
 ///
@@ -126,7 +126,7 @@ static inline void heap_set_update_absolute(void *ptr, void **absolute_ptr) {
     struct heap_header *header = (struct heap_header *) ((uint8_t *) ptr - sizeof(struct heap_header));
 
     // TODO: this section is probably critical, should interrupts be disabled?
-    header->flags &= ~(FLAG_CAPABILITY_RESOURCE | FLAG_UPDATE_FUNCTION);
+    header->flags &= (uint8_t) ~(FLAG_CAPABILITY_RESOURCE | FLAG_UPDATE_FUNCTION);
     header->update_ref.absolute_ptr = absolute_ptr;
 }
 
@@ -136,8 +136,8 @@ static inline void heap_set_update_function(void *ptr, void (*function)(void *))
     struct heap_header *header = (struct heap_header *) ((uint8_t *) ptr - sizeof(struct heap_header));
 
     // TODO: this section is probably critical, should interrupts be disabled?
-    header->flags &= ~FLAG_CAPABILITY_RESOURCE;
-    header->flags |= FLAG_UPDATE_FUNCTION;
+    header->flags &= (uint8_t) ~FLAG_CAPABILITY_RESOURCE;
+    header->flags |= (uint8_t) FLAG_UPDATE_FUNCTION;
     header->update_ref.function = function;
 }
 
@@ -149,7 +149,7 @@ static inline void heap_set_update_capability(void *ptr, const struct absolute_c
     struct heap_header *header = (struct heap_header *) ((uint8_t *) ptr - sizeof(struct heap_header));
 
     // TODO: this section is probably critical, should interrupts be disabled?
-    header->flags &= ~FLAG_UPDATE_FUNCTION;
-    header->flags |= FLAG_CAPABILITY_RESOURCE;
+    header->flags &= (uint8_t) ~FLAG_UPDATE_FUNCTION;
+    header->flags |= (uint8_t) FLAG_CAPABILITY_RESOURCE;
     header->update_ref.capability = *address;
 }

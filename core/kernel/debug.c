@@ -1,6 +1,10 @@
 #include "debug.h"
 
 static size_t debug_print(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
 #ifdef DEBUG
     printk("%s", (char *) argument);
 #else

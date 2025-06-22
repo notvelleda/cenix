@@ -35,18 +35,18 @@ static void mono_putchar(char c) {
 
         switch (column_offset) {
         case 0:
-            *(dest + 0) = (*(dest + 0) & ~0b11111100) | (data & 0b11111100);
+            *(dest + 0) = (*(dest + 0) & 0b00000011) | (data & 0b11111100);
             break;
         case 1:
-            *(dest + 0) = (*(dest + 0) & ~0b00000011) | (data >> 6);
-            *(dest + 1) = (*(dest + 1) & ~0b11110000) | ((data << 2) & 0b11110000);
+            *(dest + 0) = (*(dest + 0) & 0b11111100) | (data >> 6);
+            *(dest + 1) = (*(dest + 1) & 0b00001111) | ((data << 2) & 0b11110000);
             break;
         case 2:
-            *(dest + 1) = (*(dest + 1) & ~0b00001111) | (data >> 4);
-            *(dest + 2) = (*(dest + 2) & ~0b11000000) | ((data << 4) & 0b11000000);
+            *(dest + 1) = (*(dest + 1) & 0b11110000) | (data >> 4);
+            *(dest + 2) = (*(dest + 2) & 0b00111111) | ((data << 4) & 0b11000000);
             break;
         case 3:
-            *(dest + 2) = (*(dest + 2) & ~0b00111111) | (data >> 2);
+            *(dest + 2) = (*(dest + 2) & 0b11000000) | (data >> 2);
             break;
         }
     }

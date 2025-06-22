@@ -81,6 +81,9 @@ static void transfer_capabilities(
 }
 
 static size_t endpoint_send(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+
     struct ipc_message *message = (struct ipc_message *) argument;
     struct endpoint_capability *endpoint = (struct endpoint_capability *) slot->resource;
 
@@ -93,7 +96,7 @@ static size_t endpoint_send(size_t address, size_t depth, struct capability *slo
         printk("endpoint_send: unblocking thread 0x%x to receive message\n", receiving->thread_id);
 #endif
 
-        receiving->flags &= ~THREAD_BLOCKED_ON_RECEIVE;
+        receiving->flags &= (uint8_t) ~THREAD_BLOCKED_ON_RECEIVE;
         receiving->blocked_on = NULL;
 
         memcpy(&receiving->message_buffer->buffer, &message->buffer, IPC_BUFFER_SIZE);
@@ -125,6 +128,9 @@ static size_t endpoint_send(size_t address, size_t depth, struct capability *slo
 }
 
 static size_t endpoint_receive(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+
     struct ipc_message *message = (struct ipc_message *) argument;
     struct endpoint_capability *endpoint = (struct endpoint_capability *) slot->resource;
 
@@ -137,7 +143,7 @@ static size_t endpoint_receive(size_t address, size_t depth, struct capability *
         printk("endpoint_receive: unblocking thread 0x%x to send message\n", sending->thread_id);
 #endif
 
-        sending->flags &= ~THREAD_BLOCKED_ON_SEND;
+        sending->flags &= (uint8_t) ~THREAD_BLOCKED_ON_SEND;
         sending->blocked_on = NULL;
 
         memcpy(&message->buffer, &sending->message_buffer->buffer, IPC_BUFFER_SIZE);

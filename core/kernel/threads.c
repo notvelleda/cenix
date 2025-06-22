@@ -38,13 +38,16 @@ void init_threads(void) {
         LIST_INIT(thread_hash_table[i]);
     }
 
-    for (int i = 0; i < USED_THREAD_IDS_SIZE; i ++) {
+    for (unsigned int i = 0; i < USED_THREAD_IDS_SIZE; i ++) {
         used_thread_ids[i] = 0;
     }
     used_thread_ids[0] = 1; // id 0 is reserved for kernel resources
 }
 
 static size_t read_registers(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+
     struct read_write_register_args *args = (struct read_write_register_args *) argument;
 
     bool should_unlock = heap_lock(slot->resource);
@@ -61,6 +64,9 @@ static size_t read_registers(size_t address, size_t depth, struct capability *sl
 }
 
 static size_t write_registers(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+
     const struct read_write_register_args *args = (struct read_write_register_args *) argument;
 
     bool should_unlock = heap_lock(slot->resource);
@@ -78,6 +84,10 @@ static size_t write_registers(size_t address, size_t depth, struct capability *s
 }
 
 static size_t resume(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) argument;
+
     bool should_unlock = heap_lock(slot->resource);
 
     resume_thread((struct thread_capability *) slot->resource, EXEC_MODE_SUSPENDED);
@@ -90,6 +100,10 @@ static size_t resume(size_t address, size_t depth, struct capability *slot, size
 }
 
 static size_t suspend(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) argument;
+
     bool should_unlock = heap_lock(slot->resource);
 
     suspend_thread((struct thread_capability *) slot->resource, EXEC_MODE_SUSPENDED);
@@ -102,6 +116,9 @@ static size_t suspend(size_t address, size_t depth, struct capability *slot, siz
 }
 
 static size_t set_root_node(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+
     //bool should_unlock = heap_lock(slot->resource);
 
     struct thread_capability *thread = (struct thread_capability *) slot->resource;
@@ -211,12 +228,12 @@ struct thread_capability *alloc_thread(struct heap *heap) {
     bool has_thread_id = false;
 
     // allocate a new thread id for this thread
-    for (int i = 0; i < USED_THREAD_IDS_SIZE; i ++) {
+    for (unsigned int i = 0; i < USED_THREAD_IDS_SIZE; i ++) {
         if (used_thread_ids[i] == SIZE_MAX) {
             continue;
         }
 
-        int bit;
+        unsigned int bit;
         for (bit = 0; bit < PTR_BITS && (used_thread_ids[i] & ((size_t) 1 << bit)) != 0; bit ++);
 
         used_thread_ids[i] |= ((size_t) 1 << bit);

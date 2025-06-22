@@ -77,6 +77,10 @@ void heap_add_memory_block(struct heap *heap, void *start, void *end) {
     printk("heap: adding memory to heap from 0x%08x - 0x%08x\n", start, end);
 #endif
 
+    (void) heap;
+    (void) start;
+    (void) end;
+
     // TODO: this
 }
 
@@ -187,7 +191,7 @@ static void print_spaces(void) {
 #endif
 
 void *heap_alloc(struct heap *heap, size_t actual_size) {
-    size_t size = ((actual_size + sizeof(struct heap_header)) + 3) & ~3;
+    size_t size = ((actual_size + sizeof(struct heap_header)) + 3) & (size_t) ~3;
 
 #ifdef DEBUG_HEAP
     print_spaces();

@@ -119,7 +119,7 @@ found_thread:
                 printk("scheduler: saving registers for 0x%x due to preemption\n", thread);
 #endif
                 thread->registers = *registers;
-                thread->flags &= ~THREAD_CURRENTLY_RUNNING;
+                thread->flags &= (uint8_t) ~THREAD_CURRENTLY_RUNNING;
                 queue_thread(thread);
             }
 
@@ -130,7 +130,7 @@ found_thread:
             printk("scheduler: saving registers for 0x%x due to pause\n", thread);
 #endif
             thread->registers = *registers;
-            thread->flags &= ~THREAD_CURRENTLY_RUNNING;
+            thread->flags &= (uint8_t) ~THREAD_CURRENTLY_RUNNING;
             scheduler_state.current_thread = NULL;
         }
     }
