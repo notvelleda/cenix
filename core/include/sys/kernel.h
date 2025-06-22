@@ -172,6 +172,7 @@ struct ipc_message {
         size_t address;
         /// how many bits of the address field are valid and should be used to search
         /// through the calling thread's address space
+        // TODO: should this be a uint8_t? i don't see why this should be able to represent any values over sizeof(size_t) * 8
         size_t depth;
     } capabilities[IPC_CAPABILITY_SLOTS];
     /// \brief if a capability's corresponding bit here is set, it will be copied to the receiving thread instead of moved

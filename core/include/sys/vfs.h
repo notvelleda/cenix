@@ -20,6 +20,8 @@
 // TODO: how the hell will fd_unmount work???? should it check the provided file descriptor against all the mounted file descriptors to see if any of them are copies
 // of the same endpoint (this'll need a new invocation type to be added to the kernel but that's fine), then do an inode comparison? but that method is far from perfect
 
+// TODO: should the position field in FD_READ/FD_READ_FAST/FD_WRITE/FD_WRITE_FAST be 32 or 64 bit? 64 bit may be excessive on 16 bit machines but having it be only 16 bit is silly
+
 #define VFS_NEW_PROCESS 255
 
 /// if this flag is set, the new process will share its filesystem namespace with its creator
@@ -43,13 +45,13 @@
 #define OPEN_DIRECTORY 4
 
 static inline size_t vfs_call(size_t endpoint, size_t reply_endpoint, struct ipc_message *to_send, struct ipc_message *to_receive) {
-    size_t result = syscall_invoke(endpoint, -1, ENDPOINT_SEND, (size_t) to_send);
+    size_t result = syscall_invoke(endpoint, SIZE_MAX, ENDPOINT_SEND, (size_t) to_send);
 
     if (result != 0) {
         return result;
     }
 
-    result = syscall_invoke(reply_endpoint, -1, ENDPOINT_RECEIVE, (size_t) to_receive);
+    result = syscall_invoke(reply_endpoint, SIZE_MAX, ENDPOINT_RECEIVE, (size_t) to_receive);
 
     if (result != 0) {
         return result;
@@ -85,7 +87,7 @@ static inline size_t vfs_call(size_t endpoint, size_t reply_endpoint, struct ipc
 static inline size_t fd_read(size_t fd_address, size_t reply_endpoint, size_t read_buffer, size_t size, size_t position, size_t *bytes_read) {
     struct ipc_message to_send = {
         .buffer = {FD_READ},
-        .capabilities = {{reply_endpoint, -1}, {read_buffer, -1}},
+        .capabilities = {{reply_endpoint, SIZE_MAX}, {read_buffer, SIZE_MAX}},
         .to_copy = 3
     };
     struct ipc_message to_receive = {
@@ -115,7 +117,7 @@ static inline size_t fd_read_fast(size_t fd_address, size_t reply_endpoint, uint
 
     struct ipc_message to_send = {
         .buffer = {FD_READ_FAST, (uint8_t) size},
-        .capabilities = {{reply_endpoint, -1}},
+        .capabilities = {{reply_endpoint, SIZE_MAX}},
         .to_copy = 1
     };
     struct ipc_message to_receive = {
@@ -145,7 +147,7 @@ static inline size_t fd_read_fast(size_t fd_address, size_t reply_endpoint, uint
 static inline size_t fd_write(size_t fd_address, size_t reply_endpoint, size_t write_buffer, size_t size, size_t position, size_t *bytes_written) {
     struct ipc_message to_send = {
         .buffer = {FD_WRITE},
-        .capabilities = {{reply_endpoint, -1}, {write_buffer, -1}},
+        .capabilities = {{reply_endpoint, SIZE_MAX}, {write_buffer, SIZE_MAX}},
         .to_copy = 1
     };
     struct ipc_message to_receive = {
@@ -175,7 +177,7 @@ static inline size_t fd_write_fast(size_t fd_address, size_t reply_endpoint, con
 
     struct ipc_message to_send = {
         .buffer = {FD_WRITE_FAST, (uint8_t) size},
-        .capabilities = {{reply_endpoint, -1}},
+        .capabilities = {{reply_endpoint, SIZE_MAX}},
         .to_copy = 1
     };
     struct ipc_message to_receive = {
@@ -196,7 +198,7 @@ static inline size_t fd_write_fast(size_t fd_address, size_t reply_endpoint, con
 static inline size_t fd_stat(size_t fd_address, size_t reply_endpoint, struct stat *stat_buffer) {
     struct ipc_message to_send = {
         .buffer = {FD_STAT},
-        .capabilities = {{reply_endpoint, -1}},
+        .capabilities = {{reply_endpoint, SIZE_MAX}},
         .to_copy = 1
     };
     struct ipc_message to_receive = {
@@ -220,11 +222,11 @@ static inline size_t fd_stat(size_t fd_address, size_t reply_endpoint, struct st
 static inline size_t fd_open(size_t fd_address, size_t reply_endpoint, size_t name_address, size_t fd_slot, uint8_t flags, uint8_t mode) {
     struct ipc_message to_send = {
         .buffer = {FD_OPEN, flags, mode},
-        .capabilities = {{reply_endpoint, -1}, {name_address, -1}},
+        .capabilities = {{reply_endpoint, SIZE_MAX}, {name_address, SIZE_MAX}},
         .to_copy = 1 // copy the reply endpoint only (TODO: should this copy the filename too? does it matter?)
     };
     struct ipc_message to_receive = {
-        .capabilities = {{fd_slot, -1}}
+        .capabilities = {{fd_slot, SIZE_MAX}}
     };
 
     return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
@@ -238,7 +240,7 @@ static inline size_t fd_open(size_t fd_address, size_t reply_endpoint, size_t na
 static inline size_t fd_link(size_t fd_address, size_t reply_endpoint, size_t fd_to_link, size_t name_address) {
     struct ipc_message to_send = {
         .buffer = {FD_LINK},
-        .capabilities = {{reply_endpoint, -1}, {fd_to_link, -1}, {name_address, -1}},
+        .capabilities = {{reply_endpoint, SIZE_MAX}, {fd_to_link, SIZE_MAX}, {name_address, SIZE_MAX}},
         .to_copy = 1 // TODO: should the file descriptor to link and name be copied?
     };
     struct ipc_message to_receive = {
@@ -253,7 +255,7 @@ static inline size_t fd_link(size_t fd_address, size_t reply_endpoint, size_t fd
 static inline size_t fd_unlink(size_t fd_address, size_t reply_endpoint, size_t name_address) {
     struct ipc_message to_send = {
         .buffer = {FD_UNLINK},
-        .capabilities = {{reply_endpoint, -1}, {name_address, -1}},
+        .capabilities = {{reply_endpoint, SIZE_MAX}, {name_address, SIZE_MAX}},
         .to_copy = 1 // TODO: should the filename be copied?
     };
     struct ipc_message to_receive = {
@@ -268,7 +270,7 @@ static inline size_t fd_unlink(size_t fd_address, size_t reply_endpoint, size_t 
 static inline size_t fd_truncate(size_t fd_address, size_t reply_endpoint, size_t size) {
     struct ipc_message to_send = {
         .buffer = {FD_TRUNCATE},
-        .capabilities = {{reply_endpoint, -1}},
+        .capabilities = {{reply_endpoint, SIZE_MAX}},
         .to_copy = 1
     };
     struct ipc_message to_receive = {
@@ -286,7 +288,7 @@ static inline size_t fd_truncate(size_t fd_address, size_t reply_endpoint, size_
 static inline size_t fd_mount(size_t fd_address, size_t reply_endpoint, size_t directory_fd, uint8_t flags) {
     struct ipc_message to_send = {
         .buffer = {FD_MOUNT, flags},
-        .capabilities = {{reply_endpoint, -1}, {directory_fd, -1}},
+        .capabilities = {{reply_endpoint, SIZE_MAX}, {directory_fd, SIZE_MAX}},
         .to_copy = 1 // TODO: should both of these be copied?
     };
     struct ipc_message to_receive = {
@@ -301,7 +303,7 @@ static inline size_t fd_mount(size_t fd_address, size_t reply_endpoint, size_t d
 static inline size_t fd_unmount(size_t fd_address, size_t reply_endpoint, size_t to_unmount) {
     struct ipc_message to_send = {
         .buffer = {FD_UNMOUNT},
-        .capabilities = {{reply_endpoint, -1}, {to_unmount, -1}},
+        .capabilities = {{reply_endpoint, SIZE_MAX}, {to_unmount, SIZE_MAX}},
         .to_copy = 1 // TODO: should both of these be copied?
     };
     struct ipc_message to_receive = {

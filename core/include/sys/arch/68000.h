@@ -49,6 +49,8 @@ struct arguments_data {
 };
 
 static inline void start_arguments(struct arguments_data *data, struct thread_registers *registers, size_t arguments_count, size_t arguments_size_bytes) {
+    (void) arguments_count;
+
     registers->stack_pointer -= arguments_size_bytes + 4;
     data->arguments_increment = 4;
 }
