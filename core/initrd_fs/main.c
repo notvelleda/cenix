@@ -122,7 +122,7 @@ static size_t handle_read(const struct state *state, struct ipc_message *receive
 
         entry->inode = (ino_t) current_file_pointer;
 
-        size_t name_length = current_file.name_length - (file->name_length == 0 ? 0 : file->name_length - 1);
+        size_t name_length = (uint16_t) (current_file.name_length - (file->name_length == 0 ? 0 : file->name_length - 1));
         entry->name_length = (read_size - sizeof(struct vfs_directory_entry)) < name_length ? read_size - sizeof(struct vfs_directory_entry) : name_length;
 
         read_size = entry->name_length + sizeof(struct vfs_directory_entry);
@@ -131,10 +131,10 @@ static size_t handle_read(const struct state *state, struct ipc_message *receive
     } else {
         // read from the file
 
-        if (position >= file->size) {
+        if (position >= (size_t) file->size) { // this all assumes the file size is positive, but it really shouldn't be negative so it's Probably Fine™
             read_size = 0; // this case is to avoid overflow :3
-        } else if (position + read_size >= file->size) {
-            read_size = file->size - position;
+        } else if (position + read_size >= (size_t) file->size) {
+            read_size = (size_t) file->size - position;
         }
 
         memcpy(read_data, file->data + position, read_size);
@@ -185,7 +185,7 @@ static void handle_open(const struct state *state, struct ipc_message *received,
             .source_address = state->endpoint.address,
             .source_depth = state->endpoint.depth,
             .dest_slot = IPC_CAPABILITY_SLOTS + 1,
-            .access_rights = -1, // TODO: set access rights so that other processes can't listen on this endpoint
+            .access_rights = UINT8_MAX, // TODO: set access rights so that other processes can't listen on this endpoint
             .badge = (size_t) current_file_pointer,
             .should_set_badge = 1
         };
@@ -196,7 +196,7 @@ static void handle_open(const struct state *state, struct ipc_message *received,
         if (result == 0) {
             // send the newly badged endpoint back to the caller
             FD_OPEN_REPLY_FD(*reply).address = ((IPC_CAPABILITY_SLOTS + 1) << INIT_NODE_DEPTH) | state->node.address;
-            FD_OPEN_REPLY_FD(*reply).depth = -1;
+            FD_OPEN_REPLY_FD(*reply).depth = SIZE_MAX;
             FD_RETURN_VALUE(*reply) = 0;
         }
 
@@ -327,16 +327,16 @@ STATIC_TESTABLE void handle_ipc_message(const struct state *state, struct ipc_me
 static void main_loop(const struct state *state) {
     struct ipc_message received = {
         .capabilities = {
-            {(0 << INIT_NODE_DEPTH) | state->node.address, -1},
-            {(1 << INIT_NODE_DEPTH) | state->node.address, -1},
-            {(2 << INIT_NODE_DEPTH) | state->node.address, -1},
-            {(3 << INIT_NODE_DEPTH) | state->node.address, -1}
+            {(0 << INIT_NODE_DEPTH) | state->node.address, SIZE_MAX},
+            {(1 << INIT_NODE_DEPTH) | state->node.address, SIZE_MAX},
+            {(2 << INIT_NODE_DEPTH) | state->node.address, SIZE_MAX},
+            {(3 << INIT_NODE_DEPTH) | state->node.address, SIZE_MAX}
         }
     };
 
     while (1) {
         received.badge = 0;
-        size_t result = syscall_invoke(state->endpoint.address, -1, ENDPOINT_RECEIVE, (size_t) &received);
+        size_t result = syscall_invoke(state->endpoint.address, SIZE_MAX, ENDPOINT_RECEIVE, (size_t) &received);
 
         if (result != 0) {
 #ifdef UNDER_TEST
@@ -361,7 +361,7 @@ static void main_loop(const struct state *state) {
         };
 
         handle_ipc_message(state, &received, &reply);
-        syscall_invoke(FD_REPLY_ENDPOINT(received).address, -1, ENDPOINT_SEND, (size_t) &reply); // return value is ignored here since it doesn't matter if the reply fails to send
+        syscall_invoke(FD_REPLY_ENDPOINT(received).address, SIZE_MAX, ENDPOINT_SEND, (size_t) &reply); // return value is ignored here since it doesn't matter if the reply fails to send
 
         // delete any leftover capabilities that were transferred and temporary capabilities not sent.
         for (size_t i = 0; i < IPC_CAPABILITY_SLOTS + 1; i ++) {
@@ -377,16 +377,16 @@ static void mount_to_root(const struct state *state) {
         .type = TYPE_ENDPOINT,
         .size = 0,
         .address = 5,
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args) == 0);
+    assert(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args) == 0);
 
     // copy the file descriptor endpoint and set its badge to 0 so that operations on the root directory will be properly handled
     const struct node_copy_args fd_copy_args = {
         .source_address = state->endpoint.address,
         .source_depth = state->endpoint.depth,
         .dest_slot = IPC_CAPABILITY_SLOTS + 1,
-        .access_rights = -1,
+        .access_rights = UINT8_MAX,
         .badge = 0,
         .should_set_badge = 1
     };
@@ -424,16 +424,16 @@ void _start(size_t initrd_start, size_t initrd_end) {
         .address = 3,
         .depth = INIT_NODE_DEPTH
     };
-    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args) == 0);
+    assert(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args) == 0);
 
     // allocate the file descriptor endpoint that will be sent to the vfs and will be listened on for incoming messages
     const struct alloc_args fd_alloc_args = {
         .type = TYPE_ENDPOINT,
         .size = 0,
         .address = 4,
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args) == 0);
+    assert(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args) == 0);
 
     // this is used so that passing state around to the various functions here that use it is a lot cleaner
     const struct state state = {

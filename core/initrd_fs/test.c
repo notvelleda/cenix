@@ -1,5 +1,6 @@
 #include "errno.h"
 #include "fff.h"
+#include <inttypes.h>
 #include "jax.h"
 #include "main.h"
 #include <stdbool.h>
@@ -38,9 +39,9 @@ void custom_setup(void) {
         .type = TYPE_ENDPOINT,
         .size = 0,
         .address = ENDPOINT_ADDRESS,
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args) == 0);
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args) == 0);
 
     const struct alloc_args node_alloc_args = {
         .type = TYPE_NODE,
@@ -48,14 +49,14 @@ void custom_setup(void) {
         .address = NODE_ADDRESS,
         .depth = INIT_NODE_DEPTH
     };
-    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args) == 0);
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &node_alloc_args) == 0);
 
     // load the test jax archive from disk
     FILE *jax_file = fopen(STRINGIFY(TEST_JAX_LOCATION), "rb");
     TEST_ASSERT(jax_file != NULL);
 
     fseek(jax_file, 0, SEEK_END);
-    long file_size = ftell(jax_file);
+    size_t file_size = (size_t) ftell(jax_file); // this value should be sanity checked but i honestly couldn't care less
     fseek(jax_file, 0, SEEK_SET);
 
     char *jax_buffer = malloc(file_size);
@@ -63,13 +64,11 @@ void custom_setup(void) {
 
     TEST_ASSERT(fread(jax_buffer, file_size, 1, jax_file) == 1);
 
-    struct jax_iterator iterator;
-
     // set up state structure
     state = (struct state) {
         .initrd_start = (size_t) jax_buffer,
         .initrd_end = (size_t) jax_buffer + file_size,
-        .endpoint = (struct ipc_capability) {ENDPOINT_ADDRESS, -1},
+        .endpoint = (struct ipc_capability) {ENDPOINT_ADDRESS, SIZE_MAX},
         .node = (struct ipc_capability) {NODE_ADDRESS, INIT_NODE_DEPTH}
     };
 
@@ -89,7 +88,7 @@ static void list_directory(struct ipc_message *received, struct ipc_message *rep
     FD_READ_FAST_SIZE(*received) = FD_READ_FAST_MAX_SIZE;
     directory_entry->next_entry_position = 0;
 
-    for (int i = 0; i < num_entries; i ++) {
+    for (size_t i = 0; i < num_entries; i ++) {
         received->badge = badge;
         FD_READ_FAST_POSITION(*received) = directory_entry->next_entry_position;
 
@@ -104,7 +103,13 @@ static void list_directory(struct ipc_message *received, struct ipc_message *rep
         name_buffer[directory_entry->name_length] = 0;
 
 #ifdef DEBUG
-        printf("inode: %d, next_entry_position: %d, name_length: %d, name: %s\n", directory_entry->inode, directory_entry->next_entry_position, directory_entry->name_length, name_buffer);
+        printf(
+            "inode: %" PRIdPTR ", next_entry_position: %" PRIdPTR ", name_length: %d, name: %s\n",
+            directory_entry->inode,
+            directory_entry->next_entry_position,
+            directory_entry->name_length,
+            name_buffer
+        );
 #endif
 
         if (i == num_entries - 1) {
@@ -123,9 +128,9 @@ static size_t open(struct ipc_message *received, struct ipc_message *reply, size
         .type = TYPE_UNTYPED,
         .size = strlen(name) + 1,
         .address = ((IPC_CAPABILITY_SLOTS + 2) << INIT_NODE_DEPTH) | NODE_ADDRESS,
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args) == 0);
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args) == 0);
 
     // copy the name into it
     char *buffer = (char *) syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_LOCK, 0);
@@ -151,7 +156,7 @@ static size_t open(struct ipc_message *received, struct ipc_message *reply, size
         TEST_ASSERT(read_badge(FD_OPEN_REPLY_FD(*reply).address, FD_OPEN_REPLY_FD(*reply).depth, new_badge) == 0);
 
 #ifdef DEBUG
-        printf("got badge %d\n", *new_badge);
+        printf("got badge %" PRIdPTR "\n", *new_badge);
 #endif
     }
 
@@ -191,9 +196,9 @@ static void read_file_slow(struct ipc_message *received, struct ipc_message *rep
         .type = TYPE_UNTYPED,
         .size = size > contents_length ? size : size + 1, // makes sure memory is allocated for the null terminator
         .address = ((IPC_CAPABILITY_SLOTS + 2) << INIT_NODE_DEPTH) | NODE_ADDRESS,
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args) == 0);
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args) == 0);
 
     // fill the buffer with a set value to check nothing extra was read (this could be its own test but it's easier to just slap it onto all the existing cases)
     uint8_t *buffer = (uint8_t *) syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_LOCK, 0);
@@ -232,7 +237,7 @@ static void read_file_slow(struct ipc_message *received, struct ipc_message *rep
     printf("file contents (FD_READ): \"%s\"\n", buffer);
 #endif
 
-    TEST_ASSERT(strcmp(buffer, contents) == 0);
+    TEST_ASSERT(strcmp((char *) buffer, contents) == 0);
 
     TEST_ASSERT(syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_UNLOCK, 0) == 0);
 
@@ -334,7 +339,7 @@ void read_position(void) {
     read_file(&received, &reply, badge, 4, 1024, "");
     read_file(&received, &reply, badge, 1234567890, 1024, "");
     read_file(&received, &reply, badge, 0xdeadbeef, 1024, "");
-    read_file(&received, &reply, badge, -1, 1024, "");
+    read_file(&received, &reply, badge, SIZE_MAX, 1024, "");
 }
 
 void read_less_than_full_file(void) {
@@ -398,7 +403,7 @@ void read_invalid_directory_entry(void) {
     received.badge = 0;
     FD_CALL_NUMBER(received) = FD_READ_FAST;
     FD_READ_FAST_SIZE(received) = FD_READ_FAST_MAX_SIZE;
-    FD_READ_FAST_POSITION(received) = -1;
+    FD_READ_FAST_POSITION(received) = SIZE_MAX;
     handle_ipc_message(&state, &received, &reply);
     TEST_ASSERT(FD_RETURN_VALUE(reply) == EINVAL);
 
@@ -471,7 +476,10 @@ void open_with_exclusive(void) {
 size_t fd_open_badge;
 
 size_t endpoint_success_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
-    struct ipc_message *message = (struct ipc_message *) argument;
+    (void) address;
+    (void) depth;
+    (void) slot;
+    (void) argument;
 
     // just hardcoded to delete this endpoint since it isn't copied
     syscall_invoke(3, INIT_NODE_DEPTH, NODE_DELETE, IPC_CAPABILITY_SLOTS + 1);
@@ -480,6 +488,11 @@ size_t endpoint_success_fake(size_t address, size_t depth, struct capability *sl
 }
 
 size_t endpoint_error_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+    (void) argument;
+
     return EUNKNOWN;
 }
 
@@ -493,6 +506,10 @@ size_t vfs_call_success_fake(size_t address, size_t depth, struct capability *sl
 }
 
 size_t fd_open_request_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
     struct ipc_message *message = (struct ipc_message *) argument;
 
     message->badge = 0;
@@ -508,7 +525,7 @@ size_t fd_open_request_fake(size_t address, size_t depth, struct capability *slo
         .address = FD_REPLY_ENDPOINT(*message).address,
         .depth = FD_REPLY_ENDPOINT(*message).depth
     };
-    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args) == 0);
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args) == 0);
 
     // allocate a capability to store the name
     const struct alloc_args name_alloc_args = {
@@ -517,7 +534,7 @@ size_t fd_open_request_fake(size_t address, size_t depth, struct capability *slo
         .address = FD_OPEN_NAME_ADDRESS(*message).address,
         .depth = FD_OPEN_NAME_ADDRESS(*message).depth
     };
-    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &name_alloc_args) == 0);
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &name_alloc_args) == 0);
 
     // copy the name into it
     char *buffer = (char *) syscall_invoke(name_alloc_args.address, name_alloc_args.depth, UNTYPED_LOCK, 0);
@@ -533,6 +550,10 @@ size_t fd_open_request_fake(size_t address, size_t depth, struct capability *slo
 }
 
 size_t fd_open_response_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
     struct ipc_message *message = (struct ipc_message *) argument;
 
     TEST_ASSERT(FD_RETURN_VALUE(*message) == 0);
@@ -540,13 +561,17 @@ size_t fd_open_response_fake(size_t address, size_t depth, struct capability *sl
     TEST_ASSERT(read_badge(FD_OPEN_REPLY_FD(*message).address, FD_OPEN_REPLY_FD(*message).depth, &fd_open_badge) == 0);
 
 #ifdef DEBUG
-    printf("got badge %d\n", fd_open_badge);
+    printf("got badge %" PRIdPTR "\n", fd_open_badge);
 #endif
 
     return 0;
 }
 
 size_t fd_read_request_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
     struct ipc_message *message = (struct ipc_message *) argument;
 
     message->badge = fd_open_badge;
@@ -561,7 +586,7 @@ size_t fd_read_request_fake(size_t address, size_t depth, struct capability *slo
         .address = FD_REPLY_ENDPOINT(*message).address,
         .depth = FD_REPLY_ENDPOINT(*message).depth
     };
-    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args) == 0);
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args) == 0);
 
     message->transferred_capabilities = 1;
 
@@ -569,6 +594,10 @@ size_t fd_read_request_fake(size_t address, size_t depth, struct capability *slo
 }
 
 size_t fd_read_response_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
     struct ipc_message *message = (struct ipc_message *) argument;
 
     TEST_ASSERT(FD_RETURN_VALUE(*message) == 0);
@@ -578,7 +607,7 @@ size_t fd_read_response_fake(size_t address, size_t depth, struct capability *sl
     buffer[FD_READ_FAST_BYTES_READ(*message)] = 0;
 
 #ifdef DEBUG
-    printf("bytes read: %d, file contents: \"%s\"\n", FD_READ_FAST_BYTES_READ(*message), buffer);
+    printf("bytes read: %" PRIdPTR ", file contents: \"%s\"\n", FD_READ_FAST_BYTES_READ(*message), buffer);
 #endif
 
     TEST_ASSERT(strcmp(buffer, "this is yet another test.\n") == 0);
@@ -593,9 +622,9 @@ void test_ipc_interface(void) {
         .type = TYPE_ENDPOINT,
         .size = 0,
         .address = 2,
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args) == 0);
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args) == 0);
 
     size_t (*send_fakes[])(size_t, size_t, struct capability *, size_t) = {
         endpoint_success_fake, // fd_mount
