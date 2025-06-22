@@ -22,45 +22,45 @@ void init_process_table(void) {
         .type = TYPE_UNTYPED,
         .size = PID_MAX / 8,
         .address = PID_SET_SLOT,
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &set_alloc_args);
+    syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &set_alloc_args);
 
     // TODO: use system pointer width for this
-    uint32_t *pointer = (uint32_t *) syscall_invoke(PID_SET_SLOT, -1, UNTYPED_LOCK, 0);
+    uint32_t *pointer = (uint32_t *) syscall_invoke(PID_SET_SLOT, SIZE_MAX, UNTYPED_LOCK, 0);
 
     memset(pointer, 0, PID_MAX / 8);
     *pointer = 3; // pids 0 and 1 are reserved
 
-    syscall_invoke(PID_SET_SLOT, -1, UNTYPED_UNLOCK, 0);
+    syscall_invoke(PID_SET_SLOT, SIZE_MAX, UNTYPED_UNLOCK, 0);
 
     struct alloc_args thread_node_alloc_args = {
         .type = TYPE_NODE,
         .size = PID_BITS,
         .address = PID_THREAD_NODE_SLOT,
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &thread_node_alloc_args);
+    syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &thread_node_alloc_args);
 
     struct alloc_args info_node_alloc_args = {
         .type = TYPE_NODE,
         .size = PID_BITS,
         .address = PID_INFO_NODE_SLOT,
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &info_node_alloc_args);
+    syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &info_node_alloc_args);
 
     struct alloc_args data_node_alloc_args = {
         .type = TYPE_NODE,
         .size = PID_BITS,
         .address = PID_DATA_NODE_SLOT,
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &data_node_alloc_args);
+    syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &data_node_alloc_args);
 }
 
 pid_t allocate_pid(void) {
-    uint32_t *pointer = (uint32_t *) syscall_invoke(PID_SET_SLOT, -1, UNTYPED_LOCK, 0);
+    uint32_t *pointer = (uint32_t *) syscall_invoke(PID_SET_SLOT, SIZE_MAX, UNTYPED_LOCK, 0);
 
     if (pointer == NULL) {
         return 0;
@@ -84,17 +84,17 @@ pid_t allocate_pid(void) {
         break;
     }
 
-    syscall_invoke(PID_SET_SLOT, -1, UNTYPED_UNLOCK, 0);
+    syscall_invoke(PID_SET_SLOT, SIZE_MAX, UNTYPED_UNLOCK, 0);
 
     return pid;
 }
 
 void release_pid(pid_t pid) {
-    uint32_t *pointer = (uint32_t *) syscall_invoke(PID_SET_SLOT, -1, UNTYPED_LOCK, 0);
+    uint32_t *pointer = (uint32_t *) syscall_invoke(PID_SET_SLOT, SIZE_MAX, UNTYPED_LOCK, 0);
 
     pointer[pid / 32] &= ~((uint32_t) 1 << (pid % 32));
 
-    syscall_invoke(PID_SET_SLOT, -1, UNTYPED_UNLOCK, 0);
+    syscall_invoke(PID_SET_SLOT, SIZE_MAX, UNTYPED_UNLOCK, 0);
 }
 
 size_t exec_from_initrd(
@@ -127,10 +127,10 @@ size_t exec_from_initrd(
         .type = TYPE_UNTYPED,
         .size = allocation_size,
         .address = (pid << INIT_NODE_DEPTH) | PID_DATA_NODE_SLOT,
-        .depth = -1
+        .depth = SIZE_MAX
     };
 
-    if (syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &data_alloc_args) != 0) {
+    if (syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &data_alloc_args) != 0) {
         debug_printf("exec_from_initrd: memory allocation for thread data failed\n");
         return ENOMEM;
     }
@@ -139,17 +139,17 @@ size_t exec_from_initrd(
         .type = TYPE_THREAD,
         .size = 0,
         .address = (pid << INIT_NODE_DEPTH) | PID_THREAD_NODE_SLOT,
-        .depth = -1
+        .depth = SIZE_MAX
     };
 
-    if (syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &thread_alloc_args) != 0) {
+    if (syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &thread_alloc_args) != 0) {
         debug_printf("exec_from_initrd: memory allocation for thread failed\n");
 
         syscall_invoke(PID_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, pid);
         return ENOMEM;
     }
 
-    void *data = (void *) syscall_invoke(data_alloc_args.address, -1, UNTYPED_LOCK, 0);
+    void *data = (void *) syscall_invoke(data_alloc_args.address, SIZE_MAX, UNTYPED_LOCK, 0);
 
     if (data == NULL) {
         debug_printf("exec_from_initrd: failed to lock thread data\n");
@@ -176,12 +176,12 @@ size_t exec_from_initrd(
         .address = &registers,
         .size = sizeof(struct thread_registers)
     };
-    syscall_invoke(thread_alloc_args.address, -1, THREAD_WRITE_REGISTERS, (size_t) &register_write_args);
+    syscall_invoke(thread_alloc_args.address, SIZE_MAX, THREAD_WRITE_REGISTERS, (size_t) &register_write_args);
 
     struct set_root_node_args set_root_node_args = {root_node_address, root_node_depth};
-    syscall_invoke(thread_alloc_args.address, -1, THREAD_SET_ROOT_NODE, (size_t) &set_root_node_args);
+    syscall_invoke(thread_alloc_args.address, SIZE_MAX, THREAD_SET_ROOT_NODE, (size_t) &set_root_node_args);
 
-    syscall_invoke(thread_alloc_args.address, -1, THREAD_RESUME, 0);
+    syscall_invoke(thread_alloc_args.address, SIZE_MAX, THREAD_RESUME, 0);
 
     return 0;
 }

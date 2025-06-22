@@ -41,13 +41,13 @@ static void start_process(
         .address = ROOT_NODE_ADDRESS,
         .depth = INIT_NODE_DEPTH
     };
-    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &root_alloc_args) == 0);
+    assert(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &root_alloc_args) == 0);
 
     struct node_copy_args alloc_copy_args = {
         .source_address = 0,
-        .source_depth = -1,
+        .source_depth = SIZE_MAX,
         .dest_slot = 0,
-        .access_rights = -1,
+        .access_rights = UINT8_MAX,
         .badge = 0,
         .should_set_badge = 0
     };
@@ -55,9 +55,9 @@ static void start_process(
 
     struct node_copy_args debug_copy_args = {
         .source_address = 1,
-        .source_depth = -1,
+        .source_depth = SIZE_MAX,
         .dest_slot = 1,
-        .access_rights = -1,
+        .access_rights = UINT8_MAX,
         .badge = 0,
         .should_set_badge = 0
     };
@@ -75,13 +75,15 @@ static void start_process(
 }
 
 void vfs_server_setup_callback(pid_t pid, void *data) {
+    (void) pid;
+
     struct alloc_args *endpoint_alloc_args = (struct alloc_args *) data;
 
     struct node_copy_args endpoint_copy_args = {
         .source_address = endpoint_alloc_args->address,
         .source_depth = endpoint_alloc_args->depth,
         .dest_slot = 2,
-        .access_rights = -1,
+        .access_rights = UINT8_MAX,
         .badge = 0,
         .should_set_badge = 0
     };
@@ -99,11 +101,11 @@ void initrd_fs_setup_callback(pid_t pid, void *data) {
             pid >> 8, pid & 0xff,
             0, 1
         },
-        .capabilities = {{endpoint_alloc_args->address, -1}},
+        .capabilities = {{endpoint_alloc_args->address, SIZE_MAX}},
         .to_copy = 1
     };
     struct ipc_message to_receive = {
-        .capabilities = {{(2 << INIT_NODE_DEPTH) | ROOT_NODE_ADDRESS, -1}}
+        .capabilities = {{(2 << INIT_NODE_DEPTH) | ROOT_NODE_ADDRESS, SIZE_MAX}}
     };
 
     assert(vfs_call(VFS_ENDPOINT_SLOT, endpoint_alloc_args->address, &to_send, &to_receive) == 0);
@@ -131,22 +133,22 @@ void early_init(void) {
         .type = TYPE_ENDPOINT,
         .size = 0,
         .address = 6,
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args) == 0);
+    assert(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args) == 0);
 
     // start vfs server
     start_process("/lib/core/vfs_server", vfs_server_setup_callback, &endpoint_alloc_args, NULL, NULL);
 
     // receive the endpoint that will be used for communicating with the vfs server from the vfs server
     const struct ipc_message message = {
-        .capabilities = {{VFS_ENDPOINT_SLOT, -1}}
+        .capabilities = {{VFS_ENDPOINT_SLOT, SIZE_MAX}}
     };
     assert(syscall_invoke(endpoint_alloc_args.address, endpoint_alloc_args.depth, ENDPOINT_RECEIVE, (size_t) &message) == 0);
 
     // receive a file descriptor for the root directory of the filesystem
     const struct ipc_message message_2 = {
-        .capabilities = {{ROOT_FD_SLOT, -1}}
+        .capabilities = {{ROOT_FD_SLOT, SIZE_MAX}}
     };
     assert(syscall_invoke(endpoint_alloc_args.address, endpoint_alloc_args.depth, ENDPOINT_RECEIVE, (size_t) &message_2) == 0);
 
