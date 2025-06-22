@@ -1,11 +1,13 @@
 #include "capabilities_layout.h"
 #include "core_io.h"
 #include "directories.h"
+#include "inttypes.h"
 #include "ipc.h"
 #include "mount_points.h"
 #include "namespaces.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 #include "structures.h"
 #include "sys/kernel.h"
@@ -15,25 +17,25 @@
 static size_t alloc_namespace(void) {
     size_t address = alloc_structure(USED_NAMESPACES_SLOT, NAMESPACE_NODE_SLOT, MAX_NAMESPACES, sizeof(struct fs_namespace));
 
-    if (address == -1) {
-        return -1;
+    if (address == SIZE_MAX) {
+        return SIZE_MAX;
     }
 
-    struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(address, -1, UNTYPED_LOCK, 0);
+    struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(address, SIZE_MAX, UNTYPED_LOCK, 0);
 
     if (namespace == NULL) {
         free_structure(USED_NAMESPACES_SLOT, NAMESPACE_NODE_SLOT, MAX_NAMESPACES, address);
-        return -1;
+        return SIZE_MAX;
     }
 
     namespace->references = 1;
-    namespace->root_address = -1;
+    namespace->root_address = SIZE_MAX;
 
     for (int i = 0; i < NUM_BUCKETS; i ++) {
-        namespace->mount_point_addresses[i] = -1;
+        namespace->mount_point_addresses[i] = SIZE_MAX;
     }
 
-    syscall_invoke(address, -1, UNTYPED_UNLOCK, 0);
+    syscall_invoke(address, SIZE_MAX, UNTYPED_UNLOCK, 0);
 
     return address;
 }
@@ -41,7 +43,7 @@ static size_t alloc_namespace(void) {
 /// frees a filesystem namespace given its id if it has no more references
 static void free_namespace(size_t namespace_id) {
     size_t address = (namespace_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
-    struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(address, -1, UNTYPED_LOCK, 0);
+    struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(address, SIZE_MAX, UNTYPED_LOCK, 0);
 
     if (namespace == NULL) {
         debug_printf("free_namespace: couldn't lock namespace, reference count will be wrong!\n");
@@ -56,7 +58,7 @@ static void free_namespace(size_t namespace_id) {
         namespace->references --;
     }
 
-    syscall_invoke(address, -1, UNTYPED_UNLOCK, 0);
+    syscall_invoke(address, SIZE_MAX, UNTYPED_UNLOCK, 0);
 
     if (should_free) {
         free_structure(USED_NAMESPACES_SLOT, NAMESPACE_NODE_SLOT, MAX_NAMESPACES, address);
@@ -87,7 +89,7 @@ static uint8_t hash(size_t value) {
     const uint8_t *data = (uint8_t *) &value;
     uint8_t result = 0;
 
-    for (int i = 0; i < sizeof(size_t); i ++) {
+    for (unsigned int i = 0; i < sizeof(size_t); i ++) {
         result = permutation_table[result ^ *(data ++)];
     }
 
@@ -100,8 +102,8 @@ size_t set_up_filesystem_for_process(const struct state *state, pid_t creator_pi
 
     if ((flags & VFS_SHARE_NAMESPACE) != 0) {
         // use the namespace id of the creator process
-        size_t creator_process_data_address = (creator_pid << INIT_NODE_DEPTH) | PROCESS_DATA_NODE_SLOT;
-        struct process_data *creator_process_data = (struct process_data *) syscall_invoke(creator_process_data_address, -1, UNTYPED_LOCK, 0);
+        size_t creator_process_data_address = ((size_t) creator_pid << INIT_NODE_DEPTH) | PROCESS_DATA_NODE_SLOT;
+        struct process_data *creator_process_data = (struct process_data *) syscall_invoke(creator_process_data_address, SIZE_MAX, UNTYPED_LOCK, 0);
 
         if (creator_process_data == NULL) {
             return ENOMEM;
@@ -110,10 +112,10 @@ size_t set_up_filesystem_for_process(const struct state *state, pid_t creator_pi
         fs_namespace = creator_process_data->fs_namespace;
         force_disable_namespace_modification = !creator_process_data->can_modify_namespace;
 
-        syscall_invoke(creator_process_data_address, -1, UNTYPED_UNLOCK, 0);
+        syscall_invoke(creator_process_data_address, SIZE_MAX, UNTYPED_UNLOCK, 0);
 
         size_t address = (fs_namespace << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
-        struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(address, -1, UNTYPED_LOCK, 0);
+        struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(address, SIZE_MAX, UNTYPED_LOCK, 0);
 
         if (namespace == NULL) {
             return ENOMEM;
@@ -121,12 +123,12 @@ size_t set_up_filesystem_for_process(const struct state *state, pid_t creator_pi
 
         namespace->references ++;
 
-        syscall_invoke(address, -1, UNTYPED_UNLOCK, 0);
+        syscall_invoke(address, SIZE_MAX, UNTYPED_UNLOCK, 0);
     } else {
         // allocate a new namespace for this process
         size_t namespace_address = alloc_namespace();
 
-        if (namespace_address == -1) {
+        if (namespace_address == SIZE_MAX) {
             return ENOMEM;
         }
 
@@ -137,20 +139,20 @@ size_t set_up_filesystem_for_process(const struct state *state, pid_t creator_pi
     const struct alloc_args alloc_args = {
         .type = TYPE_UNTYPED,
         .size = sizeof(struct process_data),
-        .address = (new_pid << INIT_NODE_DEPTH) | PROCESS_DATA_NODE_SLOT,
-        .depth = -1
+        .address = ((size_t) new_pid << INIT_NODE_DEPTH) | PROCESS_DATA_NODE_SLOT,
+        .depth = SIZE_MAX
     };
 
-    if (syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args) != 0) {
+    if (syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args) != 0) {
         free_namespace(fs_namespace);
         return ENOMEM;
     }
 
-    struct process_data *process_data = (struct process_data *) syscall_invoke(alloc_args.address, -1, UNTYPED_LOCK, 0);
+    struct process_data *process_data = (struct process_data *) syscall_invoke(alloc_args.address, SIZE_MAX, UNTYPED_LOCK, 0);
 
     if (process_data == NULL) {
         free_namespace(fs_namespace);
-        syscall_invoke(PROCESS_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, new_pid);
+        syscall_invoke(PROCESS_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, (size_t) new_pid);
         return ENOMEM;
     }
 
@@ -164,18 +166,18 @@ size_t set_up_filesystem_for_process(const struct state *state, pid_t creator_pi
 
     size_t badge = IPC_BADGE(process_data->fs_namespace, process_data->can_modify_namespace ? IPC_FLAG_CAN_MODIFY : 0);
 
-    syscall_invoke(alloc_args.address, -1, UNTYPED_UNLOCK, 0);
+    syscall_invoke(alloc_args.address, SIZE_MAX, UNTYPED_UNLOCK, 0);
 
     struct ipc_message message = {
-        .capabilities = {{reply_address, -1}},
+        .capabilities = {{reply_address, SIZE_MAX}},
         .badge = badge
     };
     size_t result = open_root(state, &message, fs_namespace);
 
     if (result != 0) {
-        debug_printf("set_up_filesystem_for_process: open_root failed with error %d\n", result);
+        debug_printf("set_up_filesystem_for_process: open_root failed with error %" PRIdPTR "\n", result);
         free_namespace(fs_namespace);
-        syscall_invoke(PROCESS_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, new_pid);
+        syscall_invoke(PROCESS_DATA_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, (size_t) new_pid);
     }
 
     return result;
@@ -184,11 +186,11 @@ size_t set_up_filesystem_for_process(const struct state *state, pid_t creator_pi
 size_t add_mount_point_to_namespace(struct fs_namespace *namespace, struct mount_point *mount_point) {
     size_t mount_point_address = alloc_structure(USED_MOUNT_POINT_IDS_SLOT, MOUNT_POINTS_NODE_SLOT, MAX_MOUNT_POINTS, sizeof(struct mount_point));
 
-    if (mount_point_address == -1) {
+    if (mount_point_address == SIZE_MAX) {
         return ENOMEM;
     }
 
-    struct mount_point *new_mount_point = (struct mount_point *) syscall_invoke(mount_point_address, -1, UNTYPED_LOCK, 0);
+    struct mount_point *new_mount_point = (struct mount_point *) syscall_invoke(mount_point_address, SIZE_MAX, UNTYPED_LOCK, 0);
 
     if (new_mount_point == NULL) {
         free_structure(USED_MOUNT_POINT_IDS_SLOT, MOUNT_POINTS_NODE_SLOT, MAX_MOUNT_POINTS, mount_point_address);
@@ -197,7 +199,7 @@ size_t add_mount_point_to_namespace(struct fs_namespace *namespace, struct mount
 
     memcpy(new_mount_point, mount_point, sizeof(struct mount_point));
 
-    if (namespace->root_address == -1) {
+    if (namespace->root_address == SIZE_MAX) {
         // if the root address of this namespace hasn't been set yet, there's no way for this mount call to be mounting anything but the root filesystem.
         // any existing file descriptors for the previously unset root directory will be automatically updated to the new value when operations are performed on them
         namespace->root_address = mount_point_address;
@@ -208,10 +210,10 @@ size_t add_mount_point_to_namespace(struct fs_namespace *namespace, struct mount
         uint8_t bucket = hash(new_mount_point->inode) % NUM_BUCKETS;
         size_t *bucket_value = &namespace->mount_point_addresses[bucket];
 
-        if (*bucket_value == -1) {
+        if (*bucket_value == SIZE_MAX) {
             *bucket_value = mount_point_address;
         } else {
-            struct mount_point *other_mount_point = (struct mount_point *) syscall_invoke(*bucket_value, -1, UNTYPED_LOCK, 0);
+            struct mount_point *other_mount_point = (struct mount_point *) syscall_invoke(*bucket_value, SIZE_MAX, UNTYPED_LOCK, 0);
 
             if (other_mount_point == NULL) {
                 free_structure(USED_MOUNT_POINT_IDS_SLOT, MOUNT_POINTS_NODE_SLOT, MAX_MOUNT_POINTS, mount_point_address);
@@ -220,53 +222,53 @@ size_t add_mount_point_to_namespace(struct fs_namespace *namespace, struct mount
 
             other_mount_point->previous = mount_point_address;
 
-            syscall_invoke(*bucket_value, -1, UNTYPED_UNLOCK, 0); // TODO: is unlocking it here ok? could this cause problems?
+            syscall_invoke(*bucket_value, SIZE_MAX, UNTYPED_UNLOCK, 0); // TODO: is unlocking it here ok? could this cause problems?
 
             new_mount_point->next = *bucket_value;
             *bucket_value = mount_point_address;
         }
     }
 
-    syscall_invoke(mount_point_address, -1, UNTYPED_UNLOCK, 0);
+    syscall_invoke(mount_point_address, SIZE_MAX, UNTYPED_UNLOCK, 0);
 
     return 0;
 }
 
 size_t find_mount_point(size_t namespace_id, ino_t inode, size_t enclosing_filesystem) {
     size_t namespace_address = (namespace_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
-    struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(namespace_address, -1, UNTYPED_LOCK, 0);
+    struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(namespace_address, SIZE_MAX, UNTYPED_LOCK, 0);
 
     if (namespace == NULL) {
-        return -1;
+        return SIZE_MAX;
     }
 
     uint8_t bucket = hash(inode) % NUM_BUCKETS;
     size_t *bucket_value = &namespace->mount_point_addresses[bucket];
 
-    if (*bucket_value == -1) {
-        syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
-        return -1;
+    if (*bucket_value == SIZE_MAX) {
+        syscall_invoke(namespace_address, SIZE_MAX, UNTYPED_UNLOCK, 0);
+        return SIZE_MAX;
     }
 
-    for (size_t address = *bucket_value; address != -1;) {
-        struct mount_point *mount_point = (struct mount_point *) syscall_invoke(address, -1, UNTYPED_LOCK, 0);
+    for (size_t address = *bucket_value; address != SIZE_MAX;) {
+        struct mount_point *mount_point = (struct mount_point *) syscall_invoke(address, SIZE_MAX, UNTYPED_LOCK, 0);
 
         if (mount_point == NULL) {
-            syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
-            return -1;
+            syscall_invoke(namespace_address, SIZE_MAX, UNTYPED_UNLOCK, 0);
+            return SIZE_MAX;
         }
 
         if (mount_point->inode == inode && mount_point->enclosing_filesystem == enclosing_filesystem) {
-            syscall_invoke(address, -1, UNTYPED_UNLOCK, 0);
-            syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
+            syscall_invoke(address, SIZE_MAX, UNTYPED_UNLOCK, 0);
+            syscall_invoke(namespace_address, SIZE_MAX, UNTYPED_UNLOCK, 0);
             return address;
         }
 
         size_t next_address = mount_point->next;
-        syscall_invoke(address, -1, UNTYPED_UNLOCK, 0);
+        syscall_invoke(address, SIZE_MAX, UNTYPED_UNLOCK, 0);
         address = next_address;
     }
 
-    syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0);
-    return -1;
+    syscall_invoke(namespace_address, SIZE_MAX, UNTYPED_UNLOCK, 0);
+    return SIZE_MAX;
 }

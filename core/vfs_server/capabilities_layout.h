@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include "sys/kernel.h"
 
 #define PROCESS_DATA_NODE_SLOT 4
@@ -40,9 +41,9 @@
 
 #define SIZE_BITS (sizeof(size_t) * 8)
 
-#define THREAD_STORAGE_ADDRESS(thread_id) (((thread_id) << INIT_NODE_DEPTH) | THREAD_STORAGE_NODE_SLOT)
+#define THREAD_STORAGE_ADDRESS(thread_id) (((size_t) (thread_id) << INIT_NODE_DEPTH) | (size_t) THREAD_STORAGE_NODE_SLOT)
 #define THREAD_STORAGE_DEPTH (THREAD_STORAGE_BITS + INIT_NODE_DEPTH)
-#define THREAD_STORAGE_SLOT(thread_id, slot) (((slot) << (THREAD_STORAGE_BITS + INIT_NODE_DEPTH)) | THREAD_STORAGE_ADDRESS(thread_id))
+#define THREAD_STORAGE_SLOT(thread_id, slot) (((size_t) (slot) << (THREAD_STORAGE_BITS + INIT_NODE_DEPTH)) | THREAD_STORAGE_ADDRESS(thread_id))
 #define THREAD_STORAGE_SLOT_DEPTH (THREAD_STORAGE_NODE_BITS + THREAD_STORAGE_DEPTH)
 
 #define REPLY_ENDPOINT_SLOT ((1 << THREAD_STORAGE_BITS) - 1) // the slot number of the reply endpoint to use when issuing ipc calls to filesystem servers
@@ -60,10 +61,10 @@
 #error unsupported pointer size
 #endif
 
-#define MOUNTED_LIST_INFO_ADDRESS(index) (((index) << INIT_NODE_DEPTH) | MOUNTED_LIST_INFO_SLOT)
-#define MOUNTED_LIST_NODE_ADDRESS(index) (((index) << INIT_NODE_DEPTH) | MOUNTED_LIST_NODE_SLOT)
+#define MOUNTED_LIST_INFO_ADDRESS(index) (((size_t) (index) << INIT_NODE_DEPTH) | (size_t) MOUNTED_LIST_INFO_SLOT)
+#define MOUNTED_LIST_NODE_ADDRESS(index) (((size_t) (index) << INIT_NODE_DEPTH) | (size_t) MOUNTED_LIST_NODE_SLOT)
 #define MOUNTED_LIST_NODE_DEPTH (INIT_NODE_DEPTH + MOUNTED_FS_BITS)
-#define MOUNTED_LIST_SLOT(index, slot) ((slot) << MOUNTED_FS_BITS | MOUNTED_LIST_NODE_ADDRESS(index))
+#define MOUNTED_LIST_SLOT(index, slot) (((size_t) (slot) << MOUNTED_FS_BITS) | MOUNTED_LIST_NODE_ADDRESS(index))
 
 #define DIRECTORY_ADDRESS(id) (((id) << INIT_NODE_DEPTH) | DIRECTORY_NODE_SLOT)
 #define DIRECTORY_INFO_ADDRESS(id) (((id) << INIT_NODE_DEPTH) | DIRECTORY_INFO_SLOT)

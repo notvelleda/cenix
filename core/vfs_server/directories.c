@@ -1,9 +1,11 @@
 #include "capabilities_layout.h"
 #include "core_io.h"
 #include "directories.h"
+#include "inttypes.h"
 #include "ipc.h"
 #include "mount_points.h"
 #include "namespaces.h"
+#include <stdint.h>
 #include "structures.h"
 #include "sys/kernel.h"
 #include "sys/vfs.h"
@@ -26,7 +28,7 @@ static size_t open_file_callback(void *data, size_t slot) {
     if (result == 0) {
         return fd_address;
     } else {
-        return -1;
+        return SIZE_MAX;
     }
 }
 
@@ -39,9 +41,9 @@ static size_t open_mount_point(const struct state *state, size_t opened_file_add
         .type = TYPE_UNTYPED,
         .size = sizeof(struct directory_info),
         .address = info_address,
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    size_t result = syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
+    size_t result = syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
 
     if (result != 0) {
         return result;
@@ -50,7 +52,7 @@ static size_t open_mount_point(const struct state *state, size_t opened_file_add
     // delete this capability since it's not needed
     syscall_invoke(DIRECTORY_NODE_SLOT, INIT_NODE_DEPTH, NODE_DELETE, opened_file_slot);
 
-    struct directory_info *new_info = (struct directory_info *) syscall_invoke(info_address, -1, UNTYPED_LOCK, 0);
+    struct directory_info *new_info = (struct directory_info *) syscall_invoke(info_address, SIZE_MAX, UNTYPED_LOCK, 0);
 
     if (new_info == NULL) {
         return ENOMEM;
@@ -61,7 +63,7 @@ static size_t open_mount_point(const struct state *state, size_t opened_file_add
     new_info->inode = inode;
     new_info->mount_point_address = mount_point_address;
 
-    syscall_invoke(info_address, -1, UNTYPED_UNLOCK, 0);
+    syscall_invoke(info_address, SIZE_MAX, UNTYPED_UNLOCK, 0);
 
     // badge the vfs endpoint with the address of the directory info structure and send it back to the caller
     return badge_and_send(state, IPC_BADGE(info_address, IPC_FLAG_IS_MOUNT_POINT), reply_address);
@@ -77,10 +79,10 @@ static size_t proxy_directory(const struct state *state, size_t opened_file_addr
         .type = TYPE_UNTYPED,
         .size = sizeof(struct directory_info),
         .address = (new_directory_id << INIT_NODE_DEPTH) | DIRECTORY_INFO_SLOT,
-        .depth = -1
+        .depth = SIZE_MAX
     };
 
-    size_t result = syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
+    size_t result = syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args);
 
     if (result != 0) {
         return result;
@@ -128,7 +130,7 @@ size_t open_file(const struct state *state, size_t fd_endpoint, struct directory
     // be transferred back to the client anyway
     size_t opened_file_address = find_slot_for(USED_DIRECTORY_IDS_SLOT, MAX_OPEN_DIRECTORIES, &fields, &open_file_callback);
 
-    if (opened_file_address == -1) {
+    if (opened_file_address == SIZE_MAX) {
         return ENOMEM;
     }
 
@@ -143,7 +145,7 @@ idk_just_fucking_return:
 
     size_t mount_point_address = find_mount_point(info->namespace_id, stat.st_ino, info->enclosing_filesystem);
 
-    if (mount_point_address != -1) {
+    if (mount_point_address != SIZE_MAX) {
         // this directory is a mount point, so it needs to be handled accordingly
 
         size_t result = open_mount_point(state, opened_file_address, mount_point_address, info, stat.st_ino, reply_capability);
@@ -157,11 +159,11 @@ idk_just_fucking_return:
         // this isn't a directory, so just reply with the newly opened capability as directories are the only things proxied
 
         struct ipc_message reply = {
-            .capabilities = {{opened_file_address, -1}}
+            .capabilities = {{opened_file_address, SIZE_MAX}}
         };
         FD_RETURN_VALUE(reply) = 0;
 
-        syscall_invoke(reply_capability, -1, ENDPOINT_SEND, (size_t) &reply);
+        syscall_invoke(reply_capability, SIZE_MAX, ENDPOINT_SEND, (size_t) &reply);
 
         //result = 0;
         goto idk_just_fucking_return; // result should be 0 here since it's not modified since the last time it's checked
@@ -187,7 +189,7 @@ static void pass_thru_directory_message(size_t directory_id, struct ipc_message 
     uint8_t transferred_capabilities = message->transferred_capabilities;
     message->to_copy = 0; // make sure all capabilities are moved
 
-    syscall_invoke(DIRECTORY_ADDRESS(directory_id), -1, ENDPOINT_SEND, (size_t) message);
+    syscall_invoke(DIRECTORY_ADDRESS(directory_id), SIZE_MAX, ENDPOINT_SEND, (size_t) message);
 
     message->transferred_capabilities ^= transferred_capabilities; // make sure any capabilities that aren't transferred are cleaned up in _start()
 }
@@ -197,7 +199,7 @@ static void directory_open(const struct state *state, size_t directory_id, struc
     size_t directory_address = DIRECTORY_ADDRESS(directory_id);
     size_t directory_info_address = DIRECTORY_INFO_ADDRESS(directory_id);
 
-    struct directory_info *info = (struct directory_info *) syscall_invoke(directory_info_address, -1, UNTYPED_LOCK, 0);
+    struct directory_info *info = (struct directory_info *) syscall_invoke(directory_info_address, SIZE_MAX, UNTYPED_LOCK, 0);
 
     if (info == NULL) {
         return return_value(FD_REPLY_ENDPOINT(*message).address, ENOMEM);
@@ -205,7 +207,7 @@ static void directory_open(const struct state *state, size_t directory_id, struc
 
     size_t result = open_file(state, directory_address, info, message);
 
-    syscall_invoke(directory_info_address, -1, UNTYPED_UNLOCK, 0);
+    syscall_invoke(directory_info_address, SIZE_MAX, UNTYPED_UNLOCK, 0);
 
     if (result != 0) {
         return_value(FD_REPLY_ENDPOINT(*message).address, result);
@@ -215,7 +217,7 @@ static void directory_open(const struct state *state, size_t directory_id, struc
 void handle_directory_message(const struct state *state, struct ipc_message *message) {
     size_t directory_id = IPC_ID(message->badge);
 
-    debug_printf("vfs_server: got message %d for directory %d!\n", FD_CALL_NUMBER(*message), directory_id);
+    debug_printf("vfs_server: got message %d for directory %" PRIdPTR "!\n", FD_CALL_NUMBER(*message), directory_id);
 
     // TODO: should there be a check for if this directory is now a mount point? does the potential benefit outweigh the performance impact?
 
@@ -237,7 +239,7 @@ void handle_directory_message(const struct state *state, struct ipc_message *mes
         return return_value(FD_REPLY_ENDPOINT(*message).address, ENOTSUP);
     case FD_MOUNT:
         {
-            struct directory_info *info = (struct directory_info *) syscall_invoke(directory_id, -1, UNTYPED_LOCK, 0);
+            struct directory_info *info = (struct directory_info *) syscall_invoke(directory_id, SIZE_MAX, UNTYPED_LOCK, 0);
 
             if (info == NULL) {
                 return_value(FD_REPLY_ENDPOINT(*message).address, ENOMEM);
@@ -246,7 +248,7 @@ void handle_directory_message(const struct state *state, struct ipc_message *mes
 
             struct ipc_message reply = {.capabilities = {}};
             FD_RETURN_VALUE(reply) = mount(info, FD_MOUNT_FILE_DESCRIPTOR(*message).address, FD_MOUNT_FLAGS(*message));
-            syscall_invoke(FD_REPLY_ENDPOINT(*message).address, -1, ENDPOINT_SEND, (size_t) &reply);
+            syscall_invoke(FD_REPLY_ENDPOINT(*message).address, SIZE_MAX, ENDPOINT_SEND, (size_t) &reply);
         }
         break;
     case FD_UNMOUNT:
@@ -263,7 +265,7 @@ size_t open_root(const struct state *state, struct ipc_message *message, size_t 
 
     // get the namespace object from the namespace id
     size_t namespace_address = (namespace_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
-    struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(namespace_address, -1, UNTYPED_LOCK, 0);
+    struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(namespace_address, SIZE_MAX, UNTYPED_LOCK, 0);
 
     if (namespace == NULL) {
         return ENOMEM;
@@ -272,11 +274,11 @@ size_t open_root(const struct state *state, struct ipc_message *message, size_t 
     // allocate a structure to store the namespace id and root mount point address
     size_t info_address = alloc_structure(USED_DIRECTORY_IDS_SLOT, DIRECTORY_INFO_SLOT, MAX_OPEN_DIRECTORIES, sizeof(struct directory_info));
 
-    if (info_address == -1) {
+    if (info_address == SIZE_MAX) {
         return ENOMEM;
     }
 
-    struct directory_info *info = (struct directory_info *) syscall_invoke(info_address, -1, UNTYPED_LOCK, 0);
+    struct directory_info *info = (struct directory_info *) syscall_invoke(info_address, SIZE_MAX, UNTYPED_LOCK, 0);
 
     if (info == NULL) {
         free_structure(USED_DIRECTORY_IDS_SLOT, DIRECTORY_INFO_SLOT, MAX_OPEN_DIRECTORIES, info_address);
@@ -288,7 +290,7 @@ size_t open_root(const struct state *state, struct ipc_message *message, size_t 
     info->inode = 0;
     info->mount_point_address = namespace->root_address;
 
-    syscall_invoke(info_address, -1, UNTYPED_UNLOCK, 0);
+    syscall_invoke(info_address, SIZE_MAX, UNTYPED_UNLOCK, 0);
 
     // badge the vfs endpoint with the address of the directory info structure and send it back to the caller
     size_t result = badge_and_send(state, IPC_BADGE(info_address, IPC_FLAG_IS_MOUNT_POINT), reply_capability);
@@ -298,7 +300,7 @@ size_t open_root(const struct state *state, struct ipc_message *message, size_t 
         return result;
     }
 
-    syscall_invoke(namespace_address, -1, UNTYPED_UNLOCK, 0); // lock is held throughout, not sure if this is the right call (a race condition here would be fine tbh) but it is what it is
+    syscall_invoke(namespace_address, SIZE_MAX, UNTYPED_UNLOCK, 0); // lock is held throughout, not sure if this is the right call (a race condition here would be fine tbh) but it is what it is
 
     return result;
 }

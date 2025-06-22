@@ -2,10 +2,12 @@
 #include "capabilities_layout.h"
 #include "core_io.h"
 #include "directories.h"
+#include "inttypes.h"
 #include "ipc.h"
 #include "mount_points.h"
 #include "namespaces.h"
 #include <stddef.h>
+#include <stdint.h>
 #include <stdbool.h>
 #include "structures.h"
 #include "sys/kernel.h"
@@ -20,7 +22,7 @@ static void handle_vfs_message(const struct state *state, struct ipc_message *me
     size_t namespace_id = IPC_ID(message->badge);
     bool can_modify_namespace = IPC_FLAGS(message->badge) == IPC_FLAG_CAN_MODIFY;
 
-    debug_printf("vfs_server: got message %d for fs %d (can modify: %s)\n", FD_CALL_NUMBER(*message), namespace_id, can_modify_namespace ? "true" : "false");
+    debug_printf("vfs_server: got message %d for fs %" PRIdPTR " (can modify: %s)\n", FD_CALL_NUMBER(*message), namespace_id, can_modify_namespace ? "true" : "false");
 
     struct ipc_message reply = {
         .capabilities = {}
@@ -38,18 +40,18 @@ static void handle_vfs_message(const struct state *state, struct ipc_message *me
             result = set_up_filesystem_for_process(state, creator_pid, new_pid, message->buffer[1], FD_REPLY_ENDPOINT(*message).address);
 
             if (result != 0) {
-                debug_printf("vfs_server: set_up_filesystem_for_process failed with error %d\n", result);
+                debug_printf("vfs_server: set_up_filesystem_for_process failed with error %" PRIdPTR "\n", result);
 
                 FD_RETURN_VALUE(reply) = result;
 
-                syscall_invoke(FD_REPLY_ENDPOINT(*message).address, -1, ENDPOINT_SEND, (size_t) &reply);
+                syscall_invoke(FD_REPLY_ENDPOINT(*message).address, SIZE_MAX, ENDPOINT_SEND, (size_t) &reply);
             }
         }
 
         break;
     default:
         FD_RETURN_VALUE(reply) = EBADMSG;
-        syscall_invoke(FD_REPLY_ENDPOINT(*message).address, -1, ENDPOINT_SEND, (size_t) &reply);
+        syscall_invoke(FD_REPLY_ENDPOINT(*message).address, SIZE_MAX, ENDPOINT_SEND, (size_t) &reply);
     }
 }
 
@@ -63,7 +65,7 @@ STATIC_TESTABLE void main_loop(const struct state *state) {
     }
 
     while (1) {
-        size_t result = syscall_invoke(state->endpoint_address, -1, ENDPOINT_RECEIVE, (size_t) &received);
+        size_t result = syscall_invoke(state->endpoint_address, SIZE_MAX, ENDPOINT_RECEIVE, (size_t) &received);
 
         if (result != 0) {
 #ifdef UNDER_TEST
@@ -112,9 +114,9 @@ void _start(void) {
         .type = TYPE_ENDPOINT,
         .size = 0,
         .address = 3,
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    assert(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args) == 0);
+    assert(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args) == 0);
 
     const struct state state = {
         .thread_id = 0,
