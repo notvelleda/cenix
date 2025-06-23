@@ -128,13 +128,14 @@ struct invocation_handlers {
 /// or when deleting a node
 #define MAX_NESTED_NODES 4
 
-/// the header for a capability node
-struct capability_node_header {
+struct capability_node {
     /// \brief the size of this node, stored as the amount of bits that size takes up
     ///
     /// this value can be converted to the number of slots in this capability node by shifting 1 left by it (`1 << slot_bits`)
     uint8_t slot_bits;
     uint8_t nested_nodes;
+    /// the individual capability slots that this capability node contains
+    struct capability capabilities[];
 };
 
 /// \brief allocates memory for a capability node and initializes it
