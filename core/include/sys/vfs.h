@@ -80,8 +80,8 @@ static inline size_t vfs_call(size_t endpoint, size_t reply_endpoint, struct ipc
 #define FD_REPLY_ENDPOINT(message) ((message).capabilities[0])
 
 #define FD_READ_BUFFER(message) ((message).capabilities[1])
-#define FD_READ_SIZE(message) (((size_t *) ((message).buffer + 1))[0])
-#define FD_READ_POSITION(message) (((size_t *) ((message).buffer + 1))[1])
+#define FD_READ_SIZE(message) (((size_t *) ((message).buffer + sizeof(size_t)))[0])
+#define FD_READ_POSITION(message) (((size_t *) ((message).buffer + sizeof(size_t)))[1])
 #define FD_READ_BYTES_READ(message) (*(size_t *) ((message).buffer + sizeof(size_t)))
 
 static inline size_t fd_read(size_t fd_address, size_t reply_endpoint, size_t read_buffer, size_t size, size_t position, size_t *bytes_read) {
@@ -107,7 +107,7 @@ static inline size_t fd_read(size_t fd_address, size_t reply_endpoint, size_t re
 #define FD_READ_FAST_DATA(message) ((message).buffer + sizeof(size_t) * 2)
 #define FD_READ_FAST_SIZE(message) ((message).buffer[1])
 #define FD_READ_FAST_MAX_SIZE (IPC_BUFFER_SIZE - sizeof(size_t) * 2)
-#define FD_READ_FAST_POSITION(message) (*(size_t *) ((message).buffer + 2))
+#define FD_READ_FAST_POSITION(message) (*(size_t *) ((message).buffer + sizeof(size_t))) // originally was offset by 2, but since size_t can't be smaller than 2 bytes this is fine
 #define FD_READ_FAST_BYTES_READ(message) (*(size_t *) ((message).buffer + sizeof(size_t)))
 
 static inline size_t fd_read_fast(size_t fd_address, size_t reply_endpoint, uint8_t *read_buffer, size_t size, size_t position, size_t *bytes_read) {
@@ -140,8 +140,8 @@ static inline size_t fd_read_fast(size_t fd_address, size_t reply_endpoint, uint
 }
 
 #define FD_WRITE_BUFFER(message) ((message).capabilities[1])
-#define FD_WRITE_SIZE(message) (((size_t *) ((message).buffer + 1))[0])
-#define FD_WRITE_POSITION(message) (((size_t *) ((message).buffer + 1))[1])
+#define FD_WRITE_SIZE(message) (((size_t *) ((message).buffer + sizeof(size_t)))[0])
+#define FD_WRITE_POSITION(message) (((size_t *) ((message).buffer + sizeof(size_t)))[1])
 #define FD_WRITE_BYTES_WRITTEN(message) (*(size_t *) ((message).buffer + sizeof(size_t)))
 
 static inline size_t fd_write(size_t fd_address, size_t reply_endpoint, size_t write_buffer, size_t size, size_t position, size_t *bytes_written) {
@@ -164,10 +164,10 @@ static inline size_t fd_write(size_t fd_address, size_t reply_endpoint, size_t w
     return result;
 }
 
-#define FD_WRITE_FAST_DATA(message) ((message).buffer + 2 + sizeof(size_t))
+#define FD_WRITE_FAST_DATA(message) ((message).buffer + sizeof(size_t) * 2)
 #define FD_WRITE_FAST_SIZE(message) ((message).buffer[1])
-#define FD_WRITE_FAST_MAX_SIZE (IPC_BUFFER_SIZE - 2 - sizeof(size_t))
-#define FD_WRITE_FAST_POSITION(message) (*(size_t *) ((message).buffer + 2))
+#define FD_WRITE_FAST_MAX_SIZE (IPC_BUFFER_SIZE - sizeof(size_t) * 2)
+#define FD_WRITE_FAST_POSITION(message) (*(size_t *) ((message).buffer + sizeof(size_t)))
 #define FD_WRITE_FAST_BYTES_WRITTEN(message) (*(size_t *) ((message).buffer + sizeof(size_t)))
 
 static inline size_t fd_write_fast(size_t fd_address, size_t reply_endpoint, const uint8_t *write_buffer, size_t size, size_t position, size_t *bytes_written) {
@@ -265,7 +265,7 @@ static inline size_t fd_unlink(size_t fd_address, size_t reply_endpoint, size_t 
     return vfs_call(fd_address, reply_endpoint, &to_send, &to_receive);
 }
 
-#define FD_TRUNCATE_SIZE(message) (*(size_t *) ((message).buffer + 1))
+#define FD_TRUNCATE_SIZE(message) (*(size_t *) ((message).buffer + sizeof(size_t)))
 
 static inline size_t fd_truncate(size_t fd_address, size_t reply_endpoint, size_t size) {
     struct ipc_message to_send = {
