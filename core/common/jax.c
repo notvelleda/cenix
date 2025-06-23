@@ -22,14 +22,14 @@ uint16_t u16_to_ne(const uint8_t *bytes) {
 int64_t i64_to_ne(const uint8_t *bytes) {
     int64_t result = 0;
     for (int i = 0; i < 8; i ++) {
-        result |= bytes[i] << i * 8;
+        result |= (int64_t) bytes[i] << (i * 8);
     }
 
     return result;
 }
 
 bool jax_next_file(struct jax_iterator *iter, struct jax_file *file) {
-    if (iter->start >= iter->end) {
+    if (iter->start >= iter->end || iter->start + 3 >= iter->end) {
         return false;
     }
 
@@ -38,7 +38,7 @@ bool jax_next_file(struct jax_iterator *iter, struct jax_file *file) {
     file->name = (const char *) iter->start + 3;
     iter->start += file->name_length + 3;
 
-    if (iter->start >= iter->end) {
+    if (iter->start >= iter->end || iter->start + 2 >= iter->end) {
         return false;
     }
 
@@ -46,7 +46,7 @@ bool jax_next_file(struct jax_iterator *iter, struct jax_file *file) {
     file->description = (const char *) iter->start + 2;
     iter->start += file->description_length + 2;
 
-    if (iter->start >= iter->end) {
+    if (iter->start >= iter->end || iter->start + 22 >= iter->end) {
         return false;
     }
 
