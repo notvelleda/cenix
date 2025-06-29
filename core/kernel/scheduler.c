@@ -26,7 +26,7 @@ void queue_thread(struct thread_capability *thread) {
     }
 
     // TODO: calculate priority
-    thread->runqueue = &scheduler_state.priority_queues[63];
+    thread->runqueue = (void *) &scheduler_state.priority_queues[63];
     LIST_APPEND(*thread->runqueue, runqueue_entry, thread);
 }
 
@@ -91,7 +91,7 @@ void try_context_switch(struct thread_registers *registers) {
     struct thread_capability *next_thread = NULL;
 
     for (int i = NUM_PRIORITIES - 1; i >= 0; i --) {
-        LIST_CONTAINER(struct thread_capability) *queue = &scheduler_state.priority_queues[i];
+        LIST_CONTAINER(struct thread_capability) *queue = (void *) &scheduler_state.priority_queues[i];
 
         if (queue->start != NULL) {
             // pop the thread off of the queue

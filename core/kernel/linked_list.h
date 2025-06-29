@@ -8,6 +8,7 @@ struct { \
     type *next; \
 }
 
+// TODO: make this accept the name of the struct instead of just any type name
 #define LIST_CONTAINER(type) \
 struct { \
     type *start; \
