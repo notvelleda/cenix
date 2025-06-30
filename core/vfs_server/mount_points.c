@@ -11,6 +11,7 @@
 #include "structures.h"
 #include "sys/kernel.h"
 #include "sys/vfs.h"
+#include "test_macros.h"
 #include "utils.h"
 
 /// small wrapper to call iterate_over_mounted_list for the mounted list corresponding to a given mount point
@@ -136,7 +137,7 @@ static bool open_callback(void *data, size_t directory_address, bool is_create_f
 }
 
 /// handles FD_OPEN calls in mount points
-static void mount_point_open(const struct state *state, struct directory_info *info, struct ipc_message *message) {
+STATIC_TESTABLE void mount_point_open(const struct state *state, struct directory_info *info, struct ipc_message *message) {
     struct mount_point *mount_point = (struct mount_point *) syscall_invoke(info->mount_point_address, SIZE_MAX, UNTYPED_LOCK, 0);
 
     if (mount_point == NULL) {

@@ -1,8 +1,16 @@
+#include "capabilities_layout.h"
+#include "directories.h"
+#include "errno.h"
 #include "fff.h"
+#include <inttypes.h>
+#include <string.h>
+#include <sys/types.h>
 #include "ipc.h"
+#include "mount_points.h"
 #include "namespaces.h"
 #include "structures.h"
 #include "sys/kernel.h"
+#include "sys/stat.h"
 #include "sys/vfs.h"
 #include "unity.h"
 #include "unity_internals.h"
@@ -18,16 +26,30 @@ void main_loop(const struct state *state);
 struct state state;
 
 size_t endpoint_success_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+    (void) argument;
+
     return 0;
 }
 
 size_t endpoint_error_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+    (void) argument;
+
     return EUNKNOWN;
 }
 
 size_t badge_values[2];
 
 size_t new_process_response_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
     struct ipc_message *message = (struct ipc_message *) argument;
 
     badge_values[0] = badge_values[1];
@@ -35,7 +57,35 @@ size_t new_process_response_fake(size_t address, size_t depth, struct capability
     TEST_ASSERT(IPC_FLAGS(badge_values[1]) == IPC_FLAG_IS_MOUNT_POINT);
 
 #ifdef DEBUG
-    printf("got badge 0x%x: id 0x%x, flags 0x%x\n", badge_values[1], IPC_ID(badge_values[1]), IPC_FLAGS(badge_values[1]));
+    printf("new_process_response_fake: got badge 0x%" PRIxPTR ": id 0x%" PRIxPTR ", flags 0x%" PRIxPTR "\n", badge_values[1], IPC_ID(badge_values[1]), IPC_FLAGS(badge_values[1]));
+#endif
+
+    return 0;
+}
+
+static size_t response_should_fail_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
+    struct ipc_message *message = (struct ipc_message *) argument;
+    TEST_ASSERT(FD_RETURN_VALUE(*message) != 0);
+
+    return 0;
+}
+
+size_t fd_open_response_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
+    struct ipc_message *message = (struct ipc_message *) argument;
+
+    badge_values[0] = badge_values[1];
+    TEST_ASSERT(read_badge(message->capabilities[0].address, message->capabilities[0].depth, &badge_values[1]) == 0);
+
+#ifdef DEBUG
+    printf("fd_open_response_fake: got badge 0x%" PRIxPTR ": id 0x%" PRIxPTR ", flags 0x%" PRIxPTR "\n", badge_values[1], IPC_ID(badge_values[1]), IPC_FLAGS(badge_values[1]));
 #endif
 
     return 0;
@@ -44,8 +94,8 @@ size_t new_process_response_fake(size_t address, size_t depth, struct capability
 struct directory_info *directory_info_from_badge(size_t badge) {
     size_t directory_id = IPC_ID(badge);
 
-    struct directory_info *info = (struct directory_info *) syscall_invoke(directory_id, -1, UNTYPED_LOCK, 0);
-    syscall_invoke(directory_id, -1, UNTYPED_UNLOCK, 0); // this is ok since the heap here doesn't reallocate or anything
+    struct directory_info *info = (struct directory_info *) syscall_invoke(directory_id, SIZE_MAX, UNTYPED_LOCK, 0);
+    syscall_invoke(directory_id, SIZE_MAX, UNTYPED_UNLOCK, 0); // this is ok since the heap here doesn't reallocate or anything
     TEST_ASSERT(info != NULL);
 
     return info;
@@ -61,9 +111,9 @@ void custom_setup(void) {
         .type = TYPE_ENDPOINT,
         .size = 0,
         .address = 3,
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args) == 0);
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &endpoint_alloc_args) == 0);
 
     state = (struct state) {
         .thread_id = 0,
@@ -75,9 +125,9 @@ void custom_setup(void) {
         .type = TYPE_ENDPOINT,
         .size = 0,
         .address = THREAD_STORAGE_SLOT(state.thread_id, 0),
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args) == 0);
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args) == 0);
 
     endpoint_send_fake.custom_fake = new_process_response_fake;
     TEST_ASSERT(set_up_filesystem_for_process(&state, 1, 1, 0, reply_alloc_args.address) == 0);
@@ -86,6 +136,220 @@ void custom_setup(void) {
 
     RESET_FAKE(endpoint_send);
     FFF_RESET_HISTORY();
+}
+
+static void fix_up_mount_point_address(struct directory_info *info) {
+    // copied from handle_mount_point_message
+    if (info->mount_point_address == SIZE_MAX) {
+        size_t namespace_address = (info->namespace_id << INIT_NODE_DEPTH) | NAMESPACE_NODE_SLOT;
+        struct fs_namespace *namespace = (struct fs_namespace *) syscall_invoke(namespace_address, SIZE_MAX, UNTYPED_LOCK, 0);
+
+        if (namespace != NULL) {
+            if (namespace->root_address != SIZE_MAX) {
+                info->mount_point_address = namespace->root_address;
+            }
+
+            syscall_invoke(namespace_address, SIZE_MAX, UNTYPED_UNLOCK, 0);
+        }
+    }
+}
+
+static void mount_at(size_t badge) {
+    // allocate fd endpoint
+    const struct alloc_args fd_alloc_args = {
+        .type = TYPE_ENDPOINT,
+        .size = 0,
+        .address = THREAD_STORAGE_SLOT(state.thread_id, 1),
+        .depth = SIZE_MAX
+    };
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args) == 0);
+
+    // setup for mount call
+    size_t info_address = IPC_ID(badge);
+    struct directory_info *info = (struct directory_info *) syscall_invoke(info_address, SIZE_MAX, UNTYPED_LOCK, 0);
+    TEST_ASSERT(info != NULL);
+    fix_up_mount_point_address(info);
+
+    // perform mount call
+    TEST_ASSERT(mount(info, fd_alloc_args.address, 0) == 0);
+    TEST_ASSERT(syscall_invoke(info_address, SIZE_MAX, UNTYPED_UNLOCK, 0) == 0);
+
+    // delete the endpoint in case it's not copied (since this bit isn't implemented yet lmao)
+    syscall_invoke(THREAD_STORAGE_ADDRESS(state.thread_id), THREAD_STORAGE_DEPTH, NODE_DELETE, 1);
+}
+
+static void read_directory_entry(size_t badge, size_t position, struct vfs_directory_entry *entry) {
+    (void) position;
+    (void) entry;
+
+    size_t info_address = IPC_ID(badge);
+    struct directory_info *info = (struct directory_info *) syscall_invoke(info_address, SIZE_MAX, UNTYPED_LOCK, 0);
+    TEST_ASSERT(info != NULL);
+    fix_up_mount_point_address(info);
+
+    TEST_FAIL_MESSAGE("TODO"); // FD_READ for mount points hasn't been implemented :(
+}
+
+static void allocate_reply_capability(struct ipc_message *message) {
+    const struct alloc_args reply_alloc_args = {
+        .type = TYPE_ENDPOINT,
+        .size = 0,
+        .address = FD_REPLY_ENDPOINT(*message).address,
+        .depth = FD_REPLY_ENDPOINT(*message).depth
+    };
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args) == 0);
+    message->transferred_capabilities = 1;
+}
+
+static size_t fd_open_receive_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
+    struct ipc_message *message = (struct ipc_message *) argument;
+
+    const struct alloc_args alloc_args = {
+        .type = TYPE_ENDPOINT,
+        .size = 0,
+        .address = FD_OPEN_REPLY_FD(*message).address,
+        .depth = FD_OPEN_REPLY_FD(*message).depth
+    };
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args) == 0);
+    message->transferred_capabilities = 1;
+
+    return 0;
+}
+
+static ino_t fd_stat_inode = 0;
+static mode_t fd_stat_mode = 0;
+
+static size_t fd_stat_receive_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
+    struct ipc_message *message = (struct ipc_message *) argument;
+
+    FD_RETURN_VALUE(*message) = 0;
+    FD_STAT_STRUCT(*message) = (struct stat) {
+        .st_dev = 0,
+        .st_ino = fd_stat_inode,
+        .st_mode = fd_stat_mode,
+        .st_nlink = 0,
+        .st_uid = 0,
+        .st_gid = 0,
+        .st_rdev = 0,
+        .st_size = 0,
+        .st_atime = 0,
+        .st_mtime = 0,
+        .st_ctime = 0,
+        .st_blksize = 0,
+        .st_blocks = 0
+    };
+
+    return 0;
+}
+
+/// delete leftover capabilities as is done in main_loop()
+static void clean_up_thread_storage(void) {
+    for (size_t i = 0; i < IPC_CAPABILITY_SLOTS; i ++) {
+        syscall_invoke(THREAD_STORAGE_ADDRESS(state.thread_id), THREAD_STORAGE_DEPTH, NODE_DELETE, i);
+    }
+}
+
+static void open_at(size_t directory_badge, ino_t inode, mode_t mode, const char *name) {
+    // open a directory in the root directory
+    size_t info_address = IPC_ID(directory_badge);
+    struct directory_info *info = (struct directory_info *) syscall_invoke(info_address, SIZE_MAX, UNTYPED_LOCK, 0);
+    TEST_ASSERT(info != NULL);
+    fix_up_mount_point_address(info);
+
+    fd_stat_inode = inode;
+    fd_stat_mode = mode;
+
+    endpoint_send_fake.call_count = 0; // teehee
+    endpoint_receive_fake.call_count = 0;
+
+    size_t (*send_fakes[])(size_t, size_t, struct capability *, size_t) = {
+        endpoint_success_fake,
+        endpoint_success_fake,
+        fd_open_response_fake,
+        endpoint_error_fake
+    };
+    SET_CUSTOM_FAKE_SEQ(endpoint_send, send_fakes, sizeof(send_fakes) / sizeof(send_fakes[0]));
+
+    size_t (*receive_fakes[])(size_t, size_t, struct capability *, size_t) = {
+        fd_open_receive_fake,
+        fd_stat_receive_fake,
+        endpoint_error_fake
+    };
+    SET_CUSTOM_FAKE_SEQ(endpoint_receive, receive_fakes, sizeof(receive_fakes) / sizeof(receive_fakes[0]));
+
+    struct ipc_message message;
+
+    // allocate a capability to store the name
+    const struct alloc_args alloc_args = {
+        .type = TYPE_UNTYPED,
+        .size = strlen(name) + 1,
+        .address = THREAD_STORAGE_SLOT(state.thread_id, 1),
+        .depth = THREAD_STORAGE_SLOT_DEPTH
+    };
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args) == 0);
+
+    // copy the name into it
+    char *buffer = (char *) syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_LOCK, 0);
+    TEST_ASSERT(buffer != NULL);
+
+    memcpy(buffer, name, alloc_args.size);
+
+    TEST_ASSERT(syscall_invoke(alloc_args.address, alloc_args.depth, UNTYPED_UNLOCK, 0) == 0);
+
+    FD_OPEN_MODE(message) = MODE_READ;
+    FD_OPEN_FLAGS(message) = OPEN_DIRECTORY;
+    FD_OPEN_NAME_ADDRESS(message) = (struct ipc_capability) {alloc_args.address, alloc_args.depth};
+
+    FD_REPLY_ENDPOINT(message) = (struct ipc_capability) {THREAD_STORAGE_SLOT(state.thread_id, 0), SIZE_MAX};
+    allocate_reply_capability(&message);
+
+    mount_point_open(&state, info, &message);
+
+    TEST_ASSERT(syscall_invoke(info_address, SIZE_MAX, UNTYPED_UNLOCK, 0) == 0);
+
+    if (S_ISDIR(mode)) {
+        TEST_ASSERT(IPC_FLAGS(badge_values[1]) == IPC_FLAG_IS_DIRECTORY || IPC_FLAGS(badge_values[1]) == IPC_FLAG_IS_MOUNT_POINT);
+    }
+
+    TEST_ASSERT(endpoint_send_fake.call_count == 3);
+    TEST_ASSERT(endpoint_receive_fake.call_count == 2);
+
+    SET_CUSTOM_FAKE_SEQ(endpoint_send, NULL, 0);
+    SET_CUSTOM_FAKE_SEQ(endpoint_receive, NULL, 0);
+    endpoint_send_fake.return_val = EUNKNOWN;
+    endpoint_receive_fake.return_val = EUNKNOWN;
+
+    clean_up_thread_storage();
+}
+
+static void create_and_badge(size_t container_address, size_t container_depth, size_t slot, uint8_t type, size_t badge) {
+    const struct alloc_args alloc_args = {
+        .type = type,
+        .size = 0,
+        .address = THREAD_STORAGE_SLOT(state.thread_id, IPC_CAPABILITY_SLOTS + 1),
+        .depth = SIZE_MAX
+    };
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &alloc_args) == 0);
+
+    const struct node_copy_args copy_args = {
+        .source_address = alloc_args.address,
+        .source_depth = alloc_args.depth,
+        .dest_slot = slot,
+        .access_rights = UINT8_MAX,
+        .badge = badge,
+        .should_set_badge = true,
+    };
+    TEST_ASSERT(syscall_invoke(container_address, container_depth, NODE_COPY, (size_t) &copy_args) == 0);
+
+    syscall_invoke(THREAD_STORAGE_ADDRESS(state.thread_id), THREAD_STORAGE_DEPTH, NODE_DELETE, IPC_CAPABILITY_SLOTS + 1);
 }
 
 // ====================================================================================================
@@ -98,9 +362,9 @@ void new_process_share_namespace(void) {
         .type = TYPE_ENDPOINT,
         .size = 0,
         .address = THREAD_STORAGE_SLOT(state.thread_id, 0),
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args);
+    syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args);
 
     endpoint_send_fake.custom_fake = new_process_response_fake;
     TEST_ASSERT(set_up_filesystem_for_process(&state, 1, 2, VFS_SHARE_NAMESPACE, reply_alloc_args.address) == 0);
@@ -111,6 +375,10 @@ void new_process_share_namespace(void) {
 }
 
 size_t new_process_pid_2_share_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
     struct ipc_message *message = (struct ipc_message *) argument;
 
     uint16_t new_pid = 2;
@@ -125,14 +393,7 @@ size_t new_process_pid_2_share_fake(size_t address, size_t depth, struct capabil
     message->buffer[4] = creator_pid >> 8;
     message->buffer[5] = creator_pid & 0xff;
 
-    const struct alloc_args reply_alloc_args = {
-        .type = TYPE_ENDPOINT,
-        .size = 0,
-        .address = message->capabilities[0].address,
-        .depth = message->capabilities[0].depth
-    };
-    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args) == 0);
-    message->transferred_capabilities = 1;
+    allocate_reply_capability(message);
 
     return 0;
 }
@@ -166,9 +427,9 @@ void new_process_share_read_only_namespace(void) {
         .type = TYPE_ENDPOINT,
         .size = 0,
         .address = THREAD_STORAGE_SLOT(state.thread_id, 0),
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args);
+    syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args);
 
     endpoint_send_fake.custom_fake = new_process_response_fake;
     TEST_ASSERT(set_up_filesystem_for_process(&state, 1, 2, VFS_SHARE_NAMESPACE | VFS_READ_ONLY_NAMESPACE, reply_alloc_args.address) == 0);
@@ -182,6 +443,10 @@ void new_process_share_read_only_namespace(void) {
 }
 
 size_t new_process_pid_2_read_only_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
     struct ipc_message *message = (struct ipc_message *) argument;
 
     uint16_t new_pid = 2;
@@ -196,19 +461,16 @@ size_t new_process_pid_2_read_only_fake(size_t address, size_t depth, struct cap
     message->buffer[4] = creator_pid >> 8;
     message->buffer[5] = creator_pid & 0xff;
 
-    const struct alloc_args reply_alloc_args = {
-        .type = TYPE_ENDPOINT,
-        .size = 0,
-        .address = message->capabilities[0].address,
-        .depth = message->capabilities[0].depth
-    };
-    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args) == 0);
-    message->transferred_capabilities = 1;
+    allocate_reply_capability(message);
 
     return 0;
 }
 
 size_t new_process_pid_3_share_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
     struct ipc_message *message = (struct ipc_message *) argument;
 
     uint16_t new_pid = 3;
@@ -223,14 +485,7 @@ size_t new_process_pid_3_share_fake(size_t address, size_t depth, struct capabil
     message->buffer[4] = creator_pid >> 8;
     message->buffer[5] = creator_pid & 0xff;
 
-    const struct alloc_args reply_alloc_args = {
-        .type = TYPE_ENDPOINT,
-        .size = 0,
-        .address = message->capabilities[0].address,
-        .depth = message->capabilities[0].depth
-    };
-    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args) == 0);
-    message->transferred_capabilities = 1;
+    allocate_reply_capability(message);
 
     return 0;
 }
@@ -262,12 +517,84 @@ void new_process_share_read_only_namespace_ipc(void) {
 
 // (VFS_NEW_PROCESS + VFS_READ_ONLY_NAMESPACE) test that the namespace of the new process cannot be modified with mount/unmount calls
 void new_process_read_only_namespace(void) {
-    // TODO: implement this once mounting has been reworked
-    TEST_FAIL_MESSAGE("TODO");
+    const struct alloc_args reply_alloc_args = {
+        .type = TYPE_ENDPOINT,
+        .size = 0,
+        .address = THREAD_STORAGE_SLOT(state.thread_id, 0),
+        .depth = SIZE_MAX
+    };
+    syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args);
+
+    endpoint_send_fake.custom_fake = new_process_response_fake;
+    TEST_ASSERT(set_up_filesystem_for_process(&state, 1, 2, VFS_SHARE_NAMESPACE | VFS_READ_ONLY_NAMESPACE, reply_alloc_args.address) == 0);
+
+    // allocate fd endpoint
+    const struct alloc_args fd_alloc_args = {
+        .type = TYPE_ENDPOINT,
+        .size = 0,
+        .address = THREAD_STORAGE_SLOT(state.thread_id, 1),
+        .depth = SIZE_MAX
+    };
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args) == 0);
+
+    // setup for mount call
+    size_t info_address = IPC_ID(badge_values[1]);
+    struct directory_info *info = (struct directory_info *) syscall_invoke(info_address, SIZE_MAX, UNTYPED_LOCK, 0);
+    TEST_ASSERT(info != NULL);
+    fix_up_mount_point_address(info);
+
+    // perform mount call
+    TEST_ASSERT(mount(info, fd_alloc_args.address, 0) == EPERM);
+    TEST_ASSERT(syscall_invoke(info_address, SIZE_MAX, UNTYPED_UNLOCK, 0) == 0);
+
+    // TODO: test that mounting in subdirectories still fails
+    // TODO: test fd_unmount here when it's implemented
+}
+
+static size_t mount_root_directory_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
+    struct ipc_message *message = (struct ipc_message *) argument;
+
+    FD_CALL_NUMBER(*message) = FD_MOUNT;
+    FD_MOUNT_FLAGS(*message) = 0;
+
+    const struct alloc_args fd_alloc_args = {
+        .type = TYPE_ENDPOINT,
+        .size = 0,
+        .address = FD_MOUNT_FILE_DESCRIPTOR(*message).address,
+        .depth = FD_MOUNT_FILE_DESCRIPTOR(*message).depth
+    };
+    TEST_ASSERT(syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &fd_alloc_args) == 0);
+
+    allocate_reply_capability(message);
+
+    return 0;
 }
 
 void new_process_read_only_namespace_ipc(void) {
-    TEST_FAIL_MESSAGE("TODO");
+    size_t (*send_fakes[])(size_t, size_t, struct capability *, size_t) = {
+        new_process_response_fake,
+        response_should_fail_fake,
+        endpoint_error_fake
+    };
+    SET_CUSTOM_FAKE_SEQ(endpoint_send, send_fakes, sizeof(send_fakes) / sizeof(send_fakes[0]));
+
+    size_t (*receive_fakes[])(size_t, size_t, struct capability *, size_t) = {
+        new_process_pid_2_read_only_fake,
+        mount_root_directory_fake,
+        endpoint_error_fake
+    };
+    SET_CUSTOM_FAKE_SEQ(endpoint_receive, receive_fakes, sizeof(receive_fakes) / sizeof(receive_fakes[0]));
+
+    main_loop(&state);
+
+    TEST_ASSERT(endpoint_send_fake.call_count == 2);
+    TEST_ASSERT(endpoint_receive_fake.call_count == 3);
+
+    // TODO: have this test achieve parity with the previous one
 }
 
 // (VFS_NEW_PROCESS + no flags) test that a new namespace is created for this process
@@ -276,9 +603,9 @@ void new_process_new_namespace(void) {
         .type = TYPE_ENDPOINT,
         .size = 0,
         .address = THREAD_STORAGE_SLOT(state.thread_id, 0),
-        .depth = -1
+        .depth = SIZE_MAX
     };
-    syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args);
+    syscall_invoke(0, SIZE_MAX, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args);
 
     endpoint_send_fake.custom_fake = new_process_response_fake;
     TEST_ASSERT(set_up_filesystem_for_process(&state, 1, 2, 0, reply_alloc_args.address) == 0);
@@ -290,6 +617,10 @@ void new_process_new_namespace(void) {
 }
 
 size_t new_process_pid_2_new_namespace_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
     struct ipc_message *message = (struct ipc_message *) argument;
 
     uint16_t new_pid = 2;
@@ -304,14 +635,7 @@ size_t new_process_pid_2_new_namespace_fake(size_t address, size_t depth, struct
     message->buffer[4] = creator_pid >> 8;
     message->buffer[5] = creator_pid & 0xff;
 
-    const struct alloc_args reply_alloc_args = {
-        .type = TYPE_ENDPOINT,
-        .size = 0,
-        .address = message->capabilities[0].address,
-        .depth = message->capabilities[0].depth
-    };
-    TEST_ASSERT(syscall_invoke(0, -1, ADDRESS_SPACE_ALLOC, (size_t) &reply_alloc_args) == 0);
-    message->transferred_capabilities = 1;
+    allocate_reply_capability(message);
 
     return 0;
 }
@@ -346,7 +670,28 @@ void new_process_new_namespace_ipc(void) {
 
 // (FD_READ) mount points should emit one single instance of . and .. each
 void fd_read_dot_entries(void) {
-    TEST_FAIL_MESSAGE("TODO");
+    // mount two filesystems on the root directory
+    mount_at(badge_values[1]);
+    mount_at(badge_values[1]);
+
+    uint8_t data[256];
+    struct vfs_directory_entry *entry = (struct vfs_directory_entry *) &data;
+
+    endpoint_receive_fake.return_val = EUNKNOWN; // so that unimplemented stuff won't trip me up later
+
+    read_directory_entry(badge_values[1], 0, entry);
+    TEST_ASSERT(entry->name_length == 1);
+    TEST_ASSERT(entry->name[0] == '.');
+
+    read_directory_entry(badge_values[1], entry->next_entry_position, entry);
+    TEST_ASSERT(entry->name_length == 2);
+    TEST_ASSERT(entry->name[0] == '.');
+    TEST_ASSERT(entry->name[1] == '.');
+
+    while (entry->next_entry_position != 0) {
+        read_directory_entry(badge_values[1], entry->next_entry_position, entry);
+        TEST_ASSERT(!((entry->name_length == 1 && entry->name[0] == '.') || (entry->name_length == 2 && entry->name[0] == '.' && entry->name[1] == '.')));
+    }
 }
 
 void fd_read_dot_entries_ipc(void) {
@@ -362,9 +707,164 @@ void fd_read_mount_ordering_ipc(void) {
     TEST_FAIL_MESSAGE("TODO");
 }
 
+static size_t fd_read_passthru_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
+    struct ipc_message *message = (struct ipc_message *) argument;
+
+    TEST_ASSERT(FD_CALL_NUMBER(*message) == FD_READ);
+    TEST_ASSERT(FD_READ_SIZE(*message) == 32);
+    TEST_ASSERT(FD_READ_POSITION(*message) == 1234);
+
+    size_t badge;
+    TEST_ASSERT(read_badge(FD_READ_BUFFER(*message).address, FD_READ_BUFFER(*message).depth, &badge) == 0);
+    TEST_ASSERT(badge == 0xdeadbeef);
+
+    return 0;
+}
+
+static size_t fd_read_fast_passthru_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
+    struct ipc_message *message = (struct ipc_message *) argument;
+
+    TEST_ASSERT(FD_CALL_NUMBER(*message) == FD_READ_FAST);
+    TEST_ASSERT(FD_READ_FAST_SIZE(*message) == 32);
+    TEST_ASSERT(FD_READ_FAST_POSITION(*message) == 1234);
+
+    return 0;
+}
+
+static size_t fd_stat_passthru_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
+    struct ipc_message *message = (struct ipc_message *) argument;
+    TEST_ASSERT(FD_CALL_NUMBER(*message) == FD_STAT);
+
+    return 0;
+}
+
+static size_t fd_link_passthru_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
+    struct ipc_message *message = (struct ipc_message *) argument;
+
+    TEST_ASSERT(FD_CALL_NUMBER(*message) == FD_LINK);
+
+    size_t badge;
+    TEST_ASSERT(read_badge(FD_LINK_FD(*message).address, FD_LINK_FD(*message).depth, &badge) == 0);
+    TEST_ASSERT(badge == 0xdeadbeef);
+    TEST_ASSERT(read_badge(FD_LINK_NAME_ADDRESS(*message).address, FD_LINK_NAME_ADDRESS(*message).depth, &badge) == 0);
+    TEST_ASSERT(badge == 0xabababab);
+
+    return 0;
+}
+
+static size_t fd_unlink_passthru_fake(size_t address, size_t depth, struct capability *slot, size_t argument) {
+    (void) address;
+    (void) depth;
+    (void) slot;
+
+    struct ipc_message *message = (struct ipc_message *) argument;
+
+    TEST_ASSERT(FD_CALL_NUMBER(*message) == FD_UNLINK);
+
+    size_t badge;
+    TEST_ASSERT(read_badge(FD_UNLINK_NAME_ADDRESS(*message).address, FD_UNLINK_NAME_ADDRESS(*message).depth, &badge) == 0);
+    TEST_ASSERT(badge == 0xdeadbeef);
+
+    return 0;
+}
+
 // (FD_READ) directories should pass thru
 void fd_read_directory_passthru(void) {
-    TEST_FAIL_MESSAGE("TODO");
+    mount_at(badge_values[1]);
+    open_at(badge_values[1], 1234, S_IFDIR | 0777, "random_name");
+
+    // test FD_READ
+    struct ipc_message message = {
+        .badge = badge_values[1]
+    };
+
+    FD_CALL_NUMBER(message) = FD_READ;
+    FD_READ_SIZE(message) = 32;
+    FD_READ_POSITION(message) = 1234;
+    create_and_badge(THREAD_STORAGE_ADDRESS(state.thread_id), THREAD_STORAGE_DEPTH, 1, TYPE_ENDPOINT, 0xdeadbeef);
+    FD_READ_BUFFER(message) = (struct ipc_capability) {THREAD_STORAGE_SLOT(state.thread_id, 1), SIZE_MAX};
+
+    endpoint_send_fake.call_count = 0;
+    endpoint_send_fake.custom_fake = fd_read_passthru_fake;
+
+    handle_directory_message(&state, &message);
+
+    TEST_ASSERT(endpoint_send_fake.call_count == 1);
+    clean_up_thread_storage();
+
+    // test FD_READ_FAST
+    memset(message.capabilities, 0, sizeof(message.capabilities));
+    FD_CALL_NUMBER(message) = FD_READ_FAST;
+    FD_READ_FAST_SIZE(message) = 32;
+    FD_READ_FAST_POSITION(message) = 1234;
+
+    endpoint_send_fake.call_count = 0;
+    endpoint_send_fake.custom_fake = fd_read_fast_passthru_fake;
+
+    handle_directory_message(&state, &message);
+
+    TEST_ASSERT(endpoint_send_fake.call_count == 1);
+    clean_up_thread_storage();
+
+    // test FD_STAT
+    memset(message.capabilities, 0, sizeof(message.capabilities));
+    FD_CALL_NUMBER(message) = FD_STAT;
+
+    endpoint_send_fake.call_count = 0;
+    endpoint_send_fake.custom_fake = fd_stat_passthru_fake;
+
+    handle_directory_message(&state, &message);
+
+    TEST_ASSERT(endpoint_send_fake.call_count == 1);
+    clean_up_thread_storage();
+
+    // test FD_LINK
+    memset(message.capabilities, 0, sizeof(message.capabilities));
+    FD_CALL_NUMBER(message) = FD_LINK;
+    create_and_badge(THREAD_STORAGE_ADDRESS(state.thread_id), THREAD_STORAGE_DEPTH, 1, TYPE_ENDPOINT, 0xdeadbeef);
+    FD_LINK_FD(message) = (struct ipc_capability) {THREAD_STORAGE_SLOT(state.thread_id, 1), SIZE_MAX};
+    create_and_badge(THREAD_STORAGE_ADDRESS(state.thread_id), THREAD_STORAGE_DEPTH, 2, TYPE_UNTYPED, 0xabababab);
+    FD_LINK_NAME_ADDRESS(message) = (struct ipc_capability) {THREAD_STORAGE_SLOT(state.thread_id, 2), SIZE_MAX};
+
+    endpoint_send_fake.call_count = 0;
+    endpoint_send_fake.custom_fake = fd_link_passthru_fake;
+
+    handle_directory_message(&state, &message);
+
+    TEST_ASSERT(endpoint_send_fake.call_count == 1);
+    clean_up_thread_storage();
+
+    // test FD_UNLINK
+    memset(message.capabilities, 0, sizeof(message.capabilities));
+    FD_CALL_NUMBER(message) = FD_UNLINK;
+    create_and_badge(THREAD_STORAGE_ADDRESS(state.thread_id), THREAD_STORAGE_DEPTH, 1, TYPE_UNTYPED, 0xdeadbeef);
+    FD_UNLINK_NAME_ADDRESS(message) = (struct ipc_capability) {THREAD_STORAGE_SLOT(state.thread_id, 1), SIZE_MAX};
+
+    endpoint_send_fake.call_count = 0;
+    endpoint_send_fake.custom_fake = fd_unlink_passthru_fake;
+
+    handle_directory_message(&state, &message);
+
+    TEST_ASSERT(endpoint_send_fake.call_count == 1);
+    clean_up_thread_storage();
+
+    // TODO: FD_UNLINK
 }
 
 void fd_read_directory_passthru_ipc(void) {
@@ -589,6 +1089,10 @@ int main(void) {
     RUN_TEST(fd_unlink_in_directories_ipc);
     // FD_TRUNCATE (should fail! not allowed in directories)
     RUN_TEST(fd_truncate_should_fail);
+    // FD_MOUNT
+    //  - idk yet
+    // FD_UNMOUNT
+    //  - idk yet
 
     // TODO: test worker thread usage once implemented
 

@@ -21,6 +21,10 @@ struct mount_point {
     size_t mounted_list_index;
 };
 
+#ifdef UNDER_TEST
+void mount_point_open(const struct state *state, struct directory_info *info, struct ipc_message *message);
+#endif
+
 /// handles receiving a message for a mount point directory file descriptor and replying to it
 void handle_mount_point_message(const struct state *state, struct ipc_message *message);
 
