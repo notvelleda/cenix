@@ -1,4 +1,5 @@
 #include "bflt.h"
+#include "inttypes.h"
 #include <stdbool.h>
 #include "string.h"
 #include "sys/kernel.h"
@@ -41,6 +42,27 @@ size_t bflt_allocation_size(const struct bflt_header *header) {
     }
 }
 
+#define NO_FLAGS 0
+#define FLAG_DENY_TEXT_REALLOCATIONS 1
+
+/// transforms an offset as stored in a relocation or GOT entry into the absolute address for that binary
+static void *offset_to_address(void *text_segment_in_memory, void *data_segment_in_memory, uint8_t flags, unsigned long data_start, size_t offset) {
+    const size_t data_segment_offset = data_start - sizeof(struct bflt_header);
+
+    if (offset < data_segment_offset) {
+        // this offset is in the text segment
+
+        if (flags & FLAG_DENY_TEXT_REALLOCATIONS) {
+            return NULL; // indication that this relocation is invalid and should be skipped
+        } else {
+            return (void *) ((size_t) text_segment_in_memory + offset);
+        }
+    } else {
+        // this offset is in either the data or bss segment
+        return (void *) ((size_t) data_segment_in_memory + offset - data_segment_offset);
+    }
+}
+
 void bflt_load(struct bflt_header *header, void *allocation, struct thread_registers *registers) {
     void *text_start;
     void *data_start;
@@ -72,24 +94,19 @@ void bflt_load(struct bflt_header *header, void *allocation, struct thread_regis
     printf("bflt_load: %ld relocation(s) at offset %ld\n", header->num_relocations, header->relocations_start);
 
     // apply all the relocations
+    // TODO: figure out how to cleanly handle dynamic library relocations
     const uint32_t *relocations_start = (uint32_t *) ((uint8_t *) header + header->relocations_start);
 
     for (unsigned long i = 0; i < header->num_relocations; i ++) {
         uint32_t offset = *(relocations_start ++);
+        uint32_t *address_to_relocate = offset_to_address(text_start, data_start, text_writable ? NO_FLAGS : FLAG_DENY_TEXT_REALLOCATIONS, header->data_start, (size_t) offset);
 
-        if (offset < header->data_start - sizeof(struct bflt_header)) {
-            // this offset is in the text segment
-            if (text_writable) {
-                uint32_t *address = (uint32_t *) ((uint8_t *) text_start + offset);
-                *address = (uint32_t) address;
-            } else {
-                printf("bflt_load: skipping invalid relocation for offset 0x%x in read-only text segment\n", offset);
-            }
-        } else {
-            // this offset is in either the data or bss segment, either way it's valid
-            uint32_t *address = (uint32_t *) ((uint8_t *) data_start + offset - (header->data_start - sizeof(struct bflt_header)));
-            *address = (uint32_t) address;
+        if (address_to_relocate == NULL) {
+            printf("bflt_load: skipping invalid relocation for offset 0x%" PRIx32 " in read-only text segment\n", offset);
+            continue;
         }
+
+        *address_to_relocate = (uint32_t) offset_to_address(text_start, data_start, NO_FLAGS, header->data_start, (size_t) *address_to_relocate);
     }
 
     if ((header->flags & BFLT_FLAG_GOTPIC) != 0) {
@@ -99,13 +116,7 @@ void bflt_load(struct bflt_header *header, void *allocation, struct thread_regis
         size_t i = 0;
         for (; *got != UINT32_MAX; got ++, i ++) {
             //uint32_t old = *got;
-            if (*got < header->data_start - sizeof(struct bflt_header)) {
-                // this offset is in the text segment
-                *got += (uint32_t) text_start;
-            } else {
-                // this offset is in either the data or bss segment
-                *got += (uint32_t) data_start - header->data_start - sizeof(struct bflt_header);
-            }
+            *got = (uint32_t) offset_to_address(text_start, data_start, NO_FLAGS, header->data_start, (size_t) *got);
             //printf("entry %d is 0x%08x from 0x%08x\n", i, *got, old);
         }
 
