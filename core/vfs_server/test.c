@@ -877,12 +877,52 @@ void fd_read_directory_passthru_ipc(void) {
 
 // (FD_WRITE) should fail! not allowed in directories
 void fd_write_should_fail(void) {
-    TEST_FAIL_MESSAGE("TODO");
+    mount_at(badge_values[1]);
+    open_at(badge_values[1], 1234, S_IFDIR | 0777, "random_name");
+
+    struct ipc_message message = {
+        .badge = badge_values[1]
+    };
+
+    FD_REPLY_ENDPOINT(message) = (struct ipc_capability) {THREAD_STORAGE_SLOT(state.thread_id, 0), SIZE_MAX};
+    allocate_reply_capability(&message);
+
+    FD_CALL_NUMBER(message) = FD_WRITE;
+    FD_WRITE_SIZE(message) = 32;
+    FD_WRITE_POSITION(message) = 1234;
+    create_and_badge(THREAD_STORAGE_ADDRESS(state.thread_id), THREAD_STORAGE_DEPTH, 1, TYPE_UNTYPED, 0xdeadbeef);
+    FD_WRITE_BUFFER(message) = (struct ipc_capability) {THREAD_STORAGE_SLOT(state.thread_id, 1), SIZE_MAX};
+
+    endpoint_send_fake.call_count = 0;
+    endpoint_send_fake.custom_fake = response_should_fail_fake;
+
+    handle_directory_message(&state, &message);
+
+    TEST_ASSERT(endpoint_send_fake.call_count == 1);
 }
 
 // (FD_WRITE_FAST) should fail! not allowed in directories
 void fd_write_fast_should_fail(void) {
-    TEST_FAIL_MESSAGE("TODO");
+    mount_at(badge_values[1]);
+    open_at(badge_values[1], 1234, S_IFDIR | 0777, "random_name");
+
+    struct ipc_message message = {
+        .badge = badge_values[1]
+    };
+
+    FD_REPLY_ENDPOINT(message) = (struct ipc_capability) {THREAD_STORAGE_SLOT(state.thread_id, 0), SIZE_MAX};
+    allocate_reply_capability(&message);
+
+    FD_CALL_NUMBER(message) = FD_WRITE_FAST;
+    FD_WRITE_FAST_SIZE(message) = 32;
+    FD_WRITE_FAST_POSITION(message) = 1234;
+
+    endpoint_send_fake.call_count = 0;
+    endpoint_send_fake.custom_fake = response_should_fail_fake;
+
+    handle_directory_message(&state, &message);
+
+    TEST_ASSERT(endpoint_send_fake.call_count == 1);
 }
 
 // ====================================================================================================
@@ -999,7 +1039,25 @@ void fd_unlink_in_mount_points_ipc(void) {
 
 // (FD_TRUNCATE) should fail! not allowed in directories
 void fd_truncate_should_fail(void) {
-    TEST_FAIL_MESSAGE("TODO");
+    mount_at(badge_values[1]);
+    open_at(badge_values[1], 1234, S_IFDIR | 0777, "random_name");
+
+    struct ipc_message message = {
+        .badge = badge_values[1]
+    };
+
+    FD_REPLY_ENDPOINT(message) = (struct ipc_capability) {THREAD_STORAGE_SLOT(state.thread_id, 0), SIZE_MAX};
+    allocate_reply_capability(&message);
+
+    FD_CALL_NUMBER(message) = FD_TRUNCATE;
+    FD_TRUNCATE_SIZE(message) = 0xdeadbeef;
+
+    endpoint_send_fake.call_count = 0;
+    endpoint_send_fake.custom_fake = response_should_fail_fake;
+
+    handle_directory_message(&state, &message);
+
+    TEST_ASSERT(endpoint_send_fake.call_count == 1);
 }
 
 int main(void) {
